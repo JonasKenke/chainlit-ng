@@ -142,7 +142,7 @@ The pnpm workspace includes `frontend/`, `libs/react-client/`, and `libs/copilot
 - `auth/` — JWT creation/validation (`jwt.py`), OAuth state cookies (`cookie.py`)
 - `types.py` — Shared Pydantic models for API request/response types
 
-**Data layer pattern**: The data layer is optional (no persistence by default). Register a custom implementation with `@cl.data_layer` decorator or use the built-in SQLAlchemy/DynamoDB implementations. The `@queue_until_user_message()` decorator on `BaseDataLayer` methods queues write operations until the first user message arrives.
+**Data layer pattern**: The data layer is optional (no persistence by default). Install the built-in layers with `pip install "chainlit[custom-data]"`. Register a custom implementation with `@cl.data_layer` decorator or use the built-in SQLAlchemy/DynamoDB implementations. The `@queue_until_user_message()` decorator on `BaseDataLayer` methods queues write operations until the first user message arrives.
 
 **Integrations**: `langchain/`, `llama_index/`, and `semantic_kernel/` provide callback handlers that bridge those frameworks into Chainlit steps/messages.
 

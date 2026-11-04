@@ -310,6 +310,11 @@ class Step:
         if self.icon:
             metadata["icon"] = self.icon
 
+        generation = self.generation
+        to_dict = getattr(generation, "to_dict", None)
+        if callable(to_dict):
+            generation = to_dict()
+
         _dict: StepDict = {
             "name": self.name,
             "type": self.type,
@@ -329,7 +334,7 @@ class Step:
             "defaultOpen": self.default_open,
             "autoCollapse": self.auto_collapse,
             "showInput": self.show_input,
-            "generation": self.generation,
+            "generation": generation,
         }
         return _dict
 

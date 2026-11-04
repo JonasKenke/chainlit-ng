@@ -431,7 +431,7 @@ class TestUtilsEdgeCases:
         registry = {}
         getattr_func = make_module_getattr(registry)
 
-        with pytest.raises(KeyError):
+        with pytest.raises(AttributeError):
             getattr_func("nonexistent")
 
     @pytest.mark.asyncio

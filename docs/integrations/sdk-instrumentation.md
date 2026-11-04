@@ -4,6 +4,16 @@ Chainlit no longer ships the LiteralAI-backed `instrument_openai` or `instrument
 
 This guide records how to add optional SDK-specific adapters later without bringing back a tracing vendor dependency.
 
+## Removed public API
+
+| Removed                                                                    | Replacement                                                                                     |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `cl.instrument_openai()`, `cl.instrument_mistralai()`                      | No drop-in replacement. Wrap SDK calls in `cl.Step(type="llm")`, or rely on SDK-native tracing. |
+| `cl.ChatGeneration`, `cl.CompletionGeneration`, `cl.GenerationMessage`     | Plain dictionaries assigned to `Step.generation`.                                               |
+| `chainlit.data.literalai.LiteralDataLayer` and `LITERAL_API_KEY` auto-init | `@cl.data_layer`, or the built-in SQLAlchemy/DynamoDB data layers.                              |
+
+`Step.generation` accepts a JSON-serializable dict. Chat generations use `provider`, `model`, `messages`, `messageCompletion`, `settings`, `tools`, `variables`, and `type: "CHAT"`; completion generations use `provider`, `model`, `prompt`, `completion`, `settings`, `variables`, and `type: "COMPLETION"`. Optional keys include `duration`, `ttFirstToken`, `tokenThroughputInSeconds`, `promptId`, and `id`.
+
 ## Implementation direction
 
 - Wrap documented SDK calls at the application boundary. Do not monkey-patch global SDK methods or add an implicit network service.

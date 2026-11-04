@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Declare `aiohttp` and SQLAlchemy's `asyncio` extra in the `custom-data` extra so the SQLAlchemy and DynamoDB data layers import on a clean install.
+- Warn when `LITERAL_API_KEY` is set, since the LiteralAI data layer was removed.
+- Raise `AttributeError` for unknown lazy `chainlit` attributes so `hasattr` works.
+- Serialize generation objects with `to_dict()` when persisting steps, preserving compatibility with legacy generation models.
+
 ## [2.12.0]
 
 ### Changed
@@ -59,11 +66,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Replace Recoil state with Zustand and upgrade the frontend to React 19, React-PDF 11, PDF.js 6, ReactPlayer 3, and pnpm 12.
 - ReactPlayer 3 no longer supports Dailymotion, SoundCloud, Streamable, Twitch, Facebook, Mixcloud, or Kaltura.
 - Upgrade compatible Python and JavaScript dependencies to current major versions.
+- Require `mcp` 2.x.
 - Keep OpenAI 2 in the combined test extra until the LlamaIndex OpenAI integration supports OpenAI 3.
 
 ### Removed
 
 - Remove the deprecated LiteralAI data layer, debug UI, and SDK instrumentation helpers.
+- Stop installing `literalai` transitively; declare it explicitly if your application imports it.
+- Remove the `literalai` generation type re-exports; `Step.generation` now stores a plain dictionary.
 - Remove the Recoil state-atom API and `RecoilRoot` requirement from `@chainlit/react-client`.
 
 ## [2.11.12] - 2026-10-26

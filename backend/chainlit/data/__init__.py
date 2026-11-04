@@ -26,6 +26,12 @@ def get_data_layer():
         else:
             from chainlit.config import config
 
+            if not config.code.data_layer and os.environ.get("LITERAL_API_KEY"):
+                warnings.warn(
+                    "LITERAL_API_KEY is no longer supported. Configure a data layer with @cl.data_layer or DATABASE_URL.",
+                    UserWarning,
+                )
+
             if config.code.data_layer:
                 # When @data_layer is configured, call it to get data layer.
                 _data_layer = config.code.data_layer()

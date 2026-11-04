@@ -84,7 +84,10 @@ def make_module_getattr(registry):
     """
 
     def __getattr__(name):
-        module_path = registry[name]
+        try:
+            module_path = registry[name]
+        except KeyError:
+            raise AttributeError(name) from None
         module = importlib.import_module(module_path, __package__)
         return getattr(module, name)
 
