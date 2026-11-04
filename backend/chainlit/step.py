@@ -5,10 +5,7 @@ import time
 import uuid
 from copy import deepcopy
 from functools import wraps
-from typing import Callable, Dict, List, Optional, TypedDict, Union
-
-from literalai import BaseGeneration
-from literalai.observability.step import StepType, TrueStepType
+from typing import Callable, Dict, List, Literal, TypedDict, Union
 
 from chainlit.config import config
 from chainlit.context import CL_RUN_NAMES, context, local_steps
@@ -17,6 +14,12 @@ from chainlit.element import Element
 from chainlit.logger import logger
 from chainlit.types import FeedbackDict
 from chainlit.utils import utc_now
+
+TrueStepType = Literal[
+    "run", "tool", "llm", "embedding", "retrieval", "rerank", "undefined"
+]
+MessageStepType = Literal["user_message", "assistant_message", "system_message"]
+StepType = Union[TrueStepType, MessageStepType]
 
 
 def check_add_step_in_cot(step: "Step"):
@@ -47,26 +50,26 @@ class StepDict(TypedDict, total=False):
     type: StepType
     id: str
     threadId: str
-    parentId: Optional[str]
-    command: Optional[str]
-    modes: Optional[Dict[str, str]]
+    parentId: str | None
+    command: str | None
+    modes: Dict[str, str] | None
     streaming: bool
-    waitForAnswer: Optional[bool]
-    isError: Optional[bool]
+    waitForAnswer: bool | None
+    isError: bool | None
     metadata: Dict
-    tags: Optional[List[str]]
+    tags: List[str] | None
     input: str
     output: str
-    createdAt: Optional[str]
-    start: Optional[str]
-    end: Optional[str]
-    generation: Optional[Dict]
-    showInput: Optional[Union[bool, str]]
-    defaultOpen: Optional[bool]
-    autoCollapse: Optional[bool]
-    language: Optional[str]
-    icon: Optional[str]
-    feedback: Optional[FeedbackDict]
+    createdAt: str | None
+    start: str | None
+    end: str | None
+    generation: Dict | None
+    showInput: Union[bool, str] | None
+    defaultOpen: bool | None
+    autoCollapse: bool | None
+    language: str | None
+    icon: str | None
+    feedback: FeedbackDict | None
 
 
 def flatten_args_kwargs(func, args, kwargs):
@@ -77,16 +80,16 @@ def flatten_args_kwargs(func, args, kwargs):
 
 
 def step(
-    original_function: Optional[Callable] = None,
+    original_function: Callable | None = None,
     *,
-    name: Optional[str] = "",
+    name: str | None = "",
     type: TrueStepType = "undefined",
-    id: Optional[str] = None,
-    parent_id: Optional[str] = None,
-    tags: Optional[List[str]] = None,
-    metadata: Optional[Dict] = None,
-    language: Optional[str] = None,
-    icon: Optional[str] = None,
+    id: str | None = None,
+    parent_id: str | None = None,
+    tags: List[str] | None = None,
+    metadata: Dict | None = None,
+    language: str | None = None,
+    icon: str | None = None,
     show_input: Union[bool, str] = "json",
     default_open: bool = False,
     auto_collapse: bool = False,
@@ -175,43 +178,43 @@ class Step:
     name: str
     type: TrueStepType
     id: str
-    parent_id: Optional[str]
+    parent_id: str | None
 
     streaming: bool
     persisted: bool
 
     show_input: Union[bool, str]
 
-    is_error: Optional[bool]
+    is_error: bool | None
     metadata: Dict
-    tags: Optional[List[str]]
+    tags: List[str] | None
     thread_id: str
     created_at: Union[str, None]
     start: Union[str, None]
     end: Union[str, None]
-    generation: Optional[BaseGeneration]
-    language: Optional[str]
-    icon: Optional[str]
-    default_open: Optional[bool]
-    auto_collapse: Optional[bool]
-    elements: Optional[List[Element]]
+    generation: Dict | None
+    language: str | None
+    icon: str | None
+    default_open: bool | None
+    auto_collapse: bool | None
+    elements: List[Element] | None
     fail_on_persist_error: bool
 
     def __init__(
         self,
-        name: Optional[str] = config.ui.name,
+        name: str | None = config.ui.name,
         type: TrueStepType = "undefined",
-        id: Optional[str] = None,
-        parent_id: Optional[str] = None,
-        elements: Optional[List[Element]] = None,
-        metadata: Optional[Dict] = None,
-        tags: Optional[List[str]] = None,
-        language: Optional[str] = None,
-        icon: Optional[str] = None,
-        default_open: Optional[bool] = False,
-        auto_collapse: Optional[bool] = False,
+        id: str | None = None,
+        parent_id: str | None = None,
+        elements: List[Element] | None = None,
+        metadata: Dict | None = None,
+        tags: List[str] | None = None,
+        language: str | None = None,
+        icon: str | None = None,
+        default_open: bool | None = False,
+        auto_collapse: bool | None = False,
         show_input: Union[bool, str] = "json",
-        thread_id: Optional[str] = None,
+        thread_id: str | None = None,
     ):
         time.sleep(0.001)
         self._input = ""
@@ -326,7 +329,7 @@ class Step:
             "defaultOpen": self.default_open,
             "autoCollapse": self.auto_collapse,
             "showInput": self.show_input,
-            "generation": self.generation.to_dict() if self.generation else None,
+            "generation": self.generation,
         }
         return _dict
 

@@ -28,7 +28,7 @@ const CheckboxInput = ({
   disabled,
   onChange,
   setField
-}: CheckboxInputProps): JSX.Element => {
+}: CheckboxInputProps): React.JSX.Element => {
   return (
     <InputStateHandler
       id={id}

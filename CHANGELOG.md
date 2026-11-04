@@ -4,6 +4,78 @@ All notable changes to Chainlit will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+## [2.12.0]
+
+### Changed
+
+- Promote the changes from development releases `2.11.12.dev1` through `2.11.12.dev6` to the stable `2.12.0` release.
+
+## [2.11.12.dev6]
+
+### Changed
+
+- Use clearer English and German labels for actions after a scheduled prompt completes.
+
+## [2.11.12.dev5]
+
+### Fixed
+
+- Keep long profile names and email addresses within the profile menu on desktop and mobile screens.
+
+## [2.11.12.dev4]
+
+### Fixed
+
+- Prevent New Chat from restoring a previously resumed thread during navigation.
+
+## [2.11.12.dev3]
+
+### Fixed
+
+- Keep a new chat active while an older thread-history refresh completes.
+
+## [2.11.12.dev2] - 2026-10-27
+
+### Security
+
+- Compare OAuth state in constant time and reject missing state cookies.
+- Raise PyJWT, python-multipart, and pydantic-settings minimum versions to patched releases.
+- Pin vulnerable transitive `immutable` versions to patched releases.
+
+### Fixed
+
+- Use the configured root path for auth cookies so sub-path deployments set and clear them consistently.
+
+## [2.11.12.dev1] - 2026-10-27
+
+### Added
+
+- Document the path for SDK-native LLM instrumentation and the OpenAI 3.x upgrade.
+
+### Changed
+
+- Replace Recoil state with Zustand and upgrade the frontend to React 19, React-PDF 11, PDF.js 6, ReactPlayer 3, and pnpm 12.
+- ReactPlayer 3 no longer supports Dailymotion, SoundCloud, Streamable, Twitch, Facebook, Mixcloud, or Kaltura.
+- Upgrade compatible Python and JavaScript dependencies to current major versions.
+- Keep OpenAI 2 in the combined test extra until the LlamaIndex OpenAI integration supports OpenAI 3.
+
+### Removed
+
+- Remove the deprecated LiteralAI data layer, debug UI, and SDK instrumentation helpers.
+- Remove the Recoil state-atom API and `RecoilRoot` requirement from `@chainlit/react-client`.
+
+## [2.11.12] - 2026-10-26
+
+### Added
+
+- Wrap chat composer controls onto additional rows on narrow screens.
+
+### Changed
+
+- Refresh frontend and Python dependencies within the supported compatibility bounds.
+
 ## [2.11.1] - 2026-04-22
 
 ### Added

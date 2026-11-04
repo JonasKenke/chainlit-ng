@@ -12,7 +12,7 @@ const VideoElement = ({ element }: { element: IVideoElement }) => {
       className={`${element.display}-video`}
       width="100%"
       controls
-      url={element.url}
+      src={element.url}
       config={element.playerConfig || {}}
     />
   );

@@ -5,14 +5,14 @@ from fastapi import Request, Response
 
 import chainlit as cl
 from chainlit.auth import create_jwt
-from chainlit.server import _authenticate_user, app
+from chainlit.server import _authenticate_user, router
 from chainlit.user import User
 
 os.environ["CHAINLIT_AUTH_SECRET"] = "SUPER_SECRET"  # nosec B105
 os.environ["CHAINLIT_CUSTOM_AUTH"] = "true"
 
 
-@app.get("/auth/custom")
+@router.get("/auth/custom")
 async def custom_auth(request: Request) -> Response:
     user_id = str(uuid4())
 
@@ -22,7 +22,7 @@ async def custom_auth(request: Request) -> Response:
     return response
 
 
-@app.get("/auth/token")
+@router.get("/auth/token")
 async def custom_token_auth() -> Response:
     user_id = str(uuid4())
 
@@ -32,14 +32,21 @@ async def custom_token_auth() -> Response:
     return response
 
 
-catch_all_route = None
-for route in app.routes:
-    if route.path == "/{full_path:path}":
-        catch_all_route = route
+catch_all_route = next(
+    (
+        route
+        for route in router.routes
+        if getattr(route, "path", None) == "/{full_path:path}"
+    ),
+    None,
+)
 
 if catch_all_route:
-    app.routes.remove(catch_all_route)
-    app.routes.append(catch_all_route)
+    router.routes.remove(catch_all_route)
+    router.routes.append(catch_all_route)
+    # Invalidate FastAPI's cached candidates after reordering the router.
+    if hasattr(router, "_mark_routes_changed"):
+        router._mark_routes_changed()
 
 
 @cl.on_chat_start

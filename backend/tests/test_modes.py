@@ -1,12 +1,15 @@
 """Tests for Modes system functionality."""
 
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 import chainlit as cl
-from chainlit.emitter import ChainlitEmitter
+from chainlit.emitter import ChainlitEmitter, _resolve_modes
 from chainlit.mode import Mode, ModeOption
+from chainlit.socket import _persist_mode_selection, change_mode
+from chainlit.user import User
 
 
 @pytest.fixture
@@ -147,6 +150,47 @@ class TestMode:
         assert default_option is not None
         assert default_option.id == "opt1"
 
+    def test_persisted_mode_value_overrides_default(self):
+        """Persisted user values are restored only for opted-in modes."""
+        session = SimpleNamespace(
+            user=SimpleNamespace(metadata={"chainlit_modes": {"model": "slow"}}),
+            mode_values={},
+        )
+        mode = Mode(
+            id="model",
+            name="Model",
+            persist_to_user=True,
+            options=[
+                ModeOption(id="fast", name="Fast", default=True),
+                ModeOption(id="slow", name="Slow"),
+            ],
+        )
+
+        resolved, values = _resolve_modes(session, [mode])
+
+        assert values == {"model": "slow"}
+        assert resolved[0].options[1].default is True
+        assert mode.options[0].default is True
+
+    def test_non_persisted_mode_ignores_saved_value(self):
+        """Modes remain session-only unless explicitly opted in."""
+        session = SimpleNamespace(
+            user=SimpleNamespace(metadata={"chainlit_modes": {"model": "slow"}}),
+            mode_values={},
+        )
+        mode = Mode(
+            id="model",
+            name="Model",
+            options=[
+                ModeOption(id="fast", name="Fast", default=True),
+                ModeOption(id="slow", name="Slow"),
+            ],
+        )
+
+        _, values = _resolve_modes(session, [mode])
+
+        assert values == {"model": "fast"}
+
 
 @pytest.mark.asyncio
 class TestMessageWithModes:
@@ -263,6 +307,56 @@ class TestEmitterSetModes:
         assert len(call_args[0][1]) == 1
         assert call_args[0][1][0]["id"] == "model"
 
+    async def test_change_mode_validates_and_calls_hook(self):
+        session = SimpleNamespace(
+            modes=[
+                Mode(
+                    id="model",
+                    name="Model",
+                    options=[
+                        ModeOption(id="fast", name="Fast"),
+                        ModeOption(id="slow", name="Slow"),
+                    ],
+                )
+            ],
+            mode_values={"model": "fast"},
+            user=None,
+        )
+        emit = AsyncMock()
+        context = SimpleNamespace(emitter=SimpleNamespace(emit=emit))
+        hook = AsyncMock()
+
+        with (
+            patch("chainlit.socket.WebsocketSession.require", return_value=session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.user_session.UserSession.set"),
+            patch("chainlit.socket.config.code.on_mode_update", hook),
+        ):
+            await change_mode("sid", {"modeId": "model", "optionId": "slow"})
+
+        assert session.mode_values == {"model": "slow"}
+        emit.assert_awaited_once_with("mode_change", {"model": "slow"})
+        hook.assert_awaited_once_with({"model": "slow"})
+
+    async def test_persist_mode_selection_merges_user_metadata(self):
+        user = User(identifier="user@example.com", metadata={"other": "keep"})
+        session = SimpleNamespace(user=user)
+        data_layer = MagicMock()
+        data_layer.get_user = AsyncMock(
+            return_value=SimpleNamespace(metadata={"other": "latest"})
+        )
+        data_layer.create_user = AsyncMock(return_value=None)
+
+        with patch("chainlit.socket.get_data_layer", return_value=data_layer):
+            await _persist_mode_selection(session, "model", "gpt-4")
+
+        persisted_user = data_layer.create_user.await_args.args[0]
+        assert persisted_user.metadata == {
+            "other": "latest",
+            "chainlit_modes": {"model": "gpt-4"},
+        }
+        assert session.user.metadata == persisted_user.metadata
+
 
 @pytest.mark.asyncio
 class TestModeExports:
@@ -277,3 +371,7 @@ class TestModeExports:
         """Test ModeOption is exported from chainlit package."""
         assert hasattr(cl, "ModeOption")
         assert cl.ModeOption is ModeOption
+
+    def test_mode_update_hook_exported_from_chainlit(self):
+        """Test the mode update hook is part of the public API."""
+        assert callable(cl.on_mode_update)

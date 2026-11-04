@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { IInput } from '@/types';
 import { format } from 'date-fns';
 import { Calendar as CalendarIcon, ChevronDownIcon } from 'lucide-react';
-import { ReactNode, useState } from 'react';
+import { type JSX, type ReactNode, useState } from 'react';
 import { DateRange } from 'react-day-picker';
 
 import { Button } from '@/components/ui/button';

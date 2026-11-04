@@ -1,17 +1,4 @@
-import { useRecoilValue } from 'recoil';
-
-import {
-  actionState,
-  askUserState,
-  callFnState,
-  chatSettingsDefaultValueSelector,
-  chatSettingsInputsState,
-  chatSettingsValueState,
-  elementState,
-  loadingState,
-  sessionState,
-  tasklistState
-} from './state';
+import { useChainlitStore } from './state';
 
 export interface IToken {
   id: number | string;
@@ -21,17 +8,21 @@ export interface IToken {
 }
 
 const useChatData = () => {
-  const loading = useRecoilValue(loadingState);
-  const elements = useRecoilValue(elementState);
-  const tasklists = useRecoilValue(tasklistState);
-  const actions = useRecoilValue(actionState);
-  const session = useRecoilValue(sessionState);
-  const askUser = useRecoilValue(askUserState);
-  const callFn = useRecoilValue(callFnState);
-  const chatSettingsInputs = useRecoilValue(chatSettingsInputsState);
-  const chatSettingsValue = useRecoilValue(chatSettingsValueState);
-  const chatSettingsDefaultValue = useRecoilValue(
-    chatSettingsDefaultValueSelector
+  const loading = useChainlitStore((state) => state.loading);
+  const elements = useChainlitStore((state) => state.elements);
+  const tasklists = useChainlitStore((state) => state.tasklists);
+  const actions = useChainlitStore((state) => state.actions);
+  const session = useChainlitStore((state) => state.session);
+  const askUser = useChainlitStore((state) => state.askUser);
+  const callFn = useChainlitStore((state) => state.callFn);
+  const chatSettingsInputs = useChainlitStore(
+    (state) => state.chatSettingsInputs
+  );
+  const chatSettingsValue = useChainlitStore(
+    (state) => state.chatSettingsValue
+  );
+  const chatSettingsDefaultValue = useChainlitStore(
+    (state) => state.chatSettingsDefaultValue
   );
 
   const connected = session?.socket.connected && !session?.error;

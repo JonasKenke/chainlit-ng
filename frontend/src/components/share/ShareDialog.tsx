@@ -1,11 +1,11 @@
 import { useCallback, useContext, useMemo, useState } from 'react';
-import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 
 import {
   ChainlitContext,
   ClientError,
-  threadHistoryState
+  useChainlitStore,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
@@ -34,8 +34,8 @@ export function ShareDialog({
   const [isCopied, setIsCopied] = useState(false);
   const [hasBeenCopied, setHasBeenCopied] = useState(false);
   const [sharedThreadId, setSharedThreadId] = useState<string | null>(null);
-  const threadHistory = useRecoilValue(threadHistoryState);
-  const setThreadHistory = useSetRecoilState(threadHistoryState);
+  const threadHistory = useChainlitStore((state) => state.threadHistory);
+  const setThreadHistory = useSetChainlitState('threadHistory');
 
   const isAlreadyShared = useMemo(() => {
     if (!threadId) return false;

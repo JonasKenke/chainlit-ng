@@ -1,14 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { useRecoilState, useRecoilValue } from 'recoil';
 
 import { useApi, useAuth } from './api';
-import { chatProfileState, configState } from './state';
+import { useChainlitState, useChainlitStore } from './state';
 import { IChainlitConfig } from './types';
 
 const useConfig = () => {
-  const [config, setConfig] = useRecoilState(configState);
+  const [config, setConfig] = useChainlitState('config');
   const { isAuthenticated } = useAuth();
-  const chatProfile = useRecoilValue(chatProfileState);
+  const chatProfile = useChainlitStore((state) => state.chatProfile);
   const language = navigator.language || 'en-US';
   const prevChatProfileRef = useRef(chatProfile);
 

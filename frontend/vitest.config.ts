@@ -1,10 +1,12 @@
 /// <reference types="vitest" />
 import react from '@vitejs/plugin-react-swc';
 import { defineConfig } from 'vite';
-import tsconfigPaths from 'vite-tsconfig-paths';
 
 export default defineConfig({
-  plugins: [tsconfigPaths(), react()],
+  plugins: [react()],
+  resolve: {
+    tsconfigPaths: true
+  },
   test: {
     environment: 'jsdom',
     setupFiles: './tests/setup-tests.ts',

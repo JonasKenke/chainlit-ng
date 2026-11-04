@@ -5,6 +5,9 @@ from chainlit.types import (
     Feedback,
     PaginatedResponse,
     Pagination,
+    PromptDict,
+    ScheduledTaskCompletion,
+    ScheduledTaskDict,
     ThreadDict,
     ThreadFilter,
 )
@@ -103,10 +106,6 @@ class BaseDataLayer(ABC):
         pass
 
     @abstractmethod
-    async def build_debug_url(self) -> str:
-        pass
-
-    @abstractmethod
     async def close(self) -> None:
         pass
 
@@ -122,3 +121,85 @@ class BaseDataLayer(ABC):
         step_dict["metadata"] = metadata
         await self.update_step(step_dict)
         return step_dict
+
+    # ---- Prompt Gallery (opt-in; non-abstract so existing data layers stay valid) ----
+
+    async def create_prompt(self, prompt: PromptDict) -> PromptDict:
+        raise NotImplementedError(
+            "Prompt gallery is not implemented for this data layer"
+        )
+
+    async def list_prompts(self, user_id: str) -> List[PromptDict]:
+        raise NotImplementedError(
+            "Prompt gallery is not implemented for this data layer"
+        )
+
+    async def get_prompt(self, prompt_id: str) -> Optional[PromptDict]:
+        raise NotImplementedError(
+            "Prompt gallery is not implemented for this data layer"
+        )
+
+    async def update_prompt(self, prompt: PromptDict) -> PromptDict:
+        raise NotImplementedError(
+            "Prompt gallery is not implemented for this data layer"
+        )
+
+    async def delete_prompt(self, prompt_id: str, user_id: str) -> bool:
+        raise NotImplementedError(
+            "Prompt gallery is not implemented for this data layer"
+        )
+
+    # ---- Prompt scheduling (opt-in; non-abstract for compatibility) ----
+
+    async def create_scheduled_task(self, task: ScheduledTaskDict) -> ScheduledTaskDict:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def list_scheduled_tasks(self, user_id: str) -> List[ScheduledTaskDict]:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def get_scheduled_task(self, task_id: str) -> Optional[ScheduledTaskDict]:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def update_scheduled_task(self, task: ScheduledTaskDict) -> ScheduledTaskDict:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def delete_scheduled_task(self, task_id: str, user_id: str) -> bool:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def request_scheduled_task_run(
+        self, task_id: str, user_id: str, requested_at: str
+    ) -> bool:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def claim_due_scheduled_tasks(
+        self, now: str, lease_until: str, worker_id: str, limit: int
+    ) -> List[ScheduledTaskDict]:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def renew_scheduled_task_lease(
+        self, task_id: str, lease_id: str, lease_until: str
+    ) -> bool:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )
+
+    async def complete_scheduled_task_run(
+        self, task_id: str, lease_id: str, completion: ScheduledTaskCompletion
+    ) -> bool:
+        raise NotImplementedError(
+            "Prompt scheduling is not implemented for this data layer"
+        )

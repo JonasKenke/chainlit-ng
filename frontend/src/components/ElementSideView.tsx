@@ -1,9 +1,8 @@
 import { cn } from '@/lib/utils';
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useRecoilState } from 'recoil';
 
-import { sideViewState } from '@chainlit/react-client';
+import { useChainlitState } from '@chainlit/react-client';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { ResizableHandle, ResizablePanel } from '@/components/ui/resizable';
@@ -20,7 +19,7 @@ import { Element } from './Elements';
 import { Button } from './ui/button';
 
 export default function ElementSideView() {
-  const [sideView, setSideView] = useRecoilState(sideViewState);
+  const [sideView, setSideView] = useChainlitState('sideView');
   const isMobile = useIsMobile();
   const [isVisible, setIsVisible] = useState(false);
 
@@ -70,8 +69,8 @@ export default function ElementSideView() {
     <>
       <ResizableHandle className="sm:hidden md:block bg-transparent" />
       <ResizablePanel
-        minSize={isCanvas ? 30 : 10}
-        defaultSize={isCanvas ? 50 : 40}
+        minSize={isCanvas ? '30%' : '10%'}
+        defaultSize={isCanvas ? '50%' : '40%'}
         className={`md:flex flex-col flex-grow sm:hidden transform transition-transform duration-300 ease-in-out ${
           isVisible ? 'translate-x-0' : 'translate-x-full'
         }`}

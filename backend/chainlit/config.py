@@ -118,6 +118,12 @@ allow_thread_sharing = false
 # Enable favorite messages
 favorites = false
 
+# Enable the prompt gallery (store, edit, share reusable prompts)
+prompt_gallery = false
+
+# Enable recurring prompt scheduling for authenticated users
+prompt_scheduling = false
+
 [features.slack]
 # Add emoji reaction when message is received (requires reactions:write OAuth scope)
 reaction_on_message_received = false
@@ -337,6 +343,8 @@ class FeaturesSettings(BaseModel):
     edit_message: bool = True
     allow_thread_sharing: bool = False
     favorites: bool = False
+    prompt_gallery: bool = False
+    prompt_scheduling: bool = False
 
 
 class HeaderLink(BaseModel):
@@ -383,13 +391,14 @@ class UISettings(BaseModel):
 class CodeSettings(BaseModel):
     # App action functions
     action_callbacks: Dict[str, Callable[["Action"], Any]]
+    scheduled_task_after_hooks: Dict[str, Any] = Field(default_factory=dict)
 
     # Module object loaded from the module_name
     module: Any = None
 
     # App life cycle callbacks
-    on_app_startup: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
-    on_app_shutdown: Optional[Callable[[], Union[None, Awaitable[None]]]] = None
+    on_app_startup: Optional[Callable[[], Union[Awaitable[None], None]]] = None
+    on_app_shutdown: Optional[Callable[[], Union[Awaitable[None], None]]] = None
 
     # Session life cycle callbacks
     on_logout: Optional[Callable[["Request", "Response"], Any]] = None
@@ -407,8 +416,12 @@ class CodeSettings(BaseModel):
     on_mcp_disconnect: Optional[Callable] = None
     on_settings_edit: Optional[Callable[[Dict[str, Any]], Any]] = None
     on_settings_update: Optional[Callable[[Dict[str, Any]], Any]] = None
+    on_mode_update: Optional[Callable[[Dict[str, str]], Any]] = None
     set_chat_profiles: Optional[
         Callable[[Optional["User"], Optional["str"]], Awaitable[List["ChatProfile"]]]
+    ] = None
+    set_scheduled_task_models: Optional[
+        Callable[[Optional["User"], Optional["str"]], Awaitable[List[str]]]
     ] = None
     set_starters: Optional[
         Callable[[Optional["User"], Optional["str"]], Awaitable[List["Starter"]]]
@@ -574,13 +587,34 @@ def init_config(log: bool = False):
     for file in os.listdir(TRANSLATIONS_DIR):
         if file.endswith(".json"):
             dst = os.path.join(config_translation_dir, file)
+            src = os.path.join(TRANSLATIONS_DIR, file)
+            with open(src, encoding="utf-8") as f:
+                pkg_translation = json.load(f)
             if not os.path.exists(dst):
-                src = os.path.join(TRANSLATIONS_DIR, file)
-                with open(src, encoding="utf-8") as f:
-                    translation = json.load(f)
+                with open(dst, "w", encoding="utf-8") as f:
+                    json.dump(pkg_translation, f, indent=4)
+                logger.info(f"Created default translation file at {dst}")
+            else:
+                # Merge: add any keys from the package that are missing in the app file
+                with open(dst, encoding="utf-8") as f:
+                    app_translation = json.load(f)
+
+                def _deep_merge(base: dict, additions: dict) -> tuple:
+                    added = False
+                    for k, v in additions.items():
+                        if k not in base:
+                            base[k] = v
+                            added = True
+                        elif isinstance(v, dict) and isinstance(base[k], dict):
+                            _, sub_added = _deep_merge(base[k], v)
+                            added = added or sub_added
+                    return base, added
+
+                merged, added = _deep_merge(app_translation, pkg_translation)
+                if added:
                     with open(dst, "w", encoding="utf-8") as f:
-                        json.dump(translation, f, indent=4)
-                        logger.info(f"Created default translation file at {dst}")
+                        json.dump(merged, f, indent=4)
+                    logger.info(f"Updated translation file with new keys at {dst}")
 
 
 def load_module(target: str, force_refresh: bool = False):

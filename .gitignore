@@ -1,5 +1,6 @@
 build
 dist
+storybook-static
 
 *.egg-info
 
@@ -62,3 +63,5 @@ dist-ssr
 .dmypy.json
 
 .history
+test_e2e.db
+.pi-subagents

@@ -14,7 +14,9 @@ interface ElementProps {
   element?: IMessageElement;
 }
 
-const Element = ({ element }: ElementProps): JSX.Element | null => {
+const Element = ({
+  element
+}: ElementProps): import('react').JSX.Element | null => {
   switch (element?.type) {
     case 'file':
       return <FileElement element={element} />;

@@ -1,5 +1,3 @@
-import { useRecoilState } from 'recoil';
-
 import { Element } from '@chainlit/app/src/components/Elements';
 import {
   Dialog,
@@ -7,11 +5,10 @@ import {
   DialogHeader,
   DialogTitle
 } from '@chainlit/app/src/components/ui/dialog';
-import { sideViewState } from '@chainlit/react-client';
+import { useChainlitState } from '@chainlit/react-client';
 
 export default function ElementSideView() {
-  const [sideView, setSideView] = useRecoilState(sideViewState);
-
+  const [sideView, setSideView] = useChainlitState('sideView');
   if (!sideView || sideView.title === 'canvas') return null;
 
   return (

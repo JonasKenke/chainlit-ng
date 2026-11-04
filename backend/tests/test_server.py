@@ -1,4 +1,4 @@
-import datetime
+import datetime as dt
 import os
 import pathlib
 from pathlib import Path
@@ -111,7 +111,7 @@ async def test_project_settings(test_client: TestClient, mock_get_current_user: 
     assert "dataPersistence" in data
     assert "threadResumable" in data
     assert "markdown" in data
-    assert "debugUrl" in data
+    assert "debugUrl" not in data
     assert data["chatProfiles"] == []
     assert data["starters"] == []
 
@@ -421,7 +421,7 @@ def test_file_access_by_different_user(
         id="another_session_id",
         user=PersistedUser(
             id="another_user_id",
-            createdAt=datetime.datetime.now().isoformat(),
+            createdAt=dt.datetime.now().isoformat(),
             identifier="another_user_identifier",
         ),
     )
@@ -1093,7 +1093,7 @@ def test_share_thread_endpoint_sets_flags(
 
     author = PersistedUser(
         id="u1",
-        createdAt=datetime.datetime.now().isoformat(),
+        createdAt=dt.datetime.now().isoformat(),
         identifier="author",
     )
 
@@ -1110,7 +1110,6 @@ def test_share_thread_endpoint_sets_flags(
         "metadata": {"other": True},
     }
     dl.get_thread_author.return_value = "author"
-    dl.build_debug_url.return_value = ""
 
     # Ensure data layer is initialized for both server routes and ACL checks
     import chainlit.data as data_mod

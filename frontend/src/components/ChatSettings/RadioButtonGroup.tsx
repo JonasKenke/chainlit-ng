@@ -28,7 +28,7 @@ const RadioButtonGroup = ({
   disabled = false,
   onChange,
   setField
-}: RadioButtonGroupProps): JSX.Element => {
+}: RadioButtonGroupProps): import('react').JSX.Element => {
   return (
     <InputStateHandler
       id={id}

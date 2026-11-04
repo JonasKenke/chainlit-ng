@@ -2,3 +2,100 @@ packages:
   - frontend/
   - libs/react-client/
   - libs/copilot/
+
+sharedWorkspaceLockfile: false
+publicHoistPattern:
+  - '*eslint*'
+  - '*prettier*'
+  - '@types*'
+sideEffectsCache: false
+allowBuilds:
+  '@swc/core': true
+  cypress: true
+  esbuild: true
+  # Block es5-ext's optional location-dependent postinstall notice.
+  es5-ext: false
+
+overrides:
+  'braces@<3.0.3': '>=3.0.3'
+  'micromatch@<4.0.8': '>=4.0.8'
+
+packageConfigs:
+  '@chainlit/app':
+    overrides:
+      'vite@>=4.4.0 <4.4.12': '>=4.4.12'
+      'vite@>=4.0.0 <=4.5.1': '>=4.5.2'
+      'katex@>=0.11.0 <0.16.10': '>=0.16.10'
+      'katex@>=0.15.4 <0.16.10': '>=0.16.10'
+      'katex@>=0.10.0-beta <0.16.10': '>=0.16.10'
+      'vite@>=4.0.0 <=4.5.2': '>=4.5.3'
+      'braces@<3.0.3': '>=3.0.3'
+      'ws@>=8.0.0 <8.17.1': '>=8.17.1'
+      'micromatch@<4.0.8': '>=4.0.8'
+      'vite@>=4.0.0 <4.5.4': '>=4.5.4'
+      'vite@>=4.0.0 <=4.5.3': '>=4.5.4'
+      'rollup@>=3.0.0 <3.29.5': '>=3.29.5'
+      'rollup@>=4.0.0 <4.22.4': '>=4.22.4'
+      'cross-spawn@>=7.0.0 <7.0.5': '>=7.0.5'
+      'immutable@>=3.0.0 <3.8.4': '>=3.8.4 <4.0.0'
+      'immutable@>=4.0.0 <4.3.9': '>=4.3.9 <5.0.0'
+  '@chainlit/react-client':
+    overrides:
+      'vite@>=4.4.0 <4.4.12': '>=4.4.12'
+      '@adobe/css-tools@<4.3.2': '>=4.3.2'
+      'vite@>=4.0.0 <=4.5.1': '>=4.5.2'
+      'vite@>=4.0.0 <=4.5.2': '>=4.5.3'
+      'braces@<3.0.3': '>=3.0.3'
+      'ws@>=8.0.0 <8.17.1': '>=8.17.1'
+      'micromatch@<4.0.8': '>=4.0.8'
+      'vite@>=4.0.0 <4.5.4': '>=4.5.4'
+      'vite@>=4.0.0 <=4.5.3': '>=4.5.4'
+      'rollup@>=3.0.0 <3.29.5': '>=3.29.5'
+      'cross-spawn@>=7.0.0 <7.0.5': '>=7.0.5'
+      'immutable@>=3.0.0 <3.8.4': '>=3.8.4 <4.0.0'
+      'immutable@>=4.0.0 <4.3.9': '>=4.3.9 <5.0.0'
+  '@chainlit/copilot':
+    overrides:
+      'vite@>=4.4.0 <4.4.12': '>=4.4.12'
+      'vite@>=4.0.0 <=4.5.1': '>=4.5.2'
+      'express@<4.19.2': '>=4.19.2'
+      'vite@>=4.0.0 <=4.5.2': '>=4.5.3'
+      'tar@<6.2.1': '>=6.2.1'
+      'braces@<3.0.3': '>=3.0.3'
+      'ejs@<3.1.10': '>=3.1.10'
+      'ws@>=8.0.0 <8.17.1': '>=8.17.1'
+      'micromatch@<4.0.8': '>=4.0.8'
+      'body-parser@<1.20.3': '>=1.20.3'
+      'send@<0.19.0': '>=0.19.0'
+      'serve-static@<1.16.0': '>=1.16.0'
+      'express@<4.20.0': '>=4.20.0'
+      'path-to-regexp@<0.1.10': '>=0.1.10'
+      'vite@>=4.0.0 <4.5.4': '>=4.5.4'
+      'vite@>=4.0.0 <=4.5.3': '>=4.5.4'
+      'rollup@>=3.0.0 <3.29.5': '>=3.29.5'
+      'cookie@<0.7.0': '>=0.7.0'
+      'cross-spawn@>=7.0.0 <7.0.5': '>=7.0.5'
+      'immutable@>=3.0.0 <3.8.4': '>=3.8.4 <4.0.0'
+      'immutable@>=4.0.0 <4.3.9': '>=4.3.9 <5.0.0'
+# Exact pins approved for this update despite the 24-hour age gate.
+minimumReleaseAgeExclude:
+  - 'lucide-react@1.62.0'
+  - '@typescript-eslint/eslint-plugin@8.72.1'
+  - '@typescript-eslint/parser@8.72.1'
+  - '@typescript-eslint/project-service@8.72.1'
+  - '@typescript-eslint/scope-manager@8.72.1'
+  - '@typescript-eslint/tsconfig-utils@8.72.1'
+  - '@typescript-eslint/type-utils@8.72.1'
+  - '@typescript-eslint/types@8.72.1'
+  - '@typescript-eslint/typescript-estree@8.72.1'
+  - '@typescript-eslint/utils@8.72.1'
+  - '@typescript-eslint/visitor-keys@8.72.1'
+  - typescript-eslint@8.72.1
+  - postcss@8.5.32
+  - '@storybook/addon-links@10.6.4'
+  - '@storybook/addon-onboarding@10.6.4'
+  - '@storybook/builder-vite@10.6.4'
+  - '@storybook/react-dom-shim@10.6.4'
+  - '@storybook/react-vite@10.6.4'
+  - '@storybook/react@10.6.4'
+  - storybook@10.6.4

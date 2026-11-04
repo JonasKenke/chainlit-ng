@@ -132,7 +132,128 @@
       "title": "Settings panel",
       "customize": "Customize your chat settings here"
     },
-    "watermark": "LLMs can make mistakes. Check important info."
+    "watermark": "LLMs can make mistakes. Check important info.",
+    "promptGallery": {
+      "button": "Prompt gallery",
+      "title": "Prompt Gallery",
+      "save": "Save prompt",
+      "saving": "Saving...",
+      "edit": "Edit prompt",
+      "share": {
+        "title": "Share Prompt",
+        "adding": "Adding…",
+        "goHome": "Go home",
+        "notFound": "Prompt not found or no longer shared.",
+        "addError": "Failed to add prompt"
+      },
+      "unshare": "Unshare",
+      "unshared": "Sharing removed",
+      "delete": "Delete",
+      "copied": "Link copied!",
+      "addToGallery": "Add to my gallery",
+      "added": "Prompt added to your gallery",
+      "empty": {
+        "title": "No Saved Prompts",
+        "description": "Bookmark a message to save it as a prompt"
+      },
+      "dialog": {
+        "titlePlaceholder": "Prompt title",
+        "contentLabel": "Prompt text",
+        "cancel": "Cancel",
+        "save": "Save"
+      },
+      "new": "New Prompt",
+      "search": "Search prompts...",
+      "saved": "Prompt saved!"
+    },
+    "promptScheduling": {
+      "button": "Scheduled prompts",
+      "title": "Scheduled prompts",
+      "create": "Create scheduled prompt",
+      "edit": "Edit scheduled prompt",
+      "new": "New schedule",
+      "empty": "No scheduled prompts yet",
+      "nextRun": "Next run",
+      "lastRun": "Last run",
+      "lastStatus": "Last status",
+      "status": {
+        "active": "Active",
+        "paused": "Paused",
+        "success": "Success",
+        "failure": "Failed",
+        "successWithWarnings": "Success with warnings"
+      },
+      "actions": {
+        "edit": "Edit schedule",
+        "pause": "Pause schedule",
+        "resume": "Resume schedule",
+        "delete": "Delete schedule",
+        "runNow": "Run now",
+        "viewThread": "View latest run"
+      },
+      "form": {
+        "prompt": "Prompt",
+        "chooseGallery": "Choose from Prompt Gallery",
+        "profile": "Model",
+        "chatProfile": "Chat profile",
+        "defaultAssistant": "Default assistant",
+        "timezone": "Timezone",
+        "recurrence": "Recurrence",
+        "customFrequency": "Repeat",
+        "interval": "Every",
+        "hours": "hours",
+        "time": "Time",
+        "weekday": "Day of week",
+        "dayOfMonth": "Day of month",
+        "afterHooks": "Actions after completion",
+        "unavailable": "unavailable"
+      },
+      "presets": {
+        "daily": "Daily at 09:00",
+        "weekdays": "Weekdays at 09:00",
+        "weekly": "Weekly on Monday",
+        "monthly": "Monthly on the first",
+        "custom": "Custom"
+      },
+      "custom": {
+        "everyHours": "Every N hours",
+        "daily": "Every day",
+        "weekly": "Every week",
+        "monthly": "Every month"
+      },
+      "weekdays": {
+        "monday": "Monday",
+        "tuesday": "Tuesday",
+        "wednesday": "Wednesday",
+        "thursday": "Thursday",
+        "friday": "Friday",
+        "saturday": "Saturday",
+        "sunday": "Sunday"
+      },
+      "overview": {
+        "dailyAt": "Daily at {time}",
+        "weekdaysAt": "Weekdays at {time}",
+        "weeklyAt": "Every {weekday} at {time}",
+        "monthlyAt": "Monthly on day {day} at {time}",
+        "everyHours": "Every {interval} hours",
+        "everyMinutes": "Every {interval} minutes",
+        "custom": "Custom schedule"
+      },
+      "galleryTitle": "Choose a gallery prompt",
+      "galleryEmpty": "No gallery prompts available",
+      "delete": {
+        "title": "Delete scheduled prompt?",
+        "description": "This schedule and its queued run will be deleted."
+      },
+      "errors": {
+        "load": "Unable to load scheduled prompts",
+        "required": "Prompt and cron are required",
+        "save": "Unable to save scheduled prompt",
+        "update": "Unable to update scheduled prompt",
+        "delete": "Unable to delete scheduled prompt",
+        "run": "Unable to queue scheduled prompt"
+      }
+    }
   },
   "threadHistory": {
     "sidebar": {

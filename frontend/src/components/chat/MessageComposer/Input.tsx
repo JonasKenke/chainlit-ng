@@ -6,9 +6,8 @@ import React, {
   useRef,
   useState
 } from 'react';
-import { useRecoilValue } from 'recoil';
 
-import { ICommand, commandsState } from '@chainlit/react-client';
+import { ICommand, useChainlitStore } from '@chainlit/react-client';
 
 import AutoResizeTextarea from '@/components/AutoResizeTextarea';
 import Icon from '@/components/Icon';
@@ -53,7 +52,7 @@ const Input = forwardRef<InputMethods, Props>(
     },
     ref
   ) => {
-    const commands = useRecoilValue(commandsState);
+    const commands = useChainlitStore((state) => state.commands);
     const [isComposing, setIsComposing] = useState(false);
     const [showCommands, setShowCommands] = useState(false);
     const [commandInput, setCommandInput] = useState('');

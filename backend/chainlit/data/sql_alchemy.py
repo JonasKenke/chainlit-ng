@@ -24,6 +24,9 @@ from chainlit.types import (
     PageInfo,
     PaginatedResponse,
     Pagination,
+    PromptDict,
+    ScheduledTaskCompletion,
+    ScheduledTaskDict,
     ThreadDict,
     ThreadFilter,
 )
@@ -70,9 +73,6 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             logger.warning(
                 "SQLAlchemyDataLayer storage client is not initialized and elements will not be persisted!"
             )
-
-    async def build_debug_url(self) -> str:
-        return ""
 
     ###### SQL Helpers ######
     async def execute_sql(
@@ -951,3 +951,371 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if self.storage_provider:
             await self.storage_provider.close()
         await self.engine.dispose()
+
+    # ---- Prompt Gallery ----
+
+    _prompts_table_checked: bool = False
+
+    async def _ensure_prompts_table(self) -> None:
+        """Create the prompts table if it doesn't exist. Only runs once per instance."""
+        if self._prompts_table_checked:
+            return
+        await self.execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS prompts (
+                "id"          TEXT PRIMARY KEY,
+                "userId"      TEXT NOT NULL,
+                "title"       TEXT NOT NULL,
+                "content"     TEXT NOT NULL,
+                "isShared"    BOOLEAN NOT NULL DEFAULT FALSE,
+                "createdAt"   TEXT NOT NULL,
+                "updatedAt"   TEXT NOT NULL
+            )
+            """,
+            {},
+        )
+        self._prompts_table_checked = True
+
+    async def create_prompt(self, prompt: PromptDict) -> PromptDict:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: create_prompt, id={prompt['id']}")
+        await self._ensure_prompts_table()
+        await self.execute_sql(
+            """
+            INSERT INTO prompts ("id", "userId", "title", "content", "isShared", "createdAt", "updatedAt")
+            VALUES (:id, :userId, :title, :content, :isShared, :createdAt, :updatedAt)
+            """,
+            {
+                "id": prompt["id"],
+                "userId": prompt["userId"],
+                "title": prompt["title"],
+                "content": prompt["content"],
+                "isShared": prompt["isShared"],
+                "createdAt": prompt["createdAt"],
+                "updatedAt": prompt["updatedAt"],
+            },
+        )
+        return prompt
+
+    async def list_prompts(self, user_id: str) -> List[PromptDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: list_prompts, user_id={user_id}")
+        await self._ensure_prompts_table()
+        result = await self.execute_sql(
+            'SELECT * FROM prompts WHERE "userId" = :user_id ORDER BY "createdAt" DESC',
+            {"user_id": user_id},
+        )
+        if not isinstance(result, list):
+            return []
+        return [
+            PromptDict(
+                id=row["id"],
+                userId=row["userId"],
+                title=row["title"],
+                content=row["content"],
+                isShared=bool(row["isShared"]),
+                createdAt=row["createdAt"],
+                updatedAt=row["updatedAt"],
+            )
+            for row in result
+        ]
+
+    async def get_prompt(self, prompt_id: str) -> Optional[PromptDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: get_prompt, id={prompt_id}")
+        await self._ensure_prompts_table()
+        result = await self.execute_sql(
+            'SELECT * FROM prompts WHERE "id" = :id',
+            {"id": prompt_id},
+        )
+        if not isinstance(result, list) or not result:
+            return None
+        row = result[0]
+        return PromptDict(
+            id=row["id"],
+            userId=row["userId"],
+            title=row["title"],
+            content=row["content"],
+            isShared=bool(row["isShared"]),
+            createdAt=row["createdAt"],
+            updatedAt=row["updatedAt"],
+        )
+
+    async def update_prompt(self, prompt: PromptDict) -> PromptDict:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: update_prompt, id={prompt['id']}")
+        await self._ensure_prompts_table()
+        await self.execute_sql(
+            """
+            UPDATE prompts
+            SET "title" = :title, "content" = :content, "isShared" = :isShared, "updatedAt" = :updatedAt
+            WHERE "id" = :id AND "userId" = :userId
+            """,
+            {
+                "id": prompt["id"],
+                "userId": prompt["userId"],
+                "title": prompt["title"],
+                "content": prompt["content"],
+                "isShared": prompt["isShared"],
+                "updatedAt": prompt["updatedAt"],
+            },
+        )
+        return prompt
+
+    async def delete_prompt(self, prompt_id: str, user_id: str) -> bool:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: delete_prompt, id={prompt_id}")
+        await self._ensure_prompts_table()
+        result = await self.execute_sql(
+            'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id',
+            {"id": prompt_id, "user_id": user_id},
+        )
+        return isinstance(result, int) and result > 0
+
+    # ---- Prompt scheduling ----
+
+    _scheduled_tasks_table_checked: bool = False
+
+    async def _ensure_scheduled_tasks_table(self) -> None:
+        if self._scheduled_tasks_table_checked:
+            return
+        await self.execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                "id" TEXT PRIMARY KEY,
+                "userId" TEXT NOT NULL,
+                "userIdentifier" TEXT NOT NULL,
+                "prompt" TEXT NOT NULL,
+                "chatProfile" TEXT,
+                "model" TEXT,
+                "cron" TEXT NOT NULL,
+                "timezone" TEXT NOT NULL,
+                "enabled" BOOLEAN NOT NULL DEFAULT TRUE,
+                "afterHooks" TEXT NOT NULL DEFAULT '[]',
+                "nextRunAt" TEXT NOT NULL,
+                "manualRunRequestedAt" TEXT,
+                "lastRunAt" TEXT,
+                "lastStatus" TEXT,
+                "lastError" TEXT,
+                "lastThreadId" TEXT,
+                "leaseId" TEXT,
+                "leaseUntil" TEXT,
+                "createdAt" TEXT NOT NULL,
+                "updatedAt" TEXT NOT NULL
+            )
+            """,
+            {},
+        )
+        if self.engine.dialect.name == "sqlite":
+            columns = await self.execute_sql("PRAGMA table_info(scheduled_tasks)", {})
+            has_model = isinstance(columns, list) and any(
+                row.get("name") == "model" for row in columns
+            )
+        else:
+            columns = await self.execute_sql(
+                """
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'scheduled_tasks' AND column_name = :column
+                """,
+                {"column": "model"},
+            )
+            has_model = isinstance(columns, list) and bool(columns)
+        if not has_model:
+            await self.execute_sql(
+                'ALTER TABLE scheduled_tasks ADD COLUMN "model" TEXT', {}
+            )
+
+        for column, name in (
+            ("userId", "idx_scheduled_tasks_user"),
+            ("nextRunAt", "idx_scheduled_tasks_next"),
+            ("manualRunRequestedAt", "idx_scheduled_tasks_manual"),
+            ("leaseUntil", "idx_scheduled_tasks_lease"),
+        ):
+            await self.execute_sql(
+                f'CREATE INDEX IF NOT EXISTS "{name}" ON scheduled_tasks ("{column}")',
+                {},
+            )
+        self._scheduled_tasks_table_checked = True
+
+    @staticmethod
+    def _scheduled_task_from_row(row: Dict[str, Any]) -> "ScheduledTaskDict":
+        hooks = row.get("afterHooks", [])
+        if isinstance(hooks, str):
+            hooks = json.loads(hooks or "[]")
+        return ScheduledTaskDict(
+            id=row["id"],
+            userId=row["userId"],
+            userIdentifier=row["userIdentifier"],
+            prompt=row["prompt"],
+            chatProfile=row.get("chatProfile"),
+            model=row.get("model"),
+            cron=row["cron"],
+            timezone=row["timezone"],
+            enabled=bool(row["enabled"]),
+            afterHooks=hooks,
+            nextRunAt=row["nextRunAt"],
+            manualRunRequestedAt=row.get("manualRunRequestedAt"),
+            lastRunAt=row.get("lastRunAt"),
+            lastStatus=row.get("lastStatus"),
+            lastError=row.get("lastError"),
+            lastThreadId=row.get("lastThreadId"),
+            leaseId=row.get("leaseId"),
+            leaseUntil=row.get("leaseUntil"),
+            createdAt=row["createdAt"],
+            updatedAt=row["updatedAt"],
+        )
+
+    async def create_scheduled_task(
+        self, task: "ScheduledTaskDict"
+    ) -> "ScheduledTaskDict":
+        await self._ensure_scheduled_tasks_table()
+        await self.execute_sql(
+            """
+            INSERT INTO scheduled_tasks
+            ("id", "userId", "userIdentifier", "prompt", "chatProfile", "model", "cron", "timezone", "enabled", "afterHooks", "nextRunAt", "manualRunRequestedAt", "lastRunAt", "lastStatus", "lastError", "lastThreadId", "leaseId", "leaseUntil", "createdAt", "updatedAt")
+            VALUES (:id, :userId, :userIdentifier, :prompt, :chatProfile, :model, :cron, :timezone, :enabled, :afterHooks, :nextRunAt, :manualRunRequestedAt, :lastRunAt, :lastStatus, :lastError, :lastThreadId, :leaseId, :leaseUntil, :createdAt, :updatedAt)
+            """,
+            {
+                **task,
+                "model": task.get("model"),
+                "afterHooks": json.dumps(task["afterHooks"]),
+            },
+        )
+        return task
+
+    async def list_scheduled_tasks(self, user_id: str) -> List["ScheduledTaskDict"]:
+        await self._ensure_scheduled_tasks_table()
+        result = await self.execute_sql(
+            'SELECT * FROM scheduled_tasks WHERE "userId" = :user_id ORDER BY "nextRunAt"',
+            {"user_id": user_id},
+        )
+        return (
+            [self._scheduled_task_from_row(row) for row in result]
+            if isinstance(result, list)
+            else []
+        )
+
+    async def get_scheduled_task(self, task_id: str) -> Optional["ScheduledTaskDict"]:
+        await self._ensure_scheduled_tasks_table()
+        result = await self.execute_sql(
+            'SELECT * FROM scheduled_tasks WHERE "id" = :id', {"id": task_id}
+        )
+        return (
+            self._scheduled_task_from_row(result[0])
+            if isinstance(result, list) and result
+            else None
+        )
+
+    async def update_scheduled_task(
+        self, task: "ScheduledTaskDict"
+    ) -> "ScheduledTaskDict":
+        await self._ensure_scheduled_tasks_table()
+        await self.execute_sql(
+            """
+            UPDATE scheduled_tasks SET "userId"=:userId, "userIdentifier"=:userIdentifier, "prompt"=:prompt,
+            "chatProfile"=:chatProfile, "model"=:model, "cron"=:cron, "timezone"=:timezone, "enabled"=:enabled,
+            "afterHooks"=:afterHooks, "nextRunAt"=:nextRunAt, "manualRunRequestedAt"=:manualRunRequestedAt,
+            "lastRunAt"=:lastRunAt, "lastStatus"=:lastStatus, "lastError"=:lastError, "lastThreadId"=:lastThreadId,
+            "updatedAt"=:updatedAt WHERE "id"=:id
+            """,
+            {
+                **task,
+                "model": task.get("model"),
+                "afterHooks": json.dumps(task["afterHooks"]),
+            },
+        )
+        return task
+
+    async def delete_scheduled_task(self, task_id: str, user_id: str) -> bool:
+        await self._ensure_scheduled_tasks_table()
+        result = await self.execute_sql(
+            'DELETE FROM scheduled_tasks WHERE "id"=:id AND "userId"=:user_id',
+            {"id": task_id, "user_id": user_id},
+        )
+        return isinstance(result, int) and result > 0
+
+    async def request_scheduled_task_run(
+        self, task_id: str, user_id: str, requested_at: str
+    ) -> bool:
+        await self._ensure_scheduled_tasks_table()
+        result = await self.execute_sql(
+            """
+            UPDATE scheduled_tasks
+            SET "manualRunRequestedAt"=:requested_at, "updatedAt"=:requested_at
+            WHERE "id"=:id AND "userId"=:user_id
+              AND "manualRunRequestedAt" IS NULL AND "leaseId" IS NULL
+            """,
+            {"id": task_id, "user_id": user_id, "requested_at": requested_at},
+        )
+        return isinstance(result, int) and result == 1
+
+    async def claim_due_scheduled_tasks(
+        self, now: str, lease_until: str, worker_id: str, limit: int
+    ) -> List["ScheduledTaskDict"]:
+        await self._ensure_scheduled_tasks_table()
+        result = await self.execute_sql(
+            """
+            SELECT * FROM scheduled_tasks
+            WHERE ("manualRunRequestedAt" IS NOT NULL OR ("enabled" = TRUE AND "nextRunAt" <= :now))
+              AND ("leaseUntil" IS NULL OR "leaseUntil" <= :now)
+            ORDER BY COALESCE("manualRunRequestedAt", "nextRunAt") LIMIT :limit
+            """,
+            {"now": now, "limit": max(0, limit)},
+        )
+        claimed: List[ScheduledTaskDict] = []
+        for row in result if isinstance(result, list) else []:
+            lease_id = f"{worker_id}:{uuid.uuid4()}"
+            updated = await self.execute_sql(
+                """
+                UPDATE scheduled_tasks SET "leaseId"=:lease_id, "leaseUntil"=:lease_until, "updatedAt"=:now
+                WHERE "id"=:id
+                  AND ("leaseUntil" IS NULL OR "leaseUntil" <= :now)
+                  AND "enabled"=:enabled AND "nextRunAt"=:next_run_at
+                  AND (
+                    (:manual_run IS NOT NULL AND "manualRunRequestedAt"=:manual_run)
+                    OR (:manual_run IS NULL AND "manualRunRequestedAt" IS NULL
+                        AND "enabled"=TRUE AND "nextRunAt" <= :now)
+                  )
+                """,
+                {
+                    "lease_id": lease_id,
+                    "lease_until": lease_until,
+                    "now": now,
+                    "id": row["id"],
+                    "enabled": bool(row["enabled"]),
+                    "next_run_at": row["nextRunAt"],
+                    "manual_run": row.get("manualRunRequestedAt"),
+                },
+            )
+            if isinstance(updated, int) and updated == 1:
+                current = await self.get_scheduled_task(row["id"])
+                if current:
+                    claimed.append(current)
+        return claimed
+
+    async def renew_scheduled_task_lease(
+        self, task_id: str, lease_id: str, lease_until: str
+    ) -> bool:
+        await self._ensure_scheduled_tasks_table()
+        result = await self.execute_sql(
+            'UPDATE scheduled_tasks SET "leaseUntil"=:until WHERE "id"=:id AND "leaseId"=:lease',
+            {"until": lease_until, "id": task_id, "lease": lease_id},
+        )
+        return isinstance(result, int) and result == 1
+
+    async def complete_scheduled_task_run(
+        self, task_id: str, lease_id: str, completion: "ScheduledTaskCompletion"
+    ) -> bool:
+        await self._ensure_scheduled_tasks_table()
+        values = completion.model_dump()
+        result = await self.execute_sql(
+            """
+            UPDATE scheduled_tasks SET "lastRunAt"=:completedAt, "lastStatus"=:status,
+            "lastError"=:lastError, "lastThreadId"=:lastThreadId, "nextRunAt"=COALESCE(:nextRunAt, "nextRunAt"),
+            "enabled"=COALESCE(:enabled, "enabled"), "manualRunRequestedAt"=NULL,
+            "leaseId"=NULL, "leaseUntil"=NULL, "updatedAt"=:completedAt
+            WHERE "id"=:id AND "leaseId"=:lease
+            """,
+            {**values, "id": task_id, "lease": lease_id},
+        )
+        return isinstance(result, int) and result == 1

@@ -118,11 +118,5 @@ export default {
       }
     }
   },
-  safelist: [
-    {
-      pattern:
-        /^(filter-none|blur(?:-\w+)?|brightness-\d+|contrast-\d+|grayscale(?:-\d+)?|hue-rotate-\d+|-hue-rotate-\d+|invert(?:-\d+)?|saturate-\d+|sepia(?:-\d+)?)$/
-    }
-  ],
   plugins: [animate]
 };

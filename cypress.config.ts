@@ -1,12 +1,17 @@
 import { defineConfig } from 'cypress';
 import cypressSplit from 'cypress-split';
-import fkill from 'fkill';
+import { rm } from 'node:fs/promises';
 
 import { runChainlit } from './cypress/support/run';
 
 export const CHAINLIT_APP_PORT = 8000;
 
+let chainlitProcess: Awaited<ReturnType<typeof runChainlit>> | undefined;
+
 async function killChainlit() {
+  chainlitProcess?.kill('SIGTERM');
+  chainlitProcess = undefined;
+  const { default: fkill } = await import('fkill');
   await fkill(`:${CHAINLIT_APP_PORT}`, {
     force: true,
     silent: true
@@ -39,11 +44,11 @@ export default defineConfig({
       cypressSplit(on, config);
 
       await killChainlit(); // Fallback to ensure no previous instance is running
-      await runChainlit(); // Start Chainlit before running tests as Cypress require
+      chainlitProcess = await runChainlit(); // Start bootstrap app before Cypress verifies baseUrl
 
       on('before:spec', async (spec) => {
         await killChainlit();
-        await runChainlit(spec);
+        chainlitProcess = await runChainlit(spec);
       });
 
       on('after:spec', async () => {
@@ -55,6 +60,10 @@ export default defineConfig({
       });
 
       on('task', {
+        async deleteFileIfExists(filePath: string) {
+          await rm(filePath, { force: true });
+          return null;
+        },
         log(message) {
           console.log(message);
           return null;
@@ -62,7 +71,8 @@ export default defineConfig({
         restartChainlit(spec: Cypress.Spec) {
           return new Promise((resolve) => {
             killChainlit().then(() => {
-              runChainlit(spec).then(() => {
+              runChainlit(spec).then((process) => {
+                chainlitProcess = process;
                 setTimeout(() => {
                   resolve(null);
                 }, 1000);

@@ -1,40 +1,12 @@
 import { debounce } from 'lodash';
 import { useCallback, useContext, useEffect } from 'react';
-import {
-  useRecoilState,
-  useRecoilValue,
-  useResetRecoilState,
-  useSetRecoilState
-} from 'recoil';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
 import {
-  actionState,
-  askUserState,
-  audioConnectionState,
-  callFnState,
-  chatProfileState,
-  chatSettingsInputsState,
-  chatSettingsValueState,
-  commandsState,
-  currentThreadIdState,
-  elementState,
-  favoriteMessagesState,
-  firstUserInteraction,
-  isAiSpeakingState,
-  loadingState,
-  mcpState,
-  messagesState,
-  modesState,
-  resumeThreadErrorState,
-  sessionIdState,
-  sessionState,
-  sideViewState,
-  tasklistState,
-  threadIdToResumeState,
-  tokenCountState,
-  wavRecorderState,
-  wavStreamPlayerState
+  useChainlitState,
+  useChainlitStore,
+  useResetChainlitState,
+  useSetChainlitState
 } from 'src/state';
 import {
   IAction,
@@ -60,36 +32,36 @@ import type { IToken } from './useChatData';
 
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
-  const sessionId = useRecoilValue(sessionIdState);
+  const sessionId = useChainlitStore((state) => state.sessionId);
 
-  const [session, setSession] = useRecoilState(sessionState);
-  const setIsAiSpeaking = useSetRecoilState(isAiSpeakingState);
-  const setAudioConnection = useSetRecoilState(audioConnectionState);
-  const resetChatSettingsValue = useResetRecoilState(chatSettingsValueState);
-  const setChatSettingsValue = useSetRecoilState(chatSettingsValueState);
-  const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
-  const setLoading = useSetRecoilState(loadingState);
-  const setMcps = useSetRecoilState(mcpState);
-  const wavStreamPlayer = useRecoilValue(wavStreamPlayerState);
-  const wavRecorder = useRecoilValue(wavRecorderState);
-  const setMessages = useSetRecoilState(messagesState);
-  const setAskUser = useSetRecoilState(askUserState);
-  const setCallFn = useSetRecoilState(callFnState);
-  const setCommands = useSetRecoilState(commandsState);
-  const setModes = useSetRecoilState(modesState);
-  const setSideView = useSetRecoilState(sideViewState);
-  const setElements = useSetRecoilState(elementState);
-  const setTasklists = useSetRecoilState(tasklistState);
-  const setActions = useSetRecoilState(actionState);
-  const setChatSettingsInputs = useSetRecoilState(chatSettingsInputsState);
-  const setTokenCount = useSetRecoilState(tokenCountState);
-  const [chatProfile, setChatProfile] = useRecoilState(chatProfileState);
-  const idToResume = useRecoilValue(threadIdToResumeState);
-  const setThreadResumeError = useSetRecoilState(resumeThreadErrorState);
-  const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
+  const [session, setSession] = useChainlitState('session');
+  const setIsAiSpeaking = useSetChainlitState('isAiSpeaking');
+  const setAudioConnection = useSetChainlitState('audioConnection');
+  const resetChatSettingsValue = useResetChainlitState('chatSettingsValue');
+  const setChatSettingsValue = useSetChainlitState('chatSettingsValue');
+  const setFirstUserInteraction = useSetChainlitState('firstUserInteraction');
+  const setLoading = useSetChainlitState('loading');
+  const setMcps = useSetChainlitState('mcps');
+  const wavStreamPlayer = useChainlitStore((state) => state.wavStreamPlayer);
+  const wavRecorder = useChainlitStore((state) => state.wavRecorder);
+  const setMessages = useSetChainlitState('messages');
+  const setAskUser = useSetChainlitState('askUser');
+  const setCallFn = useSetChainlitState('callFn');
+  const setCommands = useSetChainlitState('commands');
+  const setModes = useSetChainlitState('modes');
+  const setSideView = useSetChainlitState('sideView');
+  const setElements = useSetChainlitState('elements');
+  const setTasklists = useSetChainlitState('tasklists');
+  const setActions = useSetChainlitState('actions');
+  const setChatSettingsInputs = useSetChainlitState('chatSettingsInputs');
+  const setTokenCount = useSetChainlitState('tokenCount');
+  const [chatProfile, setChatProfile] = useChainlitState('chatProfile');
+  const idToResume = useChainlitStore((state) => state.threadIdToResume);
+  const setThreadResumeError = useSetChainlitState('resumeThreadError');
+  const setFavoriteMessages = useSetChainlitState('favoriteMessages');
 
   const [currentThreadId, setCurrentThreadId] =
-    useRecoilState(currentThreadIdState);
+    useChainlitState('currentThreadId');
 
   // Use currentThreadId as thread id in websocket header
   useEffect(() => {
@@ -376,6 +348,22 @@ const useChatSession = () => {
 
       socket.on('set_modes', (modes: IMode[]) => {
         setModes(modes);
+      });
+
+      socket.on('mode_change', (values: Record<string, string>) => {
+        setModes((modes) =>
+          modes.map((mode) => {
+            const selectedId = values[mode.id];
+            if (!selectedId) return mode;
+            return {
+              ...mode,
+              options: mode.options.map((option) => ({
+                ...option,
+                default: option.id === selectedId
+              }))
+            };
+          })
+        );
       });
 
       socket.on('set_favorites', (steps: IStep[]) => {

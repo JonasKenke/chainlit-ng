@@ -4,18 +4,17 @@ import { Share2 } from 'lucide-react';
 import { useContext, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
-import { useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 
 import {
   ChainlitContext,
   ClientError,
-  ThreadHistory, // sessionIdState,
-  threadHistoryState,
+  ThreadHistory,
   useChatInteract,
   useChatMessages,
   useChatSession,
-  useConfig
+  useConfig,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import Alert from '@/components/Alert';
@@ -81,7 +80,7 @@ export function ThreadList({
   const [threadIdToDelete, setThreadIdToDelete] = useState<string>();
   const [threadIdToRename, setThreadIdToRename] = useState<string>();
   const [threadNewName, setThreadNewName] = useState<string>();
-  const setThreadHistory = useSetRecoilState(threadHistoryState);
+  const setThreadHistory = useSetChainlitState('threadHistory');
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
   const dataPersistence = config?.dataPersistence;

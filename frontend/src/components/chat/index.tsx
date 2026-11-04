@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
-  threadHistoryState,
   useAuth,
   useChatData,
   useChatInteract,
   useChatMessages,
-  useConfig
+  useConfig,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import Alert from '@/components/Alert';
@@ -21,7 +20,8 @@ import { useTranslation } from 'components/i18n/Translator';
 import { useUpload } from '@/hooks/useUpload';
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 
-import { IAttachment, attachmentsState } from 'state/chat';
+import { useAppStore } from '@/state/store';
+import { IAttachment } from 'state/chat';
 
 import { ErrorBoundary } from '../ErrorBoundary';
 import ChatFooter from './Footer';
@@ -32,8 +32,8 @@ import WelcomeScreen from './WelcomeScreen';
 const Chat = () => {
   const { user } = useAuth();
   const { config } = useConfig();
-  const setAttachments = useSetRecoilState(attachmentsState);
-  const setThreads = useSetRecoilState(threadHistoryState);
+  const setAttachments = useAppStore((state) => state.setAttachments);
+  const setThreads = useSetChainlitState('threadHistory');
 
   const autoScrollRef = useRef(true);
   const { error, disabled, callFn } = useChatData();

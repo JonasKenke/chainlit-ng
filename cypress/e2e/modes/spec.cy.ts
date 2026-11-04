@@ -14,6 +14,24 @@ describe('Modes Picker', () => {
     cy.get('#mode-picker-trigger-reasoning').should('exist');
   });
 
+  it('wraps composer controls on narrow screens without overflow', () => {
+    cy.viewport(240, 900);
+
+    cy.get('#mode-picker-trigger-model').should('be.visible');
+    cy.get('#mode-picker-trigger-reasoning').should('be.visible');
+    cy.get('#message-composer').then(($composer) => {
+      expect($composer[0].scrollWidth).to.be.at.most($composer[0].clientWidth);
+    });
+    cy.get('[data-testid="message-composer-actions"]').then(($actions) => {
+      const rows = new Set(
+        Array.from($actions[0].querySelectorAll('button'), (button) =>
+          Math.round(button.getBoundingClientRect().top)
+        )
+      );
+      expect(rows.size).to.be.greaterThan(1);
+    });
+  });
+
   it('should show default options selected', () => {
     cy.get('#chat-input').should('exist');
 
@@ -28,6 +46,21 @@ describe('Modes Picker', () => {
 
     cy.get('#mode-picker-trigger-model').click();
     cy.get('#mode-picker-popover-model').should('be.visible');
+  });
+
+  it('should highlight only the selected or hovered option', () => {
+    cy.get('#chat-input').should('exist');
+    cy.get('#mode-picker-trigger-model').click();
+
+    const options = '#mode-picker-popover-model [cmdk-item]';
+    cy.get(options).eq(0).should('not.have.class', 'bg-accent');
+    cy.get(options).eq(1).should('have.class', 'bg-accent');
+
+    cy.get(options).eq(0).trigger('mousemove');
+    cy.get(options).eq(0).should('have.class', 'bg-accent');
+    cy.get(options).eq(1).should('not.have.class', 'bg-accent');
+
+    cy.get(options).eq(0).trigger('mouseleave');
   });
 
   it('should display all model options in dropdown', () => {

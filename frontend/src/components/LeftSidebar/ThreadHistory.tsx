@@ -1,11 +1,10 @@
 import { uniqBy } from 'lodash';
 import { useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRecoilState } from 'recoil';
 
 import {
   ChainlitContext,
-  threadHistoryState,
+  useChainlitState,
   useChatMessages
 } from '@chainlit/react-client';
 
@@ -25,7 +24,7 @@ export function ThreadHistory() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const apiClient = useContext(ChainlitContext);
   const { firstInteraction, messages, threadId } = useChatMessages();
-  const [threadHistory, setThreadHistory] = useRecoilState(threadHistoryState);
+  const [threadHistory, setThreadHistory] = useChainlitState('threadHistory');
   const [error, setError] = useState<string>();
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
@@ -41,6 +40,8 @@ export function ThreadHistory() {
 
   // Handle first interaction
   useEffect(() => {
+    let cancelled = false;
+
     const handleFirstInteraction = async () => {
       if (!firstInteraction) return;
 
@@ -52,6 +53,8 @@ export function ThreadHistory() {
 
       await fetchThreads(undefined, true);
 
+      if (cancelled) return;
+
       const currentPage = new URL(window.location.href);
       if (threadId && currentPage.pathname === '/') {
         navigate(`/thread/${threadId}`);
@@ -59,6 +62,10 @@ export function ThreadHistory() {
     };
 
     handleFirstInteraction();
+
+    return () => {
+      cancelled = true;
+    };
   }, [firstInteraction]);
 
   // Reorder thread to top when a new message is sent in the current thread

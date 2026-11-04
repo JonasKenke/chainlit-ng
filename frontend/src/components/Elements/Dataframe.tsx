@@ -1,10 +1,12 @@
 import {
-  ColumnDef,
+  createColumnHelper,
+  createPaginatedRowModel,
+  createSortedRowModel,
   flexRender,
-  getCoreRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable
+  rowPaginationFeature,
+  rowSortingFeature,
+  tableFeatures,
+  useTable
 } from '@tanstack/react-table';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
@@ -38,34 +40,47 @@ interface DataframeData {
   data: (string | number)[][];
 }
 
+type DataframeRow = Record<string, string | number>;
+
+const features = tableFeatures({
+  rowSortingFeature,
+  sortedRowModel: createSortedRowModel(),
+  rowPaginationFeature,
+  paginatedRowModel: createPaginatedRowModel()
+});
+const columnHelper = createColumnHelper<typeof features, DataframeRow>();
+
 const _DataframeElement = ({ data }: { data: DataframeData }) => {
   const { index, columns, data: rowData } = data;
 
-  const tableColumns: ColumnDef<Record<string, string | number>>[] = useMemo(
+  const tableColumns = useMemo(
     () =>
-      columns.map((col: string) => ({
-        accessorKey: col,
-        header: ({ column }) => {
-          const sort = column.getIsSorted();
-          return (
-            <div
-              className="flex items-center cursor-pointer"
-              onClick={() => column.toggleSorting()}
-            >
-              {col}
-              {sort === 'asc' && <ArrowUp className="ml-2 !size-3" />}
-              {sort === 'desc' && <ArrowDown className="ml-2 !size-3" />}
-            </div>
-          );
-        }
-      })),
+      columnHelper.columns(
+        columns.map((col) =>
+          columnHelper.accessor(col, {
+            header: ({ column }) => {
+              const sort = column.getIsSorted();
+              return (
+                <div
+                  className="flex items-center cursor-pointer"
+                  onClick={() => column.toggleSorting()}
+                >
+                  {col}
+                  {sort === 'asc' && <ArrowUp className="ml-2 !size-3" />}
+                  {sort === 'desc' && <ArrowDown className="ml-2 !size-3" />}
+                </div>
+              );
+            }
+          })
+        )
+      ),
     [columns]
   );
 
-  const tableRows = useMemo(
+  const tableRows = useMemo<DataframeRow[]>(
     () =>
       rowData.map((row, idx) => {
-        const rowObj: Record<string, string | number> = { id: index[idx] };
+        const rowObj: DataframeRow = { id: index[idx] };
         columns.forEach((col, colIdx) => {
           rowObj[col] = row[colIdx];
         });
@@ -74,14 +89,12 @@ const _DataframeElement = ({ data }: { data: DataframeData }) => {
     [rowData, columns, index]
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features,
     data: tableRows,
     columns: tableColumns,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     initialState: {
-      pagination: { pageSize: 10 }
+      pagination: { pageIndex: 0, pageSize: 10 }
     }
   });
 
@@ -90,13 +103,13 @@ const _DataframeElement = ({ data }: { data: DataframeData }) => {
       <PaginationItem key={i}>
         <PaginationLink
           onClick={() => table.setPageIndex(i)}
-          isActive={table.getState().pagination.pageIndex === i}
+          isActive={table.state.pagination.pageIndex === i}
         >
           {i + 1}
         </PaginationLink>
       </PaginationItem>
     ));
-  }, [table.getPageCount(), table.getState().pagination.pageIndex]);
+  }, [table.getPageCount(), table.state.pagination.pageIndex]);
 
   return (
     <div className="flex flex-col gap-2 h-full overflow-y-auto dataframe">
@@ -122,7 +135,7 @@ const _DataframeElement = ({ data }: { data: DataframeData }) => {
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(
                         cell.column.columnDef.cell,

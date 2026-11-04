@@ -1,9 +1,9 @@
 import { makeApiClient } from 'api';
 import { useEffect, useState } from 'react';
-import { RecoilRoot } from 'recoil';
 import { IWidgetConfig } from 'types';
 
 import { i18nSetupLocalization } from '@chainlit/app/src/i18n';
+import { AppStateProvider } from '@chainlit/app/src/state/store';
 import { ChainlitContext } from '@chainlit/react-client';
 
 import App from './app';
@@ -15,9 +15,8 @@ interface Props {
 
 export default function AppWrapper({ widgetConfig }: Props) {
   const additionalQueryParams = widgetConfig?.additionalQueryParamsForAPI;
-  const apiClient = makeApiClient(
-    widgetConfig.chainlitServer,
-    additionalQueryParams || {}
+  const [apiClient] = useState(() =>
+    makeApiClient(widgetConfig.chainlitServer, additionalQueryParams || {})
   );
   const [customThemeLoaded, setCustomThemeLoaded] = useState(false);
 
@@ -70,9 +69,9 @@ export default function AppWrapper({ widgetConfig }: Props) {
 
   return (
     <ChainlitContext.Provider value={apiClient}>
-      <RecoilRoot>
+      <AppStateProvider>
         <App widgetConfig={widgetConfig} />
-      </RecoilRoot>
+      </AppStateProvider>
     </ChainlitContext.Provider>
   );
 }

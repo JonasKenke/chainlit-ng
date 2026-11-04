@@ -132,7 +132,128 @@
       "title": "Einstellungen",
       "customize": "Passe die Chat Einstellungen hier an"
     },
-    "watermark": "LLMs können Fehler machen. Überprüfe bitte stets die Inhalte."
+    "watermark": "LLMs können Fehler machen. Überprüfe bitte stets die Inhalte.",
+    "promptGallery": {
+      "button": "Prompt-Galerie",
+      "title": "Prompt-Galerie",
+      "save": "Prompt speichern",
+      "saving": "Wird gespeichert...",
+      "edit": "Prompt bearbeiten",
+      "share": {
+        "title": "Prompt teilen",
+        "adding": "Wird hinzugefügt…",
+        "goHome": "Zur Startseite",
+        "notFound": "Prompt nicht gefunden oder nicht mehr geteilt.",
+        "addError": "Prompt konnte nicht hinzugefügt werden"
+      },
+      "unshare": "Teilen aufheben",
+      "delete": "Löschen",
+      "copied": "Link kopiert!",
+      "addToGallery": "Zu meiner Galerie hinzufügen",
+      "added": "Prompt zu deiner Galerie hinzugefügt",
+      "empty": {
+        "title": "Keine gespeicherten Prompts",
+        "description": "Markiere eine Nachricht als Lesezeichen, um sie als Prompt zu speichern"
+      },
+      "dialog": {
+        "titlePlaceholder": "Prompt-Titel",
+        "contentLabel": "Prompt-Text",
+        "cancel": "Abbrechen",
+        "save": "Speichern"
+      },
+      "new": "Neuer Prompt",
+      "search": "Prompts suchen...",
+      "saved": "Prompt gespeichert!",
+      "unshared": "Teilen aufgehoben"
+    },
+    "promptScheduling": {
+      "button": "Geplante Prompts",
+      "title": "Geplante Prompts",
+      "create": "Geplanten Prompt erstellen",
+      "edit": "Geplanten Prompt bearbeiten",
+      "new": "Neuer Zeitplan",
+      "empty": "Noch keine geplanten Prompts",
+      "nextRun": "Nächste Ausführung",
+      "lastRun": "Letzte Ausführung",
+      "lastStatus": "Letzter Status",
+      "status": {
+        "active": "Aktiv",
+        "paused": "Pausiert",
+        "success": "Erfolgreich",
+        "failure": "Fehlgeschlagen",
+        "successWithWarnings": "Erfolgreich mit Warnungen"
+      },
+      "actions": {
+        "edit": "Zeitplan bearbeiten",
+        "pause": "Zeitplan pausieren",
+        "resume": "Zeitplan fortsetzen",
+        "delete": "Zeitplan löschen",
+        "runNow": "Jetzt ausführen",
+        "viewThread": "Letzte Ausführung anzeigen"
+      },
+      "form": {
+        "prompt": "Prompt",
+        "chooseGallery": "Aus der Prompt-Galerie auswählen",
+        "profile": "Modell",
+        "chatProfile": "Chat-Profil",
+        "defaultAssistant": "Standardassistent",
+        "timezone": "Zeitzone",
+        "recurrence": "Wiederholung",
+        "customFrequency": "Wiederholen",
+        "interval": "Alle",
+        "hours": "Stunden",
+        "time": "Uhrzeit",
+        "weekday": "Wochentag",
+        "dayOfMonth": "Tag des Monats",
+        "afterHooks": "Aktionen nach Abschluss",
+        "unavailable": "nicht verfügbar"
+      },
+      "presets": {
+        "daily": "Täglich um 09:00",
+        "weekdays": "Werktags um 09:00",
+        "weekly": "Montags wöchentlich",
+        "monthly": "Am ersten Tag des Monats",
+        "custom": "Benutzerdefiniert"
+      },
+      "custom": {
+        "everyHours": "Alle N Stunden",
+        "daily": "Täglich",
+        "weekly": "Wöchentlich",
+        "monthly": "Monatlich"
+      },
+      "weekdays": {
+        "monday": "Montag",
+        "tuesday": "Dienstag",
+        "wednesday": "Mittwoch",
+        "thursday": "Donnerstag",
+        "friday": "Freitag",
+        "saturday": "Samstag",
+        "sunday": "Sonntag"
+      },
+      "overview": {
+        "dailyAt": "Täglich um {time}",
+        "weekdaysAt": "Werktags um {time}",
+        "weeklyAt": "Jeden {weekday} um {time}",
+        "monthlyAt": "Monatlich am {day}. um {time}",
+        "everyHours": "Alle {interval} Stunden",
+        "everyMinutes": "Alle {interval} Minuten",
+        "custom": "Benutzerdefinierter Zeitplan"
+      },
+      "galleryTitle": "Prompt aus der Galerie auswählen",
+      "galleryEmpty": "Keine Galerie-Prompts verfügbar",
+      "delete": {
+        "title": "Geplanten Prompt löschen?",
+        "description": "Dieser Zeitplan und seine ausstehende Ausführung werden gelöscht."
+      },
+      "errors": {
+        "load": "Geplante Prompts konnten nicht geladen werden",
+        "required": "Prompt und Cron-Ausdruck sind erforderlich",
+        "save": "Geplanter Prompt konnte nicht gespeichert werden",
+        "update": "Geplanter Prompt konnte nicht aktualisiert werden",
+        "delete": "Geplanter Prompt konnte nicht gelöscht werden",
+        "run": "Geplanter Prompt konnte nicht eingereiht werden"
+      }
+    }
   },
   "threadHistory": {
     "sidebar": {
@@ -162,7 +283,7 @@
       },
       "actions": {
         "share": {
-          "title": "Thread löschen bestätigen",
+          "title": "Thread teilen bestätigen",
           "button": "Teilen",
           "status": {
             "copied": "Link kopiert",

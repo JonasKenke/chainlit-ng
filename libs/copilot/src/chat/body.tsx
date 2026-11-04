@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -13,7 +12,8 @@ import ScrollContainer from '@chainlit/app/src/components/chat/ScrollContainer';
 import Translator from '@chainlit/app/src/components/i18n/Translator';
 import { useLayoutMaxWidth } from '@chainlit/app/src/hooks/useLayoutMaxWidth';
 import { useUpload } from '@chainlit/app/src/hooks/useUpload';
-import { IAttachment, attachmentsState } from '@chainlit/app/src/state/chat';
+import { IAttachment } from '@chainlit/app/src/state/chat';
+import { useAppStore } from '@chainlit/app/src/state/store';
 import {
   useChatData,
   useChatInteract,
@@ -26,7 +26,7 @@ import ElementSideView from 'components/ElementSideView';
 const Chat = () => {
   const { config } = useConfig();
   const layoutMaxWidth = useLayoutMaxWidth();
-  const setAttachments = useSetRecoilState(attachmentsState);
+  const setAttachments = useAppStore((state) => state.setAttachments);
   const autoScrollRef = useRef(true);
   const { error, disabled, callFn } = useChatData();
   const { uploadFile } = useChatInteract();

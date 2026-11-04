@@ -13,12 +13,37 @@ from chainlit.mcp import McpConnection
 from chainlit.message import Message
 from chainlit.oauth_providers import get_configured_oauth_providers
 from chainlit.step import Step, step
-from chainlit.types import ChatProfile, Starter, StarterCategory, ThreadDict
+from chainlit.types import (
+    ChatProfile,
+    ScheduledTaskResult,
+    Starter,
+    StarterCategory,
+    ThreadDict,
+)
 from chainlit.user import User
 from chainlit.utils import wrap_user_function
 
 
-def on_app_startup(func: Callable[[], Union[None, Awaitable[None]]]) -> Callable:
+def after_scheduled_task(name: str, default: bool = True):
+    """Register a named hook executed after a scheduled prompt run."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("scheduled task hook name must not be empty")
+    key = name.strip()
+
+    def register(func: Callable[[ScheduledTaskResult], Any]) -> Callable:
+        if key in config.code.scheduled_task_after_hooks:
+            raise ValueError(f"scheduled task hook already registered: {key}")
+        config.code.scheduled_task_after_hooks[key] = {
+            "name": key,
+            "default": bool(default),
+            "callback": wrap_user_function(func, with_task=False),
+        }
+        return func
+
+    return register
+
+
+def on_app_startup(func: Callable[[], Union[Awaitable[None], None]]) -> Callable:
     """
     Hook to run code when the Chainlit application starts.
     Useful for initializing resources, loading models, setting up database connections, etc.
@@ -40,7 +65,7 @@ def on_app_startup(func: Callable[[], Union[None, Awaitable[None]]]) -> Callable
     return func
 
 
-def on_app_shutdown(func: Callable[[], Union[None, Awaitable[None]]]) -> Callable:
+def on_app_shutdown(func: Callable[[], Union[Awaitable[None], None]]) -> Callable:
     """
     Hook to run code when the Chainlit application shuts down.
     Useful for cleaning up resources, closing connections, saving state, etc.
@@ -247,6 +272,14 @@ def set_chat_profiles(func):
     """
 
     config.code.set_chat_profiles = wrap_user_function(func)
+    return func
+
+
+def set_scheduled_task_models(
+    func: Callable[[Optional["User"], Optional["str"]], Awaitable[List[str]]],
+) -> Callable:
+    """Declare model names available in the scheduled-prompt form."""
+    config.code.set_scheduled_task_models = wrap_user_function(func)
     return func
 
 
@@ -458,6 +491,15 @@ def on_settings_update(
     """
 
     config.code.on_settings_update = wrap_user_function(func, with_task=True)
+    return func
+
+
+def on_mode_update(
+    func: Callable[[Dict[str, str]], Any],
+) -> Callable[[Dict[str, str]], Any]:
+    """Hook called after a user changes one or more mode selections."""
+
+    config.code.on_mode_update = wrap_user_function(func, with_task=True)
     return func
 
 

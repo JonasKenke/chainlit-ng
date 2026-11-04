@@ -68,13 +68,13 @@ Pre-resolved library IDs for [Context7 MCP](https://context7.com). Use these whe
 
 ## Frontend — state & data
 
-| Library/Framework | Context7 Library ID               | Notes                       |
-| ----------------- | --------------------------------- | --------------------------- |
-| Zustand           | /websites/zustand_pmnd_rs         | For future Recoil migration |
-| SWR               | /vercel/swr-site                  | Data fetching hooks         |
-| react-hook-form   | /websites/react-hook-form         | Form state management       |
-| Zod               | /llmstxt/zod_dev_llms_txt         | Schema validation           |
-| socket.io-client  | /websites/socket_io_v4_client-api | WebSocket client            |
+| Library/Framework | Context7 Library ID               | Notes                 |
+| ----------------- | --------------------------------- | --------------------- |
+| Zustand           | /websites/zustand_pmnd_rs         | State management      |
+| SWR               | /vercel/swr-site                  | Data fetching hooks   |
+| react-hook-form   | /websites/react-hook-form         | Form state management |
+| Zod               | /llmstxt/zod_dev_llms_txt         | Schema validation     |
+| socket.io-client  | /websites/socket_io_v4_client-api | WebSocket client      |
 
 ## Frontend — rendering
 

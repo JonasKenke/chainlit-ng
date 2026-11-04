@@ -40,7 +40,7 @@ const Header = ({
   displayMode,
   setDisplayMode,
   setIsOpen
-}: Props): JSX.Element => {
+}: Props): import('react').JSX.Element => {
   const { config } = projectConfig;
   const { audioConnection } = useAudio();
   const { startNewChat } = useCopilotInteract();

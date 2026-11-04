@@ -61,6 +61,8 @@ def wrap_user_function(user_function: Callable, with_task=False) -> Callable:
             pass
         except Exception as e:
             logger.exception(e)
+            if getattr(context.session, "raise_callback_errors", False):
+                raise
             if with_task:
                 from chainlit.message import ErrorMessage
 

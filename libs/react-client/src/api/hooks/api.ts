@@ -31,7 +31,7 @@ const cloneClient = (client: ChainlitAPI): ChainlitAPI => {
  * - Automatic data caching and revalidation
  * - Integration with React component lifecycle
  * - Loading state management
- * - Recoil state integration for global state
+ * - Updates shared Zustand state where API responses affect the chat session
  * - Memoized fetcher function to prevent unnecessary rerenders
  *
  * @param path - API endpoint path or null to disable the request

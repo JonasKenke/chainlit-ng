@@ -24,7 +24,7 @@ const TextInput = ({
   className,
   setField,
   ...rest
-}: TextInputProps): JSX.Element => {
+}: TextInputProps): import('react').JSX.Element => {
   const InputComponent = multiline ? Textarea : Input;
 
   return (

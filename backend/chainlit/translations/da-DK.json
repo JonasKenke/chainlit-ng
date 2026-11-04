@@ -131,7 +131,40 @@
       "title": "Indstillingspanel",
       "customize": "Tilpas dine chatindstillinger her"
     },
-    "watermark": "Bygget med"
+    "watermark": "Bygget med",
+    "promptGallery": {
+      "button": "Promptgalleri",
+      "title": "Promptgalleri",
+      "save": "Gem prompt",
+      "saving": "Gemmer...",
+      "edit": "Rediger prompt",
+      "share": {
+        "title": "Del prompt",
+        "adding": "Tilføjer…",
+        "goHome": "Gå til forsiden",
+        "notFound": "Prompt blev ikke fundet eller er ikke længere delt.",
+        "addError": "Kunne ikke tilføje prompt"
+      },
+      "unshare": "Fjern deling",
+      "delete": "Slet",
+      "copied": "Link kopieret!",
+      "addToGallery": "Tilføj til mit galleri",
+      "added": "Prompt tilføjet til dit galleri",
+      "empty": {
+        "title": "Ingen gemte prompts",
+        "description": "Bogmærk en besked for at gemme den som en prompt"
+      },
+      "dialog": {
+        "titlePlaceholder": "Prompttitel",
+        "contentLabel": "Prompttekst",
+        "cancel": "Annuller",
+        "save": "Gem"
+      },
+      "new": "Ny prompt",
+      "search": "Søg i prompts...",
+      "saved": "Prompt gemt!",
+      "unshared": "Deling fjernet"
+    }
   },
   "threadHistory": {
     "sidebar": {

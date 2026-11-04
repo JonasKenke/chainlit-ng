@@ -77,6 +77,8 @@ def init_http_context(
     auth_token: Optional[str] = None,
     user_env: Optional[Dict[str, str]] = None,
     client_type: ClientType = "webapp",
+    chat_profile: Optional[str] = None,
+    persist_thread: bool = True,
 ) -> ChainlitContext:
     from chainlit.data import get_data_layer
 
@@ -90,10 +92,11 @@ def init_http_context(
         client_type=client_type,
         user_env=user_env,
     )
+    session.chat_profile = chat_profile
     context = ChainlitContext(session)
     context_var.set(context)
 
-    if data_layer := get_data_layer():
+    if persist_thread and (data_layer := get_data_layer()):
         if user_id := getattr(user, "id", None):
             asyncio.create_task(
                 data_layer.update_thread(thread_id=thread_id, user_id=user_id)

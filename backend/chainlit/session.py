@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from mcp import ClientSession
 
     from chainlit.config import ChainlitConfig
+    from chainlit.mode import Mode
     from chainlit.types import FileDict
     from chainlit.user import PersistedUser, User
 
@@ -104,6 +105,8 @@ class BaseSession:
 
     thread_id_to_resume: Optional[str] = None
     client_type: ClientType
+    config: Optional["ChainlitConfig"]
+    raise_callback_errors: bool
     current_task: Optional[asyncio.Task] = None
     chat_started: bool = False
 
@@ -136,6 +139,8 @@ class BaseSession:
         self.user_env = user_env or {}
         self.environ = environ or {}
         self.chat_profile = chat_profile
+        self.config = None
+        self.raise_callback_errors = False
 
         self.files: Dict[str, FileDict] = {}
         self.files_spec: Dict[str, AskFileSpec] = {}
@@ -143,6 +148,8 @@ class BaseSession:
         self.id = id
 
         self.chat_settings: Dict[str, Any] = {}
+        self.modes: list[Mode] = []
+        self.mode_values: Dict[str, str] = {}
 
     @property
     def files_dir(self):

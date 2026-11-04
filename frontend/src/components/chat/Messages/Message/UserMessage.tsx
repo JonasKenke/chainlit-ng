@@ -2,17 +2,17 @@ import { cn } from '@/lib/utils';
 import { MessageContext } from 'contexts/MessageContext';
 import { Star } from 'lucide-react';
 import { memo, useContext, useMemo, useState } from 'react';
-import { useSetRecoilState } from 'recoil';
 
 import {
   IMessageElement,
   IStep,
-  messagesState,
   useChatInteract,
-  useConfig
+  useConfig,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import AutoResizeTextarea from '@/components/AutoResizeTextarea';
+import { BookmarkButton } from '@/components/chat/Messages/Message/Buttons/BookmarkButton';
 import { Pencil } from '@/components/icons/Pencil';
 import { Button } from '@/components/ui/button';
 import { Translator } from 'components/i18n';
@@ -32,7 +32,7 @@ const UserMessage = memo(function UserMessage({
   const { askUser, loading, editable } = useContext(MessageContext);
   const { editMessage, toggleMessageFavorite } = useChatInteract();
   const { config } = useConfig();
-  const setMessages = useSetRecoilState(messagesState);
+  const setMessages = useSetChainlitState('messages');
   const disabled = loading || !!askUser;
   const isFavorite = message.metadata?.favorite === true;
   const [isEditing, setIsEditing] = useState(false);
@@ -66,41 +66,50 @@ const UserMessage = memo(function UserMessage({
       <InlinedElements elements={inlineElements} className="items-end" />
 
       <div className="flex flex-row items-center gap-1 w-full group">
-        {!isEditing && editable && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="edit-message ml-auto invisible group-hover:visible"
-            onClick={() => {
-              setEditValue(message.output);
-              setIsEditing(true);
-            }}
-            disabled={disabled}
-          >
-            <Pencil />
-          </Button>
-        )}
-        {!isEditing && favoritesEnabled && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              'favorite-message invisible group-hover:visible',
-              isFavorite ? 'visible text-yellow-500' : 'text-muted-foreground',
-              !editable && 'ml-auto'
+        {!isEditing && (
+          <div className="ml-auto flex items-center gap-1">
+            {editable && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="edit-message invisible group-hover:visible"
+                onClick={() => {
+                  setEditValue(message.output);
+                  setIsEditing(true);
+                }}
+                disabled={disabled}
+              >
+                <Pencil />
+              </Button>
             )}
-            onClick={() => toggleMessageFavorite(message)}
-            disabled={disabled}
-          >
-            <Star className={cn('h-4 w-4', isFavorite ? 'fill-current' : '')} />
-          </Button>
+            {favoritesEnabled && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'favorite-message invisible group-hover:visible',
+                  isFavorite
+                    ? 'visible text-yellow-500'
+                    : 'text-muted-foreground'
+                )}
+                onClick={() => toggleMessageFavorite(message)}
+                disabled={disabled}
+              >
+                <Star
+                  className={cn('h-4 w-4', isFavorite ? 'fill-current' : '')}
+                />
+              </Button>
+            )}
+            <div className="invisible group-hover:visible">
+              <BookmarkButton message={message} />
+            </div>
+          </div>
         )}
         <div
           className={cn(
             'px-5 py-2.5 relative bg-accent rounded-3xl',
             inlineElements.length ? 'rounded-tr-lg' : '',
-            isEditing ? 'w-full flex-grow' : 'max-w-[70%] flex-grow-0',
-            editable ? '' : 'ml-auto'
+            isEditing ? 'w-full flex-grow' : 'max-w-[70%] flex-grow-0'
           )}
         >
           {isEditing ? (

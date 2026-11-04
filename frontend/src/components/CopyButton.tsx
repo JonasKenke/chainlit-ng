@@ -14,7 +14,7 @@ import {
 interface Props {
   content: unknown;
   className?: string;
-  contentRef?: React.RefObject<HTMLDivElement>;
+  contentRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 const CopyButton = ({ content, className, contentRef }: Props) => {

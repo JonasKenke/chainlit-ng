@@ -678,9 +678,6 @@ class DynamoDBDataLayer(BaseDataLayer):
         favorite_steps.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
         return cast(List["StepDict"], favorite_steps)
 
-    async def build_debug_url(self) -> str:
-        return ""
-
     async def close(self) -> None:
         if self.storage_provider:
             await self.storage_provider.close()

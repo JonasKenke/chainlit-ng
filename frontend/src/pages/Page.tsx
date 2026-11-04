@@ -1,7 +1,6 @@
 import { Navigate } from 'react-router-dom';
-import { useRecoilValue } from 'recoil';
 
-import { sideViewState, useAuth, useConfig } from '@chainlit/react-client';
+import { useAuth, useChainlitStore, useConfig } from '@chainlit/react-client';
 
 import ChatSettingsSidebar from '@/components/ChatSettings/ChatSettingsSidebar';
 import ElementSideView from '@/components/ElementSideView';
@@ -11,17 +10,17 @@ import { Header } from '@/components/header';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 
-import { userEnvState } from 'state/user';
+import { useAppStore } from '@/state/store';
 
 type Props = {
-  children: JSX.Element;
+  children: import('react').JSX.Element;
 };
 
 const Page = ({ children }: Props) => {
   const { config } = useConfig();
   const { data } = useAuth();
-  const userEnv = useRecoilValue(userEnvState);
-  const sideView = useRecoilValue(sideViewState);
+  const userEnv = useAppStore((state) => state.userEnv);
+  const sideView = useChainlitStore((state) => state.sideView);
 
   if (config?.userEnv) {
     for (const key of config.userEnv || []) {
@@ -34,14 +33,11 @@ const Page = ({ children }: Props) => {
   const mainContent = (
     <div className="flex flex-col h-full w-full">
       <Header />
-      <ResizablePanelGroup
-        direction="horizontal"
-        className="flex flex-row flex-grow"
-      >
+      <ResizablePanelGroup orientation="horizontal" className="flex-grow">
         <ResizablePanel
           className="flex flex-col h-full w-full"
-          minSize={40}
-          defaultSize={60}
+          minSize="40%"
+          defaultSize="60%"
         >
           <div className="flex flex-row flex-grow overflow-auto">
             {children}

@@ -22,7 +22,7 @@ const InputLabel = ({
   label,
   tooltip,
   notificationsProps
-}: InputLabelProps): JSX.Element => {
+}: InputLabelProps): import('react').JSX.Element => {
   return (
     <div className="flex justify-between w-full">
       <div className="flex items-center gap-2">

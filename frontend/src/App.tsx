@@ -1,7 +1,7 @@
+import getRouterBasename from '@/lib/router';
 import { cn } from '@/lib/utils';
 import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
-import { useRecoilValue } from 'recoil';
 import { router } from 'router';
 
 import { useAuth, useChatSession, useConfig } from '@chainlit/react-client';
@@ -11,7 +11,7 @@ import { ThemeProvider } from './components/ThemeProvider';
 import { Loader } from '@/components/Loader';
 import { Toaster } from '@/components/ui/sonner';
 
-import { userEnvState } from 'state/user';
+import { useAppStore } from '@/state/store';
 
 declare global {
   interface Window {
@@ -26,9 +26,14 @@ declare global {
 
 function App() {
   const { config } = useConfig();
+  const routerBasename = getRouterBasename().replace(/\/$/, '');
+  // Shared prompts are public, so their standalone page must not wait for login.
+  const isPublicPromptShare = window.location.pathname.startsWith(
+    `${routerBasename}/prompt/`
+  );
 
   const { isAuthenticated, data, isReady } = useAuth();
-  const userEnv = useRecoilValue(userEnvState);
+  const userEnv = useAppStore((state) => state.userEnv);
   const { connect, chatProfile, setChatProfile } = useChatSession();
 
   const configLoaded = !!config;
@@ -71,7 +76,7 @@ function App() {
     }
   }, [configLoaded, config, chatProfile, setChatProfile]);
 
-  if (!configLoaded && isAuthenticated) return null;
+  if (!configLoaded && isAuthenticated && !isPublicPromptShare) return null;
 
   return (
     <ThemeProvider
@@ -86,7 +91,7 @@ function App() {
       <div
         className={cn(
           'bg-[hsl(var(--background))] flex items-center justify-center fixed size-full p-2 top-0',
-          isReady && 'hidden'
+          (isReady || isPublicPromptShare) && 'hidden'
         )}
       >
         <Loader className="!size-6" />

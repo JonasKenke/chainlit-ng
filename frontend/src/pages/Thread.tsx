@@ -1,13 +1,12 @@
 import { useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { useSetRecoilState } from 'recoil';
 
 import Page from 'pages/Page';
 
 import {
-  threadHistoryState,
   useChatMessages,
-  useConfig
+  useConfig,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import AutoResumeThread from '@/components/AutoResumeThread';
@@ -20,8 +19,7 @@ export default function ThreadPage() {
   const location = useLocation();
   const { config } = useConfig();
 
-  const setThreadHistory = useSetRecoilState(threadHistoryState);
-
+  const setThreadHistory = useSetChainlitState('threadHistory');
   const { threadId } = useChatMessages();
 
   const isCurrentThread = threadId === id;
@@ -39,7 +37,7 @@ export default function ThreadPage() {
     <Page>
       <>
         {isSharedRoute ? <ReadOnlyThread id={id!} /> : null}
-        {config?.threadResumable && !isCurrentThread && !isSharedRoute ? (
+        {config?.threadResumable && !isSharedRoute ? (
           <AutoResumeThread id={id!} />
         ) : null}
         {config?.threadResumable && !isSharedRoute ? (

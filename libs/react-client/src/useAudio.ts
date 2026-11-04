@@ -1,20 +1,14 @@
 import { useCallback } from 'react';
-import { useRecoilState, useRecoilValue } from 'recoil';
 
-import {
-  audioConnectionState,
-  isAiSpeakingState,
-  wavRecorderState,
-  wavStreamPlayerState
-} from './state';
+import { useChainlitState, useChainlitStore } from './state';
 import { useChatInteract } from './useChatInteract';
 
 const useAudio = () => {
   const [audioConnection, setAudioConnection] =
-    useRecoilState(audioConnectionState);
-  const wavRecorder = useRecoilValue(wavRecorderState);
-  const wavStreamPlayer = useRecoilValue(wavStreamPlayerState);
-  const isAiSpeaking = useRecoilValue(isAiSpeakingState);
+    useChainlitState('audioConnection');
+  const wavRecorder = useChainlitStore((state) => state.wavRecorder);
+  const wavStreamPlayer = useChainlitStore((state) => state.wavStreamPlayer);
+  const isAiSpeaking = useChainlitStore((state) => state.isAiSpeaking);
 
   const { startAudioStream, endAudioStream } = useChatInteract();
 

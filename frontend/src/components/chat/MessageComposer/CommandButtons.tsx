@@ -1,9 +1,8 @@
 import { cn } from '@/lib/utils';
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useRecoilValue } from 'recoil';
 
-import { ICommand, commandsState } from '@chainlit/react-client';
+import { ICommand, useChainlitStore } from '@chainlit/react-client';
 
 import Icon from '@/components/Icon';
 import { Button } from '@/components/ui/button';
@@ -120,7 +119,7 @@ export const CommandButtons = ({
   selectedCommandId,
   onCommandSelect
 }: Props) => {
-  const commands = useRecoilValue(commandsState);
+  const commands = useChainlitStore((state) => state.commands);
   const commandButtons = commands.filter((c) => !!c.button);
 
   // Find the selected command if it's not a button command

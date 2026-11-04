@@ -87,7 +87,7 @@ async def test_on_llm_new_token(mock_chainlit_context):
 
         chunk = GenerationChunk(text="Hello")
         await tracer.on_llm_new_token(
-            token="Hello",
+            token=["Hello"],
             chunk=chunk,
             run_id=run_id,
         )

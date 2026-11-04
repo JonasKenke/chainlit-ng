@@ -1,11 +1,10 @@
 import { MessageContext } from '@/contexts/MessageContext';
 import { MessageCircle, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { useCallback, useContext, useState } from 'react';
-import { useRecoilValue } from 'recoil';
 
 import {
   IStep,
-  firstUserInteraction,
+  useChainlitStore,
   useChatSession
 } from '@chainlit/react-client';
 
@@ -44,7 +43,9 @@ export function FeedbackButtons({ message }: FeedbackButtonsProps) {
   );
   const [showDialog, setShowDialog] = useState<number>();
   const [commentInput, setCommentInput] = useState<string>();
-  const firstInteraction = useRecoilValue(firstUserInteraction);
+  const firstInteraction = useChainlitStore(
+    (state) => state.firstUserInteraction
+  );
   const { idToResume } = useChatSession();
 
   if (!showFeedbackButtons) {

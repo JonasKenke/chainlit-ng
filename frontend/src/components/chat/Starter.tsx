@@ -1,20 +1,19 @@
 import { useCallback, useContext } from 'react';
-import { useRecoilValue } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
   ChainlitContext,
   IStarter,
   IStep,
-  modesState,
   useAuth,
+  useChainlitStore,
   useChatData,
   useChatInteract
 } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
 
-import { persistentCommandState } from '@/state/chat';
+import { useAppStore } from '@/state/store';
 
 interface StarterProps {
   starter: IStarter;
@@ -22,8 +21,8 @@ interface StarterProps {
 
 export default function Starter({ starter }: StarterProps) {
   const apiClient = useContext(ChainlitContext);
-  const selectedCommand = useRecoilValue(persistentCommandState);
-  const modes = useRecoilValue(modesState);
+  const selectedCommand = useAppStore((state) => state.persistentCommand);
+  const modes = useChainlitStore((state) => state.modes);
   const { sendMessage } = useChatInteract();
   const { loading, connected } = useChatData();
   const { user } = useAuth();

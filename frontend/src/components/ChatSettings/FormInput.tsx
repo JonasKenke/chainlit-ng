@@ -32,7 +32,11 @@ type TFormInput =
   | (DatePickerInputProps &
       IFormInput<'datepicker', string | [string, string]>);
 
-const FormInput = ({ element }: { element: TFormInput }): JSX.Element => {
+const FormInput = ({
+  element
+}: {
+  element: TFormInput;
+}): import('react').JSX.Element => {
   switch (element?.type) {
     case 'select':
       return <SelectInput {...element} value={element.value ?? ''} />;

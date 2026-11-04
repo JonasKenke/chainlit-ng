@@ -2,7 +2,6 @@ import { MessageContext } from '@/contexts/MessageContext';
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 
 import {
@@ -13,10 +12,10 @@ import {
   IStep,
   IThread,
   nestMessages,
-  sessionIdState,
-  sideViewState,
   useApi,
-  useConfig
+  useChainlitStore,
+  useConfig,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
@@ -48,12 +47,12 @@ const ReadOnlyThread = ({ id }: Props) => {
     }
   );
   const navigate = useNavigate();
-  const setSideView = useSetRecoilState(sideViewState);
+  const setSideView = useSetChainlitState('sideView');
   const [steps, setSteps] = useState<IStep[]>([]);
   const apiClient = useContext(ChainlitContext);
   const { t } = useTranslation();
   const layoutMaxWidth = useLayoutMaxWidth();
-  const sessionId = useRecoilValue(sessionIdState);
+  const sessionId = useChainlitStore((state) => state.sessionId);
 
   useEffect(() => {
     if (!thread) {

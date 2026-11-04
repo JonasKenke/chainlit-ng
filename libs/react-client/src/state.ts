@@ -1,11 +1,14 @@
-import { isEqual } from 'lodash';
-import { AtomEffect, DefaultValue, atom, selector } from 'recoil';
-import { Socket } from 'socket.io-client';
+import { useCallback, useContext } from 'react';
+import type { Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
+import { useStore } from 'zustand';
+import { type StoreApi, createStore } from 'zustand/vanilla';
 
 import { ICommand } from './types/command';
 import { IMode } from './types/mode';
 
+import type { ChainlitAPI } from './api';
+import { ChainlitContext } from './context';
 import {
   IAction,
   IAsk,
@@ -14,6 +17,8 @@ import {
   IChainlitConfig,
   IMcp,
   IMessageElement,
+  IPrompt,
+  IScheduledTask,
   IStep,
   ITasklistElement,
   IUser,
@@ -27,252 +32,206 @@ export interface ISession {
   error?: boolean;
 }
 
-export const threadIdToResumeState = atom<string | undefined>({
-  key: 'ThreadIdToResume',
-  default: undefined
-});
+export interface ChainlitState {
+  threadIdToResume: string | undefined;
+  resumeThreadError: string | undefined;
+  chatProfile: string | undefined;
+  sessionId: string;
+  session: ISession | undefined;
+  actions: IAction[];
+  messages: IStep[];
+  commands: ICommand[];
+  modes: IMode[];
+  tokenCount: number;
+  loading: boolean;
+  askUser: IAsk | undefined;
+  wavRecorder: WavRecorder;
+  wavStreamPlayer: WavStreamPlayer;
+  audioConnection: 'connecting' | 'on' | 'off';
+  isAiSpeaking: boolean;
+  callFn: ICallFn | undefined;
+  chatSettingsInputs: any[];
+  chatSettingsDefaultValue: Record<string, any>;
+  chatSettingsValue: Record<string, any>;
+  elements: IMessageElement[];
+  tasklists: ITasklistElement[];
+  firstUserInteraction: string | undefined;
+  user: IUser | undefined | null;
+  config: IChainlitConfig | undefined;
+  auth: IAuthConfig | undefined;
+  threadHistory: ThreadHistory | undefined;
+  sideView:
+    { title: string; elements: IMessageElement[]; key?: string } | undefined;
+  currentThreadId: string | undefined;
+  mcps: IMcp[];
+  favoriteMessages: IStep[];
+  prompts: IPrompt[];
+  scheduledTasks: IScheduledTask[];
+}
 
-export const resumeThreadErrorState = atom<string | undefined>({
-  key: 'ResumeThreadErrorState',
-  default: undefined
-});
+export type ChainlitStateKey = keyof ChainlitState;
+type StateUpdate<T> = T | ((previous: T) => T);
+type ChainlitStore = StoreApi<ChainlitState>;
 
-export const chatProfileState = atom<string | undefined>({
-  key: 'ChatProfile',
-  default: undefined
-});
+const stores = new WeakMap<ChainlitAPI, ChainlitStore>();
+const initialStates = new WeakMap<ChainlitStore, ChainlitState>();
+const MCP_STORAGE_KEY = 'mcp_storage_key';
 
-const sessionIdAtom = atom<string>({
-  key: 'SessionId',
-  default: uuidv4()
-});
-
-export const sessionIdState = selector({
-  key: 'SessionIdSelector',
-  get: ({ get }) => get(sessionIdAtom),
-  set: ({ set }, newValue) =>
-    set(sessionIdAtom, newValue instanceof DefaultValue ? uuidv4() : newValue)
-});
-
-export const sessionState = atom<ISession | undefined>({
-  key: 'Session',
-  dangerouslyAllowMutability: true,
-  default: undefined
-});
-
-export const actionState = atom<IAction[]>({
-  key: 'Actions',
-  default: []
-});
-
-export const messagesState = atom<IStep[]>({
-  key: 'Messages',
-  dangerouslyAllowMutability: true,
-  default: []
-});
-
-export const commandsState = atom<ICommand[]>({
-  key: 'Commands',
-  default: []
-});
-
-export const modesState = atom<IMode[]>({
-  key: 'Modes',
-  default: []
-});
-
-export const tokenCountState = atom<number>({
-  key: 'TokenCount',
-  default: 0
-});
-
-export const loadingState = atom<boolean>({
-  key: 'Loading',
-  default: false
-});
-
-export const askUserState = atom<IAsk | undefined>({
-  key: 'AskUser',
-  default: undefined
-});
-
-export const wavRecorderState = atom({
-  key: 'WavRecorder',
-  dangerouslyAllowMutability: true,
-  default: new WavRecorder()
-});
-
-export const wavStreamPlayerState = atom({
-  key: 'WavStreamPlayer',
-  dangerouslyAllowMutability: true,
-  default: new WavStreamPlayer()
-});
-
-export const audioConnectionState = atom<'connecting' | 'on' | 'off'>({
-  key: 'AudioConnection',
-  default: 'off'
-});
-
-export const isAiSpeakingState = atom({
-  key: 'isAiSpeaking',
-  default: false
-});
-
-export const callFnState = atom<ICallFn | undefined>({
-  key: 'CallFn',
-  default: undefined
-});
-
-export const chatSettingsInputsState = atom<any>({
-  key: 'ChatSettings',
-  default: []
-});
-
-export const chatSettingsDefaultValueSelector = selector({
-  key: 'ChatSettingsValue/Default',
-  get: ({ get }) => {
-    const chatSettings = get(chatSettingsInputsState);
-
-    const collectInitialValues = (
-      inputs: any[],
-      acc: Record<string, any>
-    ): Record<string, any> => {
-      if (!Array.isArray(inputs)) {
-        return acc;
-      }
-
-      inputs.forEach((input) => {
-        if (!input) {
-          return;
-        }
-        if (Array.isArray(input?.inputs) && input.inputs.length > 0) {
-          // Handle tabs
-          collectInitialValues(input.inputs, acc);
-        } else if (input?.id !== undefined) {
-          acc[input.id] = input.initial;
-        }
-      });
-
-      return acc;
-    };
-
-    return collectInitialValues(chatSettings, {});
+function readStoredMcps(): IMcp[] {
+  try {
+    const stored = localStorage.getItem(MCP_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
   }
-});
+}
 
-export const chatSettingsValueState = atom<Record<string, any>>({
-  key: 'ChatSettingsValue',
-  default: chatSettingsDefaultValueSelector
-});
-
-export const elementState = atom<IMessageElement[]>({
-  key: 'DisplayElements',
-  default: []
-});
-
-export const tasklistState = atom<ITasklistElement[]>({
-  key: 'TasklistElements',
-  default: []
-});
-
-export const firstUserInteraction = atom<string | undefined>({
-  key: 'FirstUserInteraction',
-  default: undefined
-});
-
-export const userState = atom<IUser | undefined | null>({
-  key: 'User',
-  default: undefined
-});
-
-export const configState = atom<IChainlitConfig | undefined>({
-  key: 'ChainlitConfig',
-  default: undefined
-});
-
-export const authState = atom<IAuthConfig | undefined>({
-  key: 'AuthConfig',
-  default: undefined
-});
-
-export const threadHistoryState = atom<ThreadHistory | undefined>({
-  key: 'ThreadHistory',
-  default: {
-    threads: undefined,
+function initialState(): ChainlitState {
+  return {
+    threadIdToResume: undefined,
+    resumeThreadError: undefined,
+    chatProfile: undefined,
+    sessionId: uuidv4(),
+    session: undefined,
+    actions: [],
+    messages: [],
+    commands: [],
+    modes: [],
+    tokenCount: 0,
+    loading: false,
+    askUser: undefined,
+    wavRecorder: new WavRecorder(),
+    wavStreamPlayer: new WavStreamPlayer(),
+    audioConnection: 'off',
+    isAiSpeaking: false,
+    callFn: undefined,
+    chatSettingsInputs: [],
+    chatSettingsDefaultValue: {},
+    chatSettingsValue: {},
+    elements: [],
+    tasklists: [],
+    firstUserInteraction: undefined,
+    user: undefined,
+    config: undefined,
+    auth: undefined,
+    threadHistory: {
+      threads: undefined,
+      currentThreadId: undefined,
+      timeGroupedThreads: undefined,
+      pageInfo: undefined
+    },
+    sideView: undefined,
     currentThreadId: undefined,
-    timeGroupedThreads: undefined,
-    pageInfo: undefined
-  },
-  effects: [
-    ({ setSelf, onSet }: { setSelf: any; onSet: any }) => {
-      onSet(
-        (
-          newValue: ThreadHistory | undefined,
-          oldValue: ThreadHistory | undefined
-        ) => {
-          let timeGroupedThreads = newValue?.timeGroupedThreads;
-          if (
-            newValue?.threads &&
-            !isEqual(newValue.threads, oldValue?.timeGroupedThreads)
-          ) {
-            timeGroupedThreads = groupByDate(newValue.threads);
-          }
+    mcps: readStoredMcps(),
+    favoriteMessages: [],
+    prompts: [],
+    scheduledTasks: []
+  };
+}
 
-          setSelf({
-            ...newValue,
-            timeGroupedThreads
-          });
-        }
-      );
+export function getChainlitStore(client: ChainlitAPI): ChainlitStore {
+  let store = stores.get(client);
+  if (!store) {
+    const state = initialState();
+    store = createStore<ChainlitState>()(() => state);
+    stores.set(client, store);
+    initialStates.set(store, state);
+  }
+  return store;
+}
+
+export function useChainlitStore<T>(selector: (state: ChainlitState) => T): T {
+  const client = useContext(ChainlitContext);
+  return useStore(getChainlitStore(client), selector);
+}
+
+function writeValue<K extends ChainlitStateKey>(
+  store: ChainlitStore,
+  key: K,
+  update: StateUpdate<ChainlitState[K]>
+) {
+  const previous = store.getState()[key];
+  const value =
+    typeof update === 'function'
+      ? (update as (previous: ChainlitState[K]) => ChainlitState[K])(previous)
+      : update;
+  const nextState: Partial<ChainlitState> = { [key]: value };
+
+  if (key === 'chatSettingsInputs') {
+    nextState.chatSettingsDefaultValue = getChatSettingsDefaultValue(
+      value as any[]
+    );
+  } else if (key === 'threadHistory' && value) {
+    nextState.threadHistory = withGroupedThreads(value as ThreadHistory);
+  } else if (key === 'mcps') {
+    localStorage.setItem(MCP_STORAGE_KEY, JSON.stringify(value));
+  }
+
+  store.setState(nextState);
+}
+
+export function useChainlitValue<K extends ChainlitStateKey>(key: K) {
+  return useChainlitStore((state) => state[key]);
+}
+
+export function useSetChainlitState<K extends ChainlitStateKey>(key: K) {
+  const client = useContext(ChainlitContext);
+  const store = getChainlitStore(client);
+  return useCallback(
+    (update: StateUpdate<ChainlitState[K]>) => {
+      writeValue(store, key, update);
+    },
+    [key, store]
+  );
+}
+
+export function useChainlitState<K extends ChainlitStateKey>(key: K) {
+  const value = useChainlitValue(key);
+  const setValue = useSetChainlitState(key);
+  return [value, setValue] as const;
+}
+
+export function useResetChainlitState<K extends ChainlitStateKey>(key: K) {
+  const client = useContext(ChainlitContext);
+  const store = getChainlitStore(client);
+
+  return useCallback(() => {
+    let value = initialStates.get(store)?.[key];
+    if (key === 'sessionId') value = uuidv4() as ChainlitState[K];
+    if (key === 'chatSettingsValue') {
+      value = store.getState().chatSettingsDefaultValue as ChainlitState[K];
     }
-  ]
-});
-
-export const sideViewState = atom<
-  { title: string; elements: IMessageElement[]; key?: string } | undefined
->({
-  key: 'SideView',
-  default: undefined
-});
-
-export const currentThreadIdState = atom<string | undefined>({
-  key: 'CurrentThreadId',
-  default: undefined
-});
-
-const localStorageEffect =
-  <T>(key: string): AtomEffect<T> =>
-  ({ setSelf, onSet }) => {
-    // When the atom is first initialized, try to get its value from localStorage
-    const savedValue = localStorage.getItem(key);
-    if (savedValue != null) {
-      try {
-        setSelf(JSON.parse(savedValue));
-      } catch (error) {
-        console.error(
-          `Error parsing localStorage value for key "${key}":`,
-          error
-        );
-      }
+    if (key === 'mcps') {
+      localStorage.removeItem(MCP_STORAGE_KEY);
+      store.setState({ mcps: [] });
+      return;
     }
+    writeValue(store, key, value as ChainlitState[K]);
+  }, [key, store]);
+}
 
-    // Subscribe to state changes and update localStorage
-    onSet((newValue, _, isReset) => {
-      if (isReset) {
-        localStorage.removeItem(key);
-      } else {
-        localStorage.setItem(key, JSON.stringify(newValue));
+export function getChatSettingsDefaultValue(
+  inputs: any[]
+): Record<string, any> {
+  const values: Record<string, any> = {};
+  const collect = (items: any[]) => {
+    items.forEach((input) => {
+      if (Array.isArray(input?.inputs) && input.inputs.length) {
+        collect(input.inputs);
+      } else if (input?.id !== undefined) {
+        values[input.id] = input.initial;
       }
     });
   };
+  if (Array.isArray(inputs)) collect(inputs);
+  return values;
+}
 
-export const mcpState = atom<IMcp[]>({
-  key: 'Mcp',
-  default: [],
-  effects: [localStorageEffect<IMcp[]>('mcp_storage_key')]
-});
-
-export const favoriteMessagesState = atom<IStep[]>({
-  key: 'favoriteMessagesState',
-  default: []
-});
+function withGroupedThreads(history: ThreadHistory): ThreadHistory {
+  return {
+    ...history,
+    timeGroupedThreads: history.threads
+      ? groupByDate(history.threads)
+      : undefined
+  };
+}

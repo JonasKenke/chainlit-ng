@@ -1,4 +1,8 @@
-import { submitMessage } from '../../support/testUtils';
+const submitMessage = (message: string) => {
+  cy.get('#chat-input').type(message);
+  // ponytail: force skips actionability; remove when Cypress handles this route-change click.
+  cy.get('#chat-submit').should('not.be.disabled').click({ force: true });
+};
 
 const login = (user: 'alice' | 'bob') => {
   cy.visit('/');

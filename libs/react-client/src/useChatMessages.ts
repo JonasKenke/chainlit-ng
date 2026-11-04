@@ -1,15 +1,11 @@
-import { useRecoilValue } from 'recoil';
-
-import {
-  currentThreadIdState,
-  firstUserInteraction,
-  messagesState
-} from './state';
+import { useChainlitStore } from './state';
 
 const useChatMessages = () => {
-  const messages = useRecoilValue(messagesState);
-  const firstInteraction = useRecoilValue(firstUserInteraction);
-  const threadId = useRecoilValue(currentThreadIdState);
+  const messages = useChainlitStore((state) => state.messages);
+  const firstInteraction = useChainlitStore(
+    (state) => state.firstUserInteraction
+  );
+  const threadId = useChainlitStore((state) => state.currentThreadId);
 
   return {
     threadId,

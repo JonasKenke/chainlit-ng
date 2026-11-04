@@ -8,12 +8,10 @@ from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, GenerationChunk
 from langchain_core.tracers.base import AsyncBaseTracer
 from langchain_core.tracers.schemas import Run
-from literalai import ChatGeneration, CompletionGeneration, GenerationMessage
-from literalai.observability.step import TrueStepType
 
 from chainlit.context import context_var
 from chainlit.message import Message
-from chainlit.step import Step
+from chainlit.step import Step, TrueStepType
 from chainlit.utils import utc_now
 
 DEFAULT_ANSWER_PREFIX_TOKENS = ["Final", "Answer", ":"]
@@ -33,7 +31,7 @@ class FinalStreamHelper:
 
     def __init__(
         self,
-        answer_prefix_tokens: Optional[List[str]] = None,
+        answer_prefix_tokens: List[str] | None = None,
         stream_final_answer: bool = False,
         force_stream_final_answer: bool = False,
         strip_tokens: bool = True,
@@ -95,14 +93,14 @@ class ChatGenerationStart(TypedDict):
     input_messages: List[BaseMessage]
     start: float
     token_count: int
-    tt_first_token: Optional[float]
+    tt_first_token: float | None
 
 
 class CompletionGenerationStart(TypedDict):
     prompt: str
     start: float
     token_count: int
-    tt_first_token: Optional[float]
+    tt_first_token: float | None
 
 
 class GenerationHelper:
@@ -161,10 +159,10 @@ class GenerationHelper:
         kwargs = message.get("kwargs", {})
         function_call = kwargs.get("additional_kwargs", {}).get("function_call")
 
-        msg = GenerationMessage(
-            role=self._convert_message_role(class_name),
-            content="",
-        )
+        msg: Dict[str, Any] = {
+            "role": self._convert_message_role(class_name),
+            "content": "",
+        }
         if name := kwargs.get("name"):
             msg["name"] = name
         if function_call:
@@ -209,10 +207,10 @@ class GenerationHelper:
 
         function_call = message.additional_kwargs.get("function_call")
 
-        msg = GenerationMessage(
-            role=self._convert_message_role(message.type),
-            content="",
-        )
+        msg: Dict[str, Any] = {
+            "role": self._convert_message_role(message.type),
+            "content": "",
+        }
 
         if literal_uuid := message.additional_kwargs.get("uuid"):
             msg["uuid"] = literal_uuid
@@ -256,7 +254,7 @@ class GenerationHelper:
     def _build_llm_settings(
         self,
         serialized: Dict,
-        invocation_params: Optional[Dict] = None,
+        invocation_params: Dict | None = None,
     ):
         # invocation_params = run.extra.get("invocation_params")
         if invocation_params is None:
@@ -295,7 +293,7 @@ class GenerationHelper:
         return provider, model, tools, settings
 
 
-def process_content(content: Any) -> Tuple[Dict | str, Optional[str]]:
+def process_content(content: Any) -> Tuple[Dict | str, str | None]:
     if content is None:
         return {}, None
     if isinstance(content, str):
@@ -322,15 +320,15 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
     def __init__(
         self,
         # Token sequence that prefixes the answer
-        answer_prefix_tokens: Optional[List[str]] = None,
+        answer_prefix_tokens: List[str] | None = None,
         # Should we stream the final answer?
         stream_final_answer: bool = False,
         # Should force stream the first response?
         force_stream_final_answer: bool = False,
         # Runs to ignore to enhance readability
-        to_ignore: Optional[List[str]] = None,
+        to_ignore: List[str] | None = None,
         # Runs to keep within ignored runs
-        to_keep: Optional[List[str]] = None,
+        to_keep: List[str] | None = None,
         **kwargs: Any,
     ) -> None:
         AsyncBaseTracer.__init__(self, **kwargs)
@@ -368,9 +366,9 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
         *,
         run_id: "UUID",
         parent_run_id: Optional["UUID"] = None,
-        tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        name: Optional[str] = None,
+        tags: List[str] | None = None,
+        metadata: Dict[str, Any] | None = None,
+        name: str | None = None,
         **kwargs: Any,
     ) -> Run:
         lc_messages = messages[0]
@@ -398,9 +396,9 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
         prompts: List[str],
         *,
         run_id: "UUID",
-        parent_run_id: Optional[UUID] = None,
-        tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        parent_run_id: UUID | None = None,
+        tags: List[str] | None = None,
+        metadata: Dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         await super().on_llm_start(
@@ -424,9 +422,9 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
 
     async def on_llm_new_token(
         self,
-        token: str,
+        token: Union[str, List[Union[str, Dict[str, Any]]]],
         *,
-        chunk: Optional[Union[GenerationChunk, ChatGenerationChunk]] = None,
+        chunk: Union[GenerationChunk, ChatGenerationChunk] | None = None,
         run_id: "UUID",
         parent_run_id: Optional["UUID"] = None,
         **kwargs: Any,
@@ -480,7 +478,7 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
 
         return parent_id
 
-    def _get_non_ignored_parent_id(self, current_parent_id: Optional[str] = None):
+    def _get_non_ignored_parent_id(self, current_parent_id: str | None = None):
         if not current_parent_id:
             return self.root_parent_id
 
@@ -595,35 +593,35 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
                 else:
                     throughput = None
                 message_completion = self._convert_message(message)
-                current_step.generation = ChatGeneration(
-                    provider=provider,
-                    model=model,
-                    tools=tools,
-                    variables=variables,
-                    settings=llm_settings,
-                    duration=duration,
-                    token_throughput_in_s=throughput,
-                    tt_first_token=chat_start.get("tt_first_token"),
-                    messages=[
+                generation_data: Dict = {
+                    "provider": provider,
+                    "model": model,
+                    "tools": tools,
+                    "variables": variables,
+                    "settings": llm_settings,
+                    "duration": duration,
+                    "tokenThroughputInSeconds": throughput,
+                    "ttFirstToken": chat_start.get("tt_first_token"),
+                    "messages": [
                         self._convert_message(m) for m in chat_start["input_messages"]
                     ],
-                    message_completion=message_completion,
-                )
+                    "messageCompletion": message_completion,
+                    "type": "CHAT",
+                }
 
-                # find first message with prompt_id
+                # Find the first input message's optional prompt metadata.
                 for m in chat_start["input_messages"]:
-                    if m.additional_kwargs.get("prompt_id"):
-                        current_step.generation.prompt_id = m.additional_kwargs[
-                            "prompt_id"
-                        ]
+                    if prompt_id := m.additional_kwargs.get("prompt_id"):
+                        generation_data["promptId"] = prompt_id
                         if custom_variables := m.additional_kwargs.get("variables"):
-                            current_step.generation.variables = {
+                            generation_data["variables"] = {
                                 k: str(v)
                                 for k, v in custom_variables.items()
                                 if v is not None
                             }
                     break
 
+                current_step.generation = generation_data
                 current_step.language = "json"
             else:
                 completion_start = self.completion_generations[str(run.id)]
@@ -633,17 +631,18 @@ class LangchainTracer(AsyncBaseTracer, GenerationHelper, FinalStreamHelper):
                     throughput = completion_start["token_count"] / duration
                 else:
                     throughput = None
-                current_step.generation = CompletionGeneration(
-                    provider=provider,
-                    model=model,
-                    settings=llm_settings,
-                    variables=variables,
-                    duration=duration,
-                    token_throughput_in_s=throughput,
-                    tt_first_token=completion_start.get("tt_first_token"),
-                    prompt=completion_start["prompt"],
-                    completion=completion,
-                )
+                current_step.generation = {
+                    "provider": provider,
+                    "model": model,
+                    "settings": llm_settings,
+                    "variables": variables,
+                    "duration": duration,
+                    "tokenThroughputInSeconds": throughput,
+                    "ttFirstToken": completion_start.get("tt_first_token"),
+                    "prompt": completion_start["prompt"],
+                    "completion": completion,
+                    "type": "COMPLETION",
+                }
                 current_step.output = completion
 
             if current_step:

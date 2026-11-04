@@ -132,7 +132,40 @@
       "title": "Painel de configura\u00e7\u00f5es",
       "customize": "Personalize aqui as configura\u00e7\u00f5es do seu chat"
     },
-    "watermark": "Os modelos de linguagem podem cometer erros. Verifique sempre informa\u00e7\u00f5es importantes."
+    "watermark": "Os modelos de linguagem podem cometer erros. Verifique sempre informa\u00e7\u00f5es importantes.",
+    "promptGallery": {
+      "button": "Galeria de prompts",
+      "title": "Galeria de prompts",
+      "save": "Guardar prompt",
+      "saving": "A guardar...",
+      "edit": "Editar prompt",
+      "share": {
+        "title": "Partilhar prompt",
+        "adding": "A adicionar…",
+        "goHome": "Ir para o início",
+        "notFound": "Prompt não encontrado ou já não está partilhado.",
+        "addError": "Falha ao adicionar prompt"
+      },
+      "unshare": "Cancelar partilha",
+      "delete": "Eliminar",
+      "copied": "Link copiado!",
+      "addToGallery": "Adicionar à minha galeria",
+      "added": "Prompt adicionado à sua galeria",
+      "empty": {
+        "title": "Nenhum prompt guardado",
+        "description": "Marque uma mensagem como favorita para a guardar como prompt"
+      },
+      "dialog": {
+        "titlePlaceholder": "Título do prompt",
+        "contentLabel": "Texto do prompt",
+        "cancel": "Cancelar",
+        "save": "Guardar"
+      },
+      "new": "Novo prompt",
+      "search": "Pesquisar prompts...",
+      "saved": "Prompt guardado!",
+      "unshared": "Partilha removida"
+    }
   },
   "threadHistory": {
     "sidebar": {

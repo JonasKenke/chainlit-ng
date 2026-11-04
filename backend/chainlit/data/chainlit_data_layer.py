@@ -720,9 +720,6 @@ class ChainlitDataLayer(BaseDataLayer):
             props=json.loads(row.get("props") or "{}"),
         )
 
-    async def build_debug_url(self) -> str:
-        return ""
-
     async def cleanup(self):
         """Cleanup database connections"""
         if self.pool:

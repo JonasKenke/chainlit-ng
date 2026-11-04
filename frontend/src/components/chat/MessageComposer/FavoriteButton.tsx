@@ -6,10 +6,9 @@ import {
 } from '@radix-ui/react-popover';
 import { Star, Trash } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useRecoilValue } from 'recoil';
 
 import {
-  favoriteMessagesState,
+  useChainlitStore,
   useChatInteract,
   useConfig
 } from '@chainlit/react-client';
@@ -38,7 +37,7 @@ interface Props {
 }
 
 export const FavoriteButton = ({ disabled = false, onSelect }: Props) => {
-  const favorites = useRecoilValue(favoriteMessagesState);
+  const favorites = useChainlitStore((state) => state.favoriteMessages);
   const { toggleMessageFavorite } = useChatInteract();
   const { config } = useConfig();
   const { t } = useTranslation();

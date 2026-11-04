@@ -1,16 +1,14 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { RecoilRoot } from 'recoil';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  IStep,
-  favoriteMessagesState,
-  useConfig
-} from '@chainlit/react-client';
+import { IStep, useConfig } from '@chainlit/react-client';
 
 import { FavoriteButton } from '@/components/chat/MessageComposer/FavoriteButton';
 
-const toggleMessageFavoriteMock = vi.fn();
+const { toggleMessageFavoriteMock, clientState } = vi.hoisted(() => ({
+  toggleMessageFavoriteMock: vi.fn(),
+  clientState: { favoriteMessages: [] as any[] }
+}));
 
 vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({
@@ -28,19 +26,14 @@ vi.mock('@/components/i18n/Translator', () => ({
   })
 }));
 
-vi.mock('@chainlit/react-client', async () => {
-  const { atom } = await import('recoil');
-  return {
-    useConfig: vi.fn(),
-    useChatInteract: () => ({
-      toggleMessageFavorite: toggleMessageFavoriteMock
-    }),
-    favoriteMessagesState: atom({
-      key: 'favoriteMessagesState',
-      default: []
-    })
-  };
-});
+vi.mock('@chainlit/react-client', () => ({
+  useConfig: vi.fn(),
+  useChatInteract: () => ({
+    toggleMessageFavorite: toggleMessageFavoriteMock
+  }),
+  useChainlitStore: (selector: (state: typeof clientState) => unknown) =>
+    selector(clientState)
+}));
 
 global.ResizeObserver = class ResizeObserver {
   observe() {}
@@ -80,15 +73,8 @@ describe('FavoriteButton', () => {
   });
 
   const renderComponent = (favorites = mockFavorites, props = {}) => {
-    return render(
-      <RecoilRoot
-        initializeState={({ set }) => {
-          set(favoriteMessagesState, favorites);
-        }}
-      >
-        <FavoriteButton onSelect={mockOnSelect} {...props} />
-      </RecoilRoot>
-    );
+    clientState.favoriteMessages = favorites;
+    return render(<FavoriteButton onSelect={mockOnSelect} {...props} />);
   };
 
   it('returns null if the "favorites" feature is disabled in config', () => {

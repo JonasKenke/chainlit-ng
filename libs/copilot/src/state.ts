@@ -1,51 +1,45 @@
-import { atom } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
+import { create } from 'zustand';
 
 const COPILOT_THREAD_ID_KEY = 'chainlit-copilot-thread-id';
 export const COPILOT_THREAD_CHANGED_EVENT_KEY =
   'chainlit-copilot-thread-changed';
+
 export class CopilotThreadChangedEventParams {
   newThreadId?: string;
 }
 
-export const copilotThreadIdState = atom<string>({
-  key: 'CopilotThreadId',
-  default: '',
-  effects: [
-    ({ setSelf, onSet }) => {
-      const savedValue = localStorage.getItem(COPILOT_THREAD_ID_KEY);
+interface CopilotState {
+  copilotThreadId: string;
+  initialized: boolean;
+  initialize: () => void;
+  setCopilotThreadId: (threadId: string) => void;
+}
 
-      if (savedValue != null) {
-        try {
-          const parsedValue = JSON.parse(savedValue);
-          setSelf(parsedValue);
-        } catch (_error) {
-          const newThreadId = uuidv4();
-          localStorage.setItem(
-            COPILOT_THREAD_ID_KEY,
-            JSON.stringify(newThreadId)
-          );
-          setSelf(newThreadId);
-        }
-      } else {
-        const newThreadId = uuidv4();
-        localStorage.setItem(
-          COPILOT_THREAD_ID_KEY,
-          JSON.stringify(newThreadId)
-        );
-        setSelf(newThreadId);
+export const useCopilotStore = create<CopilotState>((set, get) => ({
+  copilotThreadId: '',
+  initialized: false,
+  initialize: () => {
+    if (get().initialized) return;
+
+    let threadId: string;
+    try {
+      const stored = localStorage.getItem(COPILOT_THREAD_ID_KEY);
+      threadId = stored ? JSON.parse(stored) : uuidv4();
+      if (!stored) {
+        localStorage.setItem(COPILOT_THREAD_ID_KEY, JSON.stringify(threadId));
       }
-
-      onSet((newValue, _, isReset) => {
-        if (isReset) {
-          localStorage.removeItem(COPILOT_THREAD_ID_KEY);
-        } else {
-          localStorage.setItem(COPILOT_THREAD_ID_KEY, JSON.stringify(newValue));
-        }
-      });
+    } catch {
+      threadId = uuidv4();
     }
-  ]
-});
+
+    set({ copilotThreadId: threadId, initialized: true });
+  },
+  setCopilotThreadId: (threadId) => {
+    localStorage.setItem(COPILOT_THREAD_ID_KEY, JSON.stringify(threadId));
+    set({ copilotThreadId: threadId, initialized: true });
+  }
+}));
 
 export const getChainlitCopilotThreadId = () => {
   const threadId = localStorage.getItem(COPILOT_THREAD_ID_KEY);

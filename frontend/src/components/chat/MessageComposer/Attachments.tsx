@@ -1,6 +1,5 @@
 import { X } from 'lucide-react';
 import React from 'react';
-import { useRecoilValue } from 'recoil';
 
 import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
@@ -11,7 +10,7 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
-import { attachmentsState } from '@/state/chat';
+import { useAppStore } from '@/state/store';
 
 import { Attachment } from './Attachment';
 
@@ -73,7 +72,7 @@ const CircularProgressButton = ({
 };
 const Attachments = () => {
   const { t } = useTranslation();
-  const attachments = useRecoilValue(attachmentsState);
+  const attachments = useAppStore((state) => state.attachments);
 
   if (attachments.length === 0) return null;
 

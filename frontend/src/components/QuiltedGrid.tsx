@@ -17,7 +17,11 @@ const sizeToUnit = (element: IImageElement | IVideoElement) => {
 
 interface QuiltedGridProps<T extends IImageElement | IVideoElement> {
   elements: T[];
-  renderElement: ({ element }: { element: T }) => JSX.Element | null;
+  renderElement: ({
+    element
+  }: {
+    element: T;
+  }) => import('react').JSX.Element | null;
   className?: string;
 }
 

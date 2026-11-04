@@ -2,7 +2,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { useRecoilState } from 'recoil';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
@@ -16,12 +15,13 @@ import { Label } from '@/components/ui/label';
 
 import { useLayoutMaxWidth } from '@/hooks/useLayoutMaxWidth';
 
-import { userEnvState } from '@/state/user';
+import { useAppStore } from '@/state/store';
 
 const Env = () => {
   const navigate = useNavigate();
   const { config } = useConfig();
-  const [userEnv, setUserEnv] = useRecoilState(userEnvState);
+  const userEnv = useAppStore((state) => state.userEnv);
+  const setUserEnv = useAppStore((state) => state.setUserEnv);
   const layoutMaxWidth = useLayoutMaxWidth();
   const { t } = useTranslation();
   const requiredKeys = config?.userEnv || [];
@@ -52,7 +52,6 @@ const Env = () => {
   });
 
   const onSubmit = async (values: FormValues) => {
-    localStorage.setItem('userEnv', JSON.stringify(values));
     setUserEnv(values);
     toast.success(t('apiKeys.success.saved'));
     navigate('/');

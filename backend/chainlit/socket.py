@@ -17,6 +17,7 @@ from chainlit.context import init_ws_context
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
+from chainlit.mode import MODE_PREFERENCES_METADATA_KEY
 from chainlit.server import sio
 from chainlit.session import ClientType, WebsocketSession
 from chainlit.types import (
@@ -75,6 +76,41 @@ def restore_existing_session(
 async def persist_user_session(thread_id: str, metadata: Dict):
     if data_layer := get_data_layer():
         await data_layer.update_thread(thread_id=thread_id, metadata=metadata)
+
+
+async def _persist_mode_selection(
+    session: WebsocketSession, mode_id: str, option_id: str
+) -> None:
+    user = session.user
+    data_layer = get_data_layer()
+    if not user or not data_layer:
+        return
+
+    try:
+        latest_user = await data_layer.get_user(user.identifier)
+        metadata = dict(getattr(latest_user or user, "metadata", None) or {})
+        persisted_modes = metadata.get(MODE_PREFERENCES_METADATA_KEY)
+        persisted_modes = (
+            dict(persisted_modes) if isinstance(persisted_modes, dict) else {}
+        )
+        persisted_modes[mode_id] = option_id
+        metadata[MODE_PREFERENCES_METADATA_KEY] = persisted_modes
+
+        updated_user = await data_layer.create_user(
+            User(
+                identifier=user.identifier,
+                display_name=getattr(user, "display_name", None),
+                metadata=metadata,
+            )
+        )
+        if updated_user:
+            session.user = updated_user
+        else:
+            user.metadata = metadata
+    except Exception:
+        logger.exception(
+            "Unable to persist mode preference for user '%s'", user.identifier
+        )
 
 
 async def resume_thread(session: WebsocketSession):
@@ -506,3 +542,37 @@ async def edit_settings(sid, settings: Dict[str, Any]):
 
     if config.code.on_settings_edit:
         await config.code.on_settings_edit(settings)
+
+
+@sio.on("mode_change")
+async def change_mode(sid, payload: Dict[str, Any]):
+    """Validate and apply a mode selection made in the composer."""
+    session = WebsocketSession.require(sid)
+    context = init_ws_context(session)
+
+    mode_id = payload.get("modeId") if isinstance(payload, dict) else None
+    option_id = payload.get("optionId") if isinstance(payload, dict) else None
+    mode = next(
+        (candidate for candidate in session.modes if candidate.id == mode_id),
+        None,
+    )
+    option = mode.get_option_by_id(option_id) if mode and option_id else None
+
+    if not mode or not option:
+        await context.emitter.emit("mode_change", dict(session.mode_values))
+        return
+
+    values = dict(session.mode_values)
+    values[mode.id] = option.id
+    session.mode_values = values
+
+    from chainlit.user_session import user_session
+
+    user_session.set("modes", values)
+    await context.emitter.emit("mode_change", values)
+
+    if mode.persist_to_user:
+        await _persist_mode_selection(session, mode.id, option.id)
+
+    if config.code.on_mode_update:
+        await config.code.on_mode_update(values)

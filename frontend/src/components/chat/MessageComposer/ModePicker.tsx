@@ -37,12 +37,17 @@ export const ModePicker = ({
 }: Props) => {
   const apiClient = useContext(ChainlitContext);
   const [open, setOpen] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const options = mode.options;
   const selectedOption =
     options.find((opt) => opt.id === selectedOptionId) || options[0];
+  const selectedOptionIndex = Math.max(
+    0,
+    options.findIndex((option) => option.id === selectedOptionId)
+  );
+  const highlightedIndex = selectedIndex ?? selectedOptionIndex;
 
   // Handle option selection
   const handleOptionSelect = (option: IModeOption) => {
@@ -63,19 +68,21 @@ export const ModePicker = ({
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % options.length);
+        setSelectedIndex((prev) =>
+          prev === null ? 0 : (prev + 1) % options.length
+        );
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setSelectedIndex(
-          (prev) => (prev - 1 + options.length) % options.length
+        setSelectedIndex((prev) =>
+          prev === null
+            ? options.length - 1
+            : (prev - 1 + options.length) % options.length
         );
         break;
       case 'Enter':
         e.preventDefault();
-        if (options[selectedIndex]) {
-          handleOptionSelect(options[selectedIndex]);
-        }
+        handleOptionSelect(options[selectedIndex ?? selectedOptionIndex]);
         break;
       case 'Escape':
         e.preventDefault();
@@ -89,7 +96,7 @@ export const ModePicker = ({
   };
 
   const handleMouseLeave = () => {
-    // Keep current selection on mouse leave
+    setSelectedIndex(null);
   };
 
   // Helper to render icon - supports Lucide names, local paths, and URLs
@@ -131,7 +138,13 @@ export const ModePicker = ({
       className="mode-picker-wrapper inline-flex items-center"
       ref={popoverRef}
     >
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen);
+          if (nextOpen) setSelectedIndex(null);
+        }}
+      >
         <PopoverTrigger asChild>
           <Button
             id={`mode-picker-trigger-${mode.id}`}
@@ -139,7 +152,7 @@ export const ModePicker = ({
             size="sm"
             disabled={disabled}
             className={cn(
-              'inline-flex items-center gap-1.5 h-7 px-2 rounded-md',
+              'inline-flex items-center gap-1.5 h-9 px-2 rounded-full',
               'text-xs font-medium',
               'hover:bg-muted transition-colors',
               'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
@@ -175,19 +188,19 @@ export const ModePicker = ({
                   <CommandItemAnimated
                     key={option.id}
                     index={index}
-                    isSelected={index === selectedIndex}
+                    isSelected={index === highlightedIndex}
                     onMouseMove={() => handleMouseMove(index)}
+                    onMouseLeave={() => setSelectedIndex(null)}
                     onSelect={() => handleOptionSelect(option)}
                     className={cn(
-                      'flex items-start gap-2 px-2 py-2 cursor-pointer',
-                      selectedOptionId === option.id && 'bg-accent'
+                      'flex items-start gap-2 px-2 py-2 cursor-pointer'
                     )}
                   >
                     {renderIcon(
                       option.icon,
                       cn(
                         '!size-5 mt-0.5 text-muted-foreground flex-shrink-0',
-                        index === selectedIndex && 'text-foreground'
+                        index === highlightedIndex && 'text-foreground'
                       )
                     )}
                     <div className="flex-1 min-w-0">

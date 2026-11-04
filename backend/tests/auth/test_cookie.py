@@ -147,6 +147,63 @@ def test_state_cookie_lifetime_custom(monkeypatch):
     assert cookie_module._state_cookie_lifetime == 600
 
 
+def test_cookie_path_uses_chainlit_root_path_value(monkeypatch):
+    monkeypatch.setenv("CHAINLIT_ROOT_PATH", "/myapp")
+    monkeypatch.delenv("CHAINLIT_AUTH_COOKIE_PATH", raising=False)
+    try:
+        importlib.reload(cookie_module)
+        assert cookie_module._cookie_path == "/myapp"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cookie_module)
+
+
+@pytest.mark.parametrize("token", ["short", "x" * 3001])
+def test_auth_cookie_uses_configured_path(client, monkeypatch, token):
+    monkeypatch.setattr(cookie_module, "_cookie_path", "/myapp")
+
+    response = client.post("/set-cookie", data={"token": token})
+
+    set_cookies = response.headers.get_list("set-cookie")
+    assert set_cookies
+    assert all("path=/myapp" in cookie.lower() for cookie in set_cookies)
+
+
+@pytest.mark.parametrize("cookie_value", [None, "other"])
+def test_validate_oauth_state_cookie_rejects_missing_or_mismatched_state(
+    cookie_value,
+):
+    headers = []
+    if cookie_value is not None:
+        headers.append((b"cookie", f"oauth_state={cookie_value}".encode()))
+    request = Request(
+        {
+            "type": "http",
+            "headers": headers,
+            "query_string": b"",
+            "method": "GET",
+            "path": "/",
+        }
+    )
+
+    with pytest.raises(Exception, match="oauth state does not correspond"):
+        cookie_module.validate_oauth_state_cookie(request, "expected")
+
+
+def test_validate_oauth_state_cookie_accepts_matching_state():
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"cookie", b"oauth_state=expected")],
+            "query_string": b"",
+            "method": "GET",
+            "path": "/",
+        }
+    )
+
+    cookie_module.validate_oauth_state_cookie(request, "expected")
+
+
 def test_clear_auth_cookie(client):
     """Test cookie clearing removes all chunks."""
     # Set initial token

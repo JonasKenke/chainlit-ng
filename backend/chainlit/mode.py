@@ -10,6 +10,8 @@ from typing import List, Optional
 
 from dataclasses_json import DataClassJsonMixin
 
+MODE_PREFERENCES_METADATA_KEY = "chainlit_modes"
+
 
 @dataclass
 class ModeOption(DataClassJsonMixin):
@@ -41,11 +43,13 @@ class Mode(DataClassJsonMixin):
         id: Unique identifier for this mode (e.g., "llm", "approach")
         name: Display name shown in the UI (e.g., "Model", "Approach")
         options: List of available options for this mode
+        persist_to_user: Whether to retain the selected option in user metadata
     """
 
     id: str
     name: str
     options: List[ModeOption] = field(default_factory=list)
+    persist_to_user: bool = False
 
     def get_default_option(self) -> Optional[ModeOption]:
         """Get the default option for this mode, or the first option if none is default."""

@@ -5,20 +5,19 @@ import {
   useRef,
   useState
 } from 'react';
-import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
   FileSpec,
   IStep,
-  commandsState,
   useAuth,
+  useChainlitState,
+  useChainlitStore,
   useChatData,
   useChatInteract,
   useConfig
 } from '@chainlit/react-client';
 import type { IMode, IModeOption } from '@chainlit/react-client';
-import { modesState } from '@chainlit/react-client';
 
 import { Settings } from '@/components/icons/Settings';
 import { Button } from '@/components/ui/button';
@@ -33,12 +32,8 @@ import { useTranslation } from 'components/i18n/Translator';
 import { useQuery } from '@/hooks/query';
 import { useIsMobile } from '@/hooks/use-mobile';
 
-import { chatSettingsOpenState } from '@/state/project';
-import {
-  IAttachment,
-  attachmentsState,
-  persistentCommandState
-} from 'state/chat';
+import { IAttachment } from '@/state/chat';
+import { useAppStore } from '@/state/store';
 
 import { Attachments } from './Attachments';
 import CommandButtons from './CommandButtons';
@@ -47,6 +42,8 @@ import FavoriteButton from './FavoriteButton';
 import Input, { InputMethods } from './Input';
 import McpButton from './Mcp';
 import ModePicker from './ModePicker';
+import PromptGalleryButton from './PromptGalleryButton';
+import PromptSchedulingButton from './PromptSchedulingButton';
 import SubmitButton from './SubmitButton';
 import UploadButton from './UploadButton';
 import VoiceButton from './VoiceButton';
@@ -66,11 +63,10 @@ export default function MessageComposer({
 }: Props) {
   const inputRef = useRef<InputMethods>(null);
   const [value, setValue] = useState('');
-  const [selectedCommand, setSelectedCommand] = useRecoilState(
-    persistentCommandState
-  );
-  const commands = useRecoilValue(commandsState);
-  const setChatSettingsOpen = useSetRecoilState(chatSettingsOpenState);
+  const selectedCommand = useAppStore((state) => state.persistentCommand);
+  const setSelectedCommand = useAppStore((state) => state.setPersistentCommand);
+  const commands = useChainlitStore((state) => state.commands);
+  const setChatSettingsOpen = useAppStore((state) => state.setChatSettingsOpen);
 
   // Pre-select the command marked as selected by the backend
   useEffect(() => {
@@ -79,11 +75,12 @@ export default function MessageComposer({
       setSelectedCommand(defaultSelected);
     }
   }, [commands]);
-  const [attachments, setAttachments] = useRecoilState(attachmentsState);
+  const attachments = useAppStore((state) => state.attachments);
+  const setAttachments = useAppStore((state) => state.setAttachments);
   const { t } = useTranslation();
 
   const { user } = useAuth();
-  const { sendMessage, replyMessage } = useChatInteract();
+  const { sendMessage, replyMessage, updateMode } = useChatInteract();
   const { askUser, chatSettingsInputs, disabled: _disabled } = useChatData();
 
   const disabled = _disabled || !!attachments.find((a) => !a.uploaded);
@@ -96,7 +93,7 @@ export default function MessageComposer({
   const isMobile = useIsMobile();
 
   // Get/set available modes from state - selections are tracked via the 'default' flag on options
-  const [modes, setModes] = useRecoilState(modesState);
+  const [modes, setModes] = useChainlitState('modes');
 
   const handleModeSelect = useCallback(
     (modeId: string, optionId: string) => {
@@ -112,8 +109,9 @@ export default function MessageComposer({
           };
         })
       );
+      updateMode(modeId, optionId);
     },
-    [setModes]
+    [setModes, updateMode]
   );
 
   // Helper to get selected option for a mode (the one with default=true, or first option)
@@ -280,8 +278,11 @@ export default function MessageComposer({
         onEnter={submit}
         placeholder={t('chat.input.placeholder')}
       />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center -ml-1.5">
+      <div className="flex flex-wrap items-end justify-between gap-y-1">
+        <div
+          data-testid="message-composer-actions"
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-1 -ml-1.5 [&>*]:shrink-0"
+        >
           <VoiceButton disabled={disabled} />
           <UploadButton
             disabled={disabled}
@@ -310,7 +311,11 @@ export default function MessageComposer({
               </Tooltip>
             </TooltipProvider>
           )}
-          <McpButton disabled={disabled} />
+          <PromptGalleryButton
+            disabled={disabled}
+            onSelect={onFavoriteSelect}
+          />
+          <PromptSchedulingButton disabled={disabled} />
           {modes.map((mode) => (
             <ModePicker
               key={mode.id}
@@ -320,6 +325,7 @@ export default function MessageComposer({
               onOptionSelect={handleModeSelect}
             />
           ))}
+          <McpButton disabled={disabled} />
           <CommandButton
             disabled={disabled}
             selectedCommandId={selectedCommand?.id}
@@ -330,10 +336,9 @@ export default function MessageComposer({
             selectedCommandId={selectedCommand?.id}
             onCommandSelect={setSelectedCommand}
           />
-
           <FavoriteButton disabled={disabled} onSelect={onFavoriteSelect} />
         </div>
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <SubmitButton
             onSubmit={submit}
             disabled={

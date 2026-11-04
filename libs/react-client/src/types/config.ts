@@ -81,6 +81,7 @@ export interface IChainlitConfig {
     user_message_markdown?: boolean;
     edit_message?: boolean;
     favorites?: boolean;
+    prompt_gallery?: boolean;
     mcp?: {
       enabled?: boolean;
       sse?: {
@@ -94,12 +95,15 @@ export interface IChainlitConfig {
       };
     };
   };
-  debugUrl?: string;
   userEnv: string[];
   maskUserEnv?: boolean;
   dataPersistence: boolean;
   threadResumable: boolean;
   threadSharing?: boolean;
+  promptGallery?: boolean;
+  promptScheduling?: boolean;
+  scheduledTaskAfterHooks?: { name: string; default: boolean }[];
+  scheduledTaskModels?: string[];
   chatProfiles: ChatProfile[];
   starters?: IStarter[];
   starterCategories?: IStarterCategory[];

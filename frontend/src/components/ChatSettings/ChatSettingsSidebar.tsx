@@ -3,14 +3,12 @@ import mapValues from 'lodash/mapValues';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { useRecoilState, useSetRecoilState } from 'recoil';
 
 import {
-  chatSettingsInputsState,
-  chatSettingsValueState,
   useChatData,
   useChatInteract,
-  useConfig
+  useConfig,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
@@ -27,7 +25,7 @@ import { Translator } from 'components/i18n';
 
 import { useIsMobile } from '@/hooks/use-mobile';
 
-import { chatSettingsSidebarOpenState } from '@/state/project';
+import { useAppStore } from '@/state/store';
 
 import { FormInput, TFormInputValue } from './FormInput';
 import { useChatSettingsSnapshotAtOpen } from './useChatSettingsSnapshotAtOpen';
@@ -36,8 +34,9 @@ export default function ChatSettingsSidebar() {
   const { config } = useConfig();
   const { chatSettingsValue, chatSettingsInputs } = useChatData();
   const { updateChatSettings, editChatSettings } = useChatInteract();
-  const [sidebarOpen, setSidebarOpen] = useRecoilState(
-    chatSettingsSidebarOpenState
+  const sidebarOpen = useAppStore((state) => state.chatSettingsSidebarOpen);
+  const setSidebarOpen = useAppStore(
+    (state) => state.setChatSettingsSidebarOpen
   );
   const isMobile = useIsMobile();
   const [isVisible, setIsVisible] = useState(false);
@@ -50,8 +49,8 @@ export default function ChatSettingsSidebar() {
   const { handleSubmit, setValue, reset, watch, getValues } = useForm({
     defaultValues: chatSettingsValue
   });
-  const setChatSettingsValue = useSetRecoilState(chatSettingsValueState);
-  const setChatSettingsInputs = useSetRecoilState(chatSettingsInputsState);
+  const setChatSettingsValue = useSetChainlitState('chatSettingsValue');
+  const setChatSettingsInputs = useSetChainlitState('chatSettingsInputs');
 
   const restoreSnapshot = useCallback(() => {
     setChatSettingsInputs(cloneDeep(inputsAtOpen));
@@ -207,8 +206,8 @@ export default function ChatSettingsSidebar() {
     <>
       <ResizableHandle className="sm:hidden md:block bg-transparent" />
       <ResizablePanel
-        minSize={15}
-        defaultSize={25}
+        minSize="15%"
+        defaultSize="25%"
         className={`md:flex flex-col flex-grow sm:hidden transform transition-transform duration-300 ease-in-out ${
           isVisible ? 'translate-x-0' : 'translate-x-full'
         }`}

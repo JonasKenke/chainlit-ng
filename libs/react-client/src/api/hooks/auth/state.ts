@@ -1,10 +1,9 @@
-import { useRecoilState, useSetRecoilState } from 'recoil';
-import { authState, threadHistoryState, userState } from 'src/state';
+import { useChainlitState, useSetChainlitState } from 'src/state';
 
 export const useAuthState = () => {
-  const [authConfig, setAuthConfig] = useRecoilState(authState);
-  const [user, setUser] = useRecoilState(userState);
-  const setThreadHistory = useSetRecoilState(threadHistoryState);
+  const [authConfig, setAuthConfig] = useChainlitState('auth');
+  const [user, setUser] = useChainlitState('user');
+  const setThreadHistory = useSetChainlitState('threadHistory');
 
   return {
     authConfig,

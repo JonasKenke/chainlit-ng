@@ -1,4 +1,3 @@
-import { platform } from 'os';
 import { sep } from 'path';
 
 import { setupWebSocketListener, submitMessage } from '../../support/testUtils';
@@ -138,11 +137,7 @@ const cleanupThreadHistory = () => {
   const threadHistoryFile = pathItems.join(sep);
 
   // Clean up thread history file
-  const command =
-    platform() === 'win32'
-      ? `del /f "${threadHistoryFile}"`
-      : `rm -f "${threadHistoryFile}"`;
-  cy.exec(command, { failOnNonZeroExit: false });
+  cy.task('deleteFileIfExists', threadHistoryFile);
 };
 
 describe.skip('Data Layer', () => {

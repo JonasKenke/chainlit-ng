@@ -1,5 +1,7 @@
 # Copilot Type Checking — Research & Proposed Solutions
 
+> Historical snapshot: this report predates the Recoil-to-Zustand migration. Its Recoil bundle measurements and Vite aliases are not current.
+
 ## Problem Statement
 
 Running `tsc --noemit` in `libs/copilot/` fails because copilot **directly imports source files from `@chainlit/app` (the frontend)**, and those source files rely on path aliases/baseUrl settings defined in the frontend's own `tsconfig.json` — settings that are **not available** when TypeScript runs under copilot's `tsconfig.json`.
@@ -110,25 +112,26 @@ libs/copilot/
 - **Rendering**: Uses Shadow DOM (`attachShadow({ mode: 'open' })`) with inlined CSS
 - **Global API**: Exposes `window.mountChainlitWidget()`, `window.unmountChainlitWidget()`, `window.sendChainlitMessage()`, etc.
 - **No TypeScript consumers**: Nobody imports from `@chainlit/copilot` — the type-check is purely a development-time quality gate
-- **Vite resolves successfully**: The build uses `vite-tsconfig-paths` plugin + explicit `resolve.alias` entries, so the IIFE builds correctly despite tsc failing
+- **Vite resolves successfully**: Vite 8's native `resolve.tsconfigPaths` option plus explicit `resolve.alias` entries let the IIFE build correctly despite tsc failing
 
 ### Vite Config Resolution
 
 ```typescript
 // libs/copilot/vite.config.ts
 resolve: {
+  tsconfigPaths: true,
   alias: {
-    react: path.resolve(__dirname, './node_modules/react'),
-    '@chainlit': path.resolve(__dirname, './node_modules/@chainlit'),
-    postcss: path.resolve(__dirname, './node_modules/postcss'),
-    tailwindcss: path.resolve(__dirname, './node_modules/tailwindcss'),
-    i18next: path.resolve(__dirname, './node_modules/i18next'),
-    sonner: path.resolve(__dirname, './node_modules/sonner'),
-    'highlight.js': path.resolve(__dirname, './node_modules/highlight.js'),
-    'react-i18next': path.resolve(__dirname, './node_modules/react-i18next'),
-    'usehooks-ts': path.resolve(__dirname, './node_modules/usehooks-ts'),
-    lodash: path.resolve(__dirname, './node_modules/lodash'),
-    recoil: path.resolve(__dirname, './node_modules/recoil')
+    react: path.resolve(import.meta.dirname, './node_modules/react'),
+    '@chainlit': path.resolve(import.meta.dirname, './node_modules/@chainlit'),
+    postcss: path.resolve(import.meta.dirname, './node_modules/postcss'),
+    tailwindcss: path.resolve(import.meta.dirname, './node_modules/tailwindcss'),
+    i18next: path.resolve(import.meta.dirname, './node_modules/i18next'),
+    sonner: path.resolve(import.meta.dirname, './node_modules/sonner'),
+    'highlight.js': path.resolve(import.meta.dirname, './node_modules/highlight.js'),
+    'react-i18next': path.resolve(import.meta.dirname, './node_modules/react-i18next'),
+    'usehooks-ts': path.resolve(import.meta.dirname, './node_modules/usehooks-ts'),
+    lodash: path.resolve(import.meta.dirname, './node_modules/lodash'),
+    recoil: path.resolve(import.meta.dirname, './node_modules/recoil')
   }
 }
 ```
@@ -140,7 +143,7 @@ libs/copilot/node_modules/@chainlit/app → ../../../../frontend
 libs/copilot/node_modules/@chainlit/react-client → ../../../react-client
 ```
 
-This means Vite follows symlinks into the actual source directories — `@chainlit/app/src/components/Alert` resolves to `frontend/src/components/Alert.tsx` via filesystem. Vite resolves each file's imports independently using the `vite-tsconfig-paths` plugin, which can apply different tsconfig settings per file. **tsc cannot do this** — it uses a single tsconfig for all files in its program.
+This means Vite follows symlinks into the actual source directories — `@chainlit/app/src/components/Alert` resolves to `frontend/src/components/Alert.tsx` via filesystem. Vite 8's native `resolve.tsconfigPaths` resolves imports from each file's tsconfig. **tsc cannot do this** — it uses a single tsconfig for all files in its program.
 
 ---
 
@@ -772,7 +775,7 @@ Step 2 — Change frontend files imported by copilot to use **relative imports**
 - Zero effort, zero risk
 - Vite build already validates copilot compiles correctly
 - Copilot has **no downstream TypeScript consumers** — it's an IIFE bundle
-- IDE still provides type hints via `vite-tsconfig-paths`
+- IDE still provides path hints through the TypeScript `paths` mappings
 
 **Cons**:
 

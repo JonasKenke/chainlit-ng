@@ -5,7 +5,7 @@ interface LoaderProps {
   className?: string;
 }
 
-const Loader = ({ className }: LoaderProps): JSX.Element => {
+const Loader = ({ className }: LoaderProps): import('react').JSX.Element => {
   return (
     <LoaderIcon
       className={cn('h-4 w-4 animate-spin text-primary', className)}

@@ -37,10 +37,16 @@ export default function UserNav() {
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-26" align="end" forceMount>
+      <DropdownMenuContent
+        className="max-w-[min(24rem,calc(100vw-2rem))]"
+        align="end"
+        forceMount
+      >
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">{displayName}</p>
+            <p className="wrap-anywhere text-sm font-medium leading-none">
+              {displayName}
+            </p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

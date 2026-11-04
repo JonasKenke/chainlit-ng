@@ -2,6 +2,12 @@ import { IElement, IThread, IUser } from 'src/types';
 
 import { IAction } from 'src/types/action';
 import { IFeedback } from 'src/types/feedback';
+import { IPrompt } from 'src/types/prompt';
+import {
+  IScheduledTask,
+  IScheduledTaskPayload,
+  IScheduledTaskUpdate
+} from 'src/types/scheduledTask';
 
 export * from './hooks/auth';
 export * from './hooks/api';
@@ -384,6 +390,81 @@ export class ChainlitAPI extends APIBase {
       threadId,
       isShared
     });
+    return res.json();
+  }
+
+  // ---- Scheduled tasks ----
+
+  async listScheduledTasks(): Promise<IScheduledTask[]> {
+    const res = await this.get(`/project/scheduled-tasks`);
+    return res.json();
+  }
+
+  async createScheduledTask(
+    payload: IScheduledTaskPayload
+  ): Promise<IScheduledTask> {
+    const res = await this.post(`/project/scheduled-tasks`, payload);
+    return res.json();
+  }
+
+  async updateScheduledTask(
+    id: string,
+    payload: IScheduledTaskUpdate
+  ): Promise<IScheduledTask> {
+    const res = await this.put(`/project/scheduled-tasks/${id}`, payload);
+    return res.json();
+  }
+
+  async deleteScheduledTask(id: string): Promise<{ success: boolean }> {
+    const res = await this.delete(`/project/scheduled-tasks/${id}`, {});
+    return res.json();
+  }
+
+  async runScheduledTask(id: string): Promise<IScheduledTask> {
+    const res = await this.post(`/project/scheduled-tasks/${id}/run`, {});
+    return res.json();
+  }
+
+  // ---- Prompt Gallery ----
+
+  async listPrompts(): Promise<IPrompt[]> {
+    const res = await this.get(`/project/prompts`);
+    return res.json();
+  }
+
+  async createPrompt(title: string, content: string): Promise<IPrompt> {
+    const res = await this.post(`/project/prompts`, { title, content });
+    return res.json();
+  }
+
+  async updatePrompt(
+    id: string,
+    fields: { title?: string; content?: string }
+  ): Promise<IPrompt> {
+    const res = await this.put(`/project/prompts/${id}`, fields);
+    return res.json();
+  }
+
+  async deletePrompt(id: string): Promise<{ success: boolean }> {
+    const res = await this.delete(`/project/prompts/${id}`, {});
+    return res.json();
+  }
+
+  async sharePrompt(
+    id: string,
+    isShared: boolean
+  ): Promise<{ prompt: IPrompt; shareUrl: string }> {
+    const res = await this.post(`/project/prompts/${id}/share`, { isShared });
+    return res.json();
+  }
+
+  async getSharedPrompt(id: string): Promise<IPrompt> {
+    const res = await this.get(`/project/prompt/share/${id}`);
+    return res.json();
+  }
+
+  async addSharedPrompt(id: string): Promise<IPrompt> {
+    const res = await this.post(`/project/prompt/share/${id}/add`, {});
     return res.json();
   }
 }

@@ -1,22 +1,8 @@
 import { useCallback, useContext } from 'react';
-import { useRecoilValue, useResetRecoilState, useSetRecoilState } from 'recoil';
 import {
-  actionState,
-  askUserState,
-  chatSettingsInputsState,
-  chatSettingsValueState,
-  currentThreadIdState,
-  elementState,
-  favoriteMessagesState,
-  firstUserInteraction,
-  loadingState,
-  messagesState,
-  sessionIdState,
-  sessionState,
-  sideViewState,
-  tasklistState,
-  threadIdToResumeState,
-  tokenCountState
+  useChainlitStore,
+  useResetChainlitState,
+  useSetChainlitState
 } from 'src/state';
 import { IFileRef, IStep } from 'src/types';
 import { addMessage } from 'src/utils/message';
@@ -28,25 +14,25 @@ type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
 const useChatInteract = () => {
   const client = useContext(ChainlitContext);
-  const session = useRecoilValue(sessionState);
-  const askUser = useRecoilValue(askUserState);
-  const sessionId = useRecoilValue(sessionIdState);
+  const session = useChainlitStore((state) => state.session);
+  const askUser = useChainlitStore((state) => state.askUser);
+  const sessionId = useChainlitStore((state) => state.sessionId);
 
-  const resetChatSettings = useResetRecoilState(chatSettingsInputsState);
-  const resetSessionId = useResetRecoilState(sessionIdState);
-  const resetChatSettingsValue = useResetRecoilState(chatSettingsValueState);
+  const resetChatSettings = useResetChainlitState('chatSettingsInputs');
+  const resetSessionId = useResetChainlitState('sessionId');
+  const resetChatSettingsValue = useResetChainlitState('chatSettingsValue');
 
-  const setFirstUserInteraction = useSetRecoilState(firstUserInteraction);
-  const setLoading = useSetRecoilState(loadingState);
-  const setMessages = useSetRecoilState(messagesState);
-  const setElements = useSetRecoilState(elementState);
-  const setTasklists = useSetRecoilState(tasklistState);
-  const setActions = useSetRecoilState(actionState);
-  const setTokenCount = useSetRecoilState(tokenCountState);
-  const setIdToResume = useSetRecoilState(threadIdToResumeState);
-  const setSideView = useSetRecoilState(sideViewState);
-  const setCurrentThreadId = useSetRecoilState(currentThreadIdState);
-  const setFavoriteMessages = useSetRecoilState(favoriteMessagesState);
+  const setFirstUserInteraction = useSetChainlitState('firstUserInteraction');
+  const setLoading = useSetChainlitState('loading');
+  const setMessages = useSetChainlitState('messages');
+  const setElements = useSetChainlitState('elements');
+  const setTasklists = useSetChainlitState('tasklists');
+  const setActions = useSetChainlitState('actions');
+  const setTokenCount = useSetChainlitState('tokenCount');
+  const setIdToResume = useSetChainlitState('threadIdToResume');
+  const setSideView = useSetChainlitState('sideView');
+  const setCurrentThreadId = useSetChainlitState('currentThreadId');
+  const setFavoriteMessages = useSetChainlitState('favoriteMessages');
 
   const clear = useCallback(() => {
     session?.socket.emit('clear_session');
@@ -176,6 +162,13 @@ const useChatInteract = () => {
     [session?.socket]
   );
 
+  const updateMode = useCallback(
+    (modeId: string, optionId: string) => {
+      session?.socket.emit('mode_change', { modeId, optionId });
+    },
+    [session?.socket]
+  );
+
   const editChatSettings = useCallback(
     (values: object) => {
       session?.socket.emit('chat_settings_edit', values);
@@ -216,6 +209,7 @@ const useChatInteract = () => {
     stopTask,
     setIdToResume,
     updateChatSettings,
+    updateMode,
     editChatSettings,
     toggleMessageFavorite
   };

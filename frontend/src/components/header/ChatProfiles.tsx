@@ -1,5 +1,4 @@
 import { useContext, useEffect, useState } from 'react';
-import { useSetRecoilState } from 'recoil';
 
 import {
   ChainlitContext,
@@ -23,7 +22,7 @@ import {
   SelectValue
 } from '@/components/ui/select';
 
-import { IAttachment, attachmentsState } from '@/state/chat';
+import { useAppStore } from '@/state/store';
 
 import { NewChatDialog } from './NewChat';
 
@@ -37,7 +36,7 @@ export default function ChatProfiles({ navigate }: Props) {
   const { chatProfile, setChatProfile } = useChatSession();
   const { firstInteraction } = useChatMessages();
   const { clear } = useChatInteract();
-  const setAttachments = useSetRecoilState<IAttachment[]>(attachmentsState);
+  const setAttachments = useAppStore((state) => state.setAttachments);
   const [newChatProfile, setNewChatProfile] = useState<string | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
 

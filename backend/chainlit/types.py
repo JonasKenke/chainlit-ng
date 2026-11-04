@@ -21,8 +21,9 @@ if TYPE_CHECKING:
 from dataclasses import field
 
 from dataclasses_json import DataClassJsonMixin
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic.dataclasses import dataclass
+from typing_extensions import NotRequired
 
 InputWidgetType = Literal[
     "switch",
@@ -359,3 +360,95 @@ class Feedback:
 class UpdateFeedbackRequest(BaseModel):
     feedback: Feedback
     sessionId: str
+
+
+class PromptDict(TypedDict):
+    id: str
+    title: str
+    content: str
+    userId: str
+    isShared: bool
+    createdAt: str
+    updatedAt: str
+
+
+class CreatePromptRequest(BaseModel):
+    title: str
+    content: str
+
+
+class UpdatePromptRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+
+class SharePromptRequest(BaseModel):
+    isShared: bool
+
+
+class ScheduledTaskDict(TypedDict):
+    id: str
+    userId: str
+    userIdentifier: str
+    prompt: str
+    chatProfile: Optional[str]
+    model: NotRequired[Optional[str]]
+    cron: str
+    timezone: str
+    enabled: bool
+    afterHooks: List[str]
+    nextRunAt: str
+    manualRunRequestedAt: Optional[str]
+    lastRunAt: Optional[str]
+    lastStatus: Optional[str]
+    lastError: Optional[str]
+    lastThreadId: Optional[str]
+    leaseId: Optional[str]
+    leaseUntil: Optional[str]
+    createdAt: str
+    updatedAt: str
+
+
+class CreateScheduledTaskRequest(BaseModel):
+    prompt: str
+    chatProfile: Optional[str] = None
+    model: Optional[str] = Field(default=None, max_length=256)
+    cron: str
+    timezone: str
+    enabled: bool = True
+    afterHooks: List[str] = Field(default_factory=list)
+
+
+class UpdateScheduledTaskRequest(BaseModel):
+    prompt: Optional[str] = None
+    chatProfile: Optional[str] = None
+    model: Optional[str] = Field(default=None, max_length=256)
+    cron: Optional[str] = None
+    timezone: Optional[str] = None
+    enabled: Optional[bool] = None
+    afterHooks: Optional[List[str]] = None
+
+
+class ScheduledTaskCompletion(BaseModel):
+    status: str
+    completedAt: str
+    lastError: Optional[str] = None
+    lastThreadId: Optional[str] = None
+    nextRunAt: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class ScheduledTaskResult(BaseModel):
+    taskId: str
+    runId: str
+    threadId: Optional[str] = None
+    owner: str
+    prompt: str
+    chatProfile: Optional[str] = None
+    model: Optional[str] = None
+    scheduledFor: str
+    startedAt: str
+    completedAt: str
+    status: str
+    outputMessages: List[str] = Field(default_factory=list)
+    error: Optional[str] = None

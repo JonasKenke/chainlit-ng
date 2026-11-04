@@ -140,6 +140,7 @@ class TestStepClass:
             )
             test_step.input = "test input"
             test_step.output = "test output"
+            test_step.generation = {"type": "CHAT"}
 
             step_dict = test_step.to_dict()
 
@@ -153,6 +154,7 @@ class TestStepClass:
             assert step_dict["tags"] == ["tag1"]
             assert step_dict["input"] == "test input"
             assert step_dict["output"] == "test output"
+            assert step_dict["generation"] == {"type": "CHAT"}
             assert step_dict["isError"] is False
             assert step_dict["createdAt"] is not None
             assert step_dict["start"] is None

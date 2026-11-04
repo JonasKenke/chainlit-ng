@@ -1,6 +1,5 @@
 from typing import Any, Dict, List, Optional
 
-from literalai import ChatGeneration, CompletionGeneration, GenerationMessage
 from llama_index.core.callbacks import TokenCountingHandler
 from llama_index.core.callbacks.schema import CBEventType, EventPayload
 from llama_index.core.llms import ChatMessage, ChatResponse, CompletionResponse
@@ -150,10 +149,7 @@ class LlamaIndexCallbackHandler(TokenCountingHandler):
 
             if formatted_messages:
                 messages = [
-                    GenerationMessage(
-                        role=m.role.value,  # type: ignore
-                        content=m.content or "",
-                    )
+                    {"role": m.role.value, "content": m.content or ""}
                     for m in formatted_messages
                 ]
             else:
@@ -174,22 +170,24 @@ class LlamaIndexCallbackHandler(TokenCountingHandler):
 
             if messages and isinstance(response, ChatResponse):
                 msg: ChatMessage = response.message
-                step.generation = ChatGeneration(
-                    model=model,
-                    messages=messages,
-                    message_completion=GenerationMessage(
-                        role=msg.role.value,  # type: ignore
-                        content=content,
-                    ),
-                    token_count=token_count,
-                )
+                step.generation = {
+                    "model": model,
+                    "messages": messages,
+                    "messageCompletion": {
+                        "role": msg.role.value,
+                        "content": content,
+                    },
+                    "tokenCount": token_count,
+                    "type": "CHAT",
+                }
             elif formatted_prompt:
-                step.generation = CompletionGeneration(
-                    model=model,
-                    prompt=formatted_prompt,
-                    completion=content,
-                    token_count=token_count,
-                )
+                step.generation = {
+                    "model": model,
+                    "prompt": formatted_prompt,
+                    "completion": content,
+                    "tokenCount": token_count,
+                    "type": "COMPLETION",
+                }
 
             context_var.get().loop.create_task(step.update())
 

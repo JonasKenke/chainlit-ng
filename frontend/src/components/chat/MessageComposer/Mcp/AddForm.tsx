@@ -1,11 +1,10 @@
 import { useContext, useState } from 'react';
-import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { toast } from 'sonner';
 
 import {
   ChainlitContext,
-  mcpState,
-  sessionIdState
+  useChainlitStore,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
@@ -36,8 +35,8 @@ export const McpAddForm = ({
   allowHttp
 }: McpAddFormProps) => {
   const apiClient = useContext(ChainlitContext);
-  const sessionId = useRecoilValue(sessionIdState);
-  const setMcps = useSetRecoilState(mcpState);
+  const sessionId = useChainlitStore((state) => state.sessionId);
+  const setMcps = useSetChainlitState('mcps');
 
   const [serverName, setServerName] = useState('');
   // Pick the first protocol enabled by the parent component.

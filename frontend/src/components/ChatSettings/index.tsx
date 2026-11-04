@@ -2,13 +2,11 @@ import cloneDeep from 'lodash/cloneDeep';
 import mapValues from 'lodash/mapValues';
 import { useCallback, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { useRecoilState, useSetRecoilState } from 'recoil';
 
 import {
-  chatSettingsInputsState,
-  chatSettingsValueState,
   useChatData,
-  useChatInteract
+  useChatInteract,
+  useSetChainlitState
 } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
@@ -23,7 +21,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Translator } from 'components/i18n';
 
-import { chatSettingsOpenState } from 'state/project';
+import { useAppStore } from '@/state/store';
 
 import { FormInput, TFormInputValue } from './FormInput';
 import { useChatSettingsSnapshotAtOpen } from './useChatSettingsSnapshotAtOpen';
@@ -32,9 +30,8 @@ export default function ChatSettingsModal() {
   const { chatSettingsValue, chatSettingsInputs } = useChatData();
 
   const { updateChatSettings, editChatSettings } = useChatInteract();
-  const [chatSettingsOpen, setChatSettingsOpen] = useRecoilState(
-    chatSettingsOpenState
-  );
+  const chatSettingsOpen = useAppStore((state) => state.chatSettingsOpen);
+  const setChatSettingsOpen = useAppStore((state) => state.setChatSettingsOpen);
 
   const { valuesAtOpen, inputsAtOpen } = useChatSettingsSnapshotAtOpen(
     chatSettingsOpen,
@@ -45,8 +42,8 @@ export default function ChatSettingsModal() {
   const { handleSubmit, setValue, reset, watch, getValues } = useForm({
     defaultValues: chatSettingsValue
   });
-  const setChatSettingsValue = useSetRecoilState(chatSettingsValueState);
-  const setChatSettingsInputs = useSetRecoilState(chatSettingsInputsState);
+  const setChatSettingsValue = useSetChainlitState('chatSettingsValue');
+  const setChatSettingsInputs = useSetChainlitState('chatSettingsInputs');
 
   const restoreSnapshot = useCallback(() => {
     setChatSettingsInputs(cloneDeep(inputsAtOpen));

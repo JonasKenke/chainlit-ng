@@ -1,10 +1,9 @@
 import { TOptions } from 'i18next';
-import { $Dictionary } from 'i18next/typescript/helpers';
 import { useTranslation as usei18nextTranslation } from 'react-i18next';
 
 import { Skeleton } from '@/components/ui/skeleton';
 
-type options = TOptions<$Dictionary>;
+type options = TOptions<Record<string, unknown>>;
 
 type TranslatorProps = {
   path: string | string[];

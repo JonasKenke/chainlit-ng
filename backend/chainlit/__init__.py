@@ -15,7 +15,6 @@ if env_found:
 import asyncio
 from typing import TYPE_CHECKING, Any, Dict
 
-from literalai import ChatGeneration, CompletionGeneration, GenerationMessage
 from pydantic.dataclasses import dataclass
 
 import chainlit.input_widget as input_widget
@@ -55,6 +54,7 @@ from chainlit.types import (
     ChatProfile,
     InputAudioChunk,
     OutputAudioChunk,
+    ScheduledTaskResult,
     Starter,
     StarterCategory,
 )
@@ -65,6 +65,7 @@ from chainlit.version import __version__
 
 from .callbacks import (
     action_callback,
+    after_scheduled_task,
     author_rename,
     data_layer,
     header_auth_callback,
@@ -82,6 +83,7 @@ from .callbacks import (
     on_mcp_connect,
     on_mcp_disconnect,
     on_message,
+    on_mode_update,
     on_settings_edit,
     on_settings_update,
     on_shared_thread_view,
@@ -91,6 +93,7 @@ from .callbacks import (
     password_auth_callback,
     send_window_message,
     set_chat_profiles,
+    set_scheduled_task_models,
     set_starter_categories,
     set_starters,
 )
@@ -101,8 +104,6 @@ if TYPE_CHECKING:
         LangchainCallbackHandler,
     )
     from chainlit.llama_index.callbacks import LlamaIndexCallbackHandler
-    from chainlit.mistralai import instrument_mistralai
-    from chainlit.openai import instrument_openai
     from chainlit.semantic_kernel import SemanticKernelFilter
 
 
@@ -129,8 +130,6 @@ __getattr__ = make_module_getattr(
         "LangchainCallbackHandler": "chainlit.langchain.callbacks",
         "AsyncLangchainCallbackHandler": "chainlit.langchain.callbacks",
         "LlamaIndexCallbackHandler": "chainlit.llama_index.callbacks",
-        "instrument_openai": "chainlit.openai",
-        "instrument_mistralai": "chainlit.mistralai",
         "SemanticKernelFilter": "chainlit.semantic_kernel",
         "server": "chainlit.server",
     }
@@ -144,17 +143,14 @@ __all__ = [
     "AskUserMessage",
     "AsyncLangchainCallbackHandler",
     "Audio",
-    "ChatGeneration",
     "ChatProfile",
     "ChatSettings",
-    "CompletionGeneration",
     "CopilotFunction",
     "CustomElement",
     "Dataframe",
     "ElementSidebar",
     "ErrorMessage",
     "File",
-    "GenerationMessage",
     "Image",
     "InputAudioChunk",
     "LangchainCallbackHandler",
@@ -167,6 +163,7 @@ __all__ = [
     "PersistedUser",
     "Plotly",
     "Pyplot",
+    "ScheduledTaskResult",
     "SemanticKernelFilter",
     "Starter",
     "StarterCategory",
@@ -179,6 +176,7 @@ __all__ = [
     "Video",
     "__version__",
     "action_callback",
+    "after_scheduled_task",
     "author_rename",
     "cache",
     "chat_context",
@@ -186,8 +184,6 @@ __all__ = [
     "data_layer",
     "header_auth_callback",
     "input_widget",
-    "instrument_mistralai",
-    "instrument_openai",
     "make_async",
     "oauth_callback",
     "on_app_shutdown",
@@ -203,6 +199,7 @@ __all__ = [
     "on_mcp_connect",
     "on_mcp_disconnect",
     "on_message",
+    "on_mode_update",
     "on_settings_edit",
     "on_settings_update",
     "on_shared_thread_view",
@@ -213,6 +210,7 @@ __all__ = [
     "run_sync",
     "send_window_message",
     "set_chat_profiles",
+    "set_scheduled_task_models",
     "set_starter_categories",
     "set_starters",
     "sleep",

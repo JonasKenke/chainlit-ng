@@ -7,9 +7,8 @@ import {
 import { every } from 'lodash';
 import { Settings2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useRecoilValue } from 'recoil';
 
-import { ICommand, commandsState } from '@chainlit/react-client';
+import { ICommand, useChainlitStore } from '@chainlit/react-client';
 
 import Icon from '@/components/Icon';
 import { Button } from '@/components/ui/button';
@@ -42,7 +41,7 @@ export const CommandPopoverButton = ({
   onCommandSelect
 }: Props) => {
   const { t } = useTranslation();
-  const commands = useRecoilValue(commandsState);
+  const commands = useChainlitStore((state) => state.commands);
   const [open, setOpen] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);

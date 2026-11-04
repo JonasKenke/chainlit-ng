@@ -10,12 +10,11 @@ To install the package, run the following command in your project directory:
 npm install @chainlit/react-client
 ```
 
-This package use [Recoil](https://github.com/facebookexperimental/Recoil) to manage its state. This means you will have to wrap your application in a recoil provider:
+The package uses a Zustand store scoped to each `ChainlitAPI` instance. No state provider is needed; wrap your app in `ChainlitContext.Provider`:
 
 ```tsx
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { RecoilRoot } from 'recoil';
 
 import { ChainlitAPI, ChainlitContext } from '@chainlit/react-client';
 
@@ -26,13 +25,13 @@ const apiClient = new ChainlitAPI(CHAINLIT_SERVER_URL, 'webapp');
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <ChainlitContext.Provider value={apiClient}>
-      <RecoilRoot>
-        <MyApp />
-      </RecoilRoot>
+      <MyApp />
     </ChainlitContext.Provider>
   </React.StrictMode>
 );
 ```
+
+Recoil-specific atom exports have been removed. Use the public chat hooks for common state; advanced integrations can use `useChainlitStore`, `useChainlitState`, and `useSetChainlitState`.
 
 ## Usage
 
@@ -57,9 +56,7 @@ const ChatComponent = () => {
   // Connect to the WebSocket server
   useEffect(() => {
     connect({
-      userEnv: {
-        /* user environment variables */
-      }
+      userEnv: {/* user environment variables */}
     });
 
     return () => {

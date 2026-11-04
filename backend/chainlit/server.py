@@ -10,7 +10,7 @@ import urllib.parse
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, List, Optional, Union, cast
 
 import socketio
 from fastapi import (
@@ -34,7 +34,13 @@ from starlette.types import Receive, Scope, Send
 from typing_extensions import Annotated
 from watchfiles import awatch
 
-from chainlit.auth import create_jwt, decode_jwt, get_configuration, get_current_user
+from chainlit.auth import (
+    create_jwt,
+    decode_jwt,
+    get_configuration,
+    get_current_user,
+    require_login,
+)
 from chainlit.auth.cookie import (
     clear_auth_cookie,
     clear_oauth_state_cookie,
@@ -56,22 +62,36 @@ from chainlit.config import (
 )
 from chainlit.data import get_data_layer
 from chainlit.data.acl import is_thread_author
+from chainlit.data.base import BaseDataLayer
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
 from chainlit.oauth_providers import get_oauth_provider
+from chainlit.scheduled_task import (
+    next_run_at,
+    validate_cron,
+    validate_prompt,
+    validate_timezone,
+)
+from chainlit.scheduler import ScheduledTaskWorker
 from chainlit.secret import random_secret
 from chainlit.types import (
     AskFileSpec,
     CallActionRequest,
     ConnectMCPRequest,
+    CreatePromptRequest,
+    CreateScheduledTaskRequest,
     DeleteFeedbackRequest,
     DeleteThreadRequest,
     DisconnectMCPRequest,
     ElementRequest,
     GetThreadsRequest,
+    ScheduledTaskDict,
+    SharePromptRequest,
     ShareThreadRequest,
     Theme,
     UpdateFeedbackRequest,
+    UpdatePromptRequest,
+    UpdateScheduledTaskRequest,
     UpdateThreadRequest,
 )
 from chainlit.user import PersistedUser, User
@@ -156,6 +176,17 @@ async def lifespan(app: FastAPI):
         discord_task = asyncio.create_task(client.start(discord_bot_token))
 
     slack_task = None
+    scheduler: Optional[ScheduledTaskWorker] = None
+    scheduler_task = None
+    if (
+        config.features.prompt_scheduling
+        and require_login()
+        and config.code.on_message
+        and (data_layer := get_data_layer())
+        and _supports_scheduled_tasks(data_layer)
+    ):
+        scheduler = ScheduledTaskWorker(data_layer)
+        scheduler_task = asyncio.create_task(scheduler.run())
 
     # Slack Socket Handler if env variable SLACK_WEBSOCKET_TOKEN is set
     if os.environ.get("SLACK_BOT_TOKEN") and os.environ.get("SLACK_WEBSOCKET_TOKEN"):
@@ -182,6 +213,12 @@ async def lifespan(app: FastAPI):
             if slack_task:
                 slack_task.cancel()
                 await slack_task
+
+            if scheduler:
+                await scheduler.shutdown()
+                if scheduler_task:
+                    scheduler_task.cancel()
+                    await scheduler_task
 
             if data_layer := get_data_layer():
                 await data_layer.close()
@@ -751,6 +788,51 @@ async def oauth_azure_hf_callback(
 GenericUser = Union[User, PersistedUser, None]
 UserParam = Annotated[GenericUser, Depends(get_current_user)]
 
+_SCHEDULED_TASK_METHODS = (
+    "create_scheduled_task",
+    "list_scheduled_tasks",
+    "get_scheduled_task",
+    "update_scheduled_task",
+    "delete_scheduled_task",
+    "request_scheduled_task_run",
+    "claim_due_scheduled_tasks",
+    "renew_scheduled_task_lease",
+    "complete_scheduled_task_run",
+)
+
+
+def _supports_scheduled_tasks(data_layer: Optional[BaseDataLayer]) -> bool:
+    if data_layer is None:
+        return False
+    return all(
+        callable(getattr(data_layer, method, None))
+        and getattr(type(data_layer), method, None)
+        is not getattr(BaseDataLayer, method)
+        for method in _SCHEDULED_TASK_METHODS
+    )
+
+
+_PROMPT_GALLERY_METHODS = (
+    "create_prompt",
+    "list_prompts",
+    "get_prompt",
+    "update_prompt",
+    "delete_prompt",
+)
+
+
+def _supports_prompt_gallery(data_layer: Optional[BaseDataLayer]) -> bool:
+    """Return whether a data layer implements all prompt gallery operations."""
+    if data_layer is None:
+        return False
+
+    return all(
+        callable(getattr(data_layer, method, None))
+        and getattr(type(data_layer), method, None)
+        is not getattr(BaseDataLayer, method)
+        for method in _PROMPT_GALLERY_METHODS
+    )
+
 
 @router.get("/user")
 async def get_user(current_user: UserParam) -> GenericUser:
@@ -832,6 +914,16 @@ async def project_settings(
                 d.pop("config_overrides", None)
                 profiles.append(d)
 
+    scheduled_models: list[str] = []
+    if config.code.set_scheduled_task_models:
+        scheduled_models = list(
+            dict.fromkeys(
+                await config.code.set_scheduled_task_models(
+                    current_user, effective_language
+                )
+            )
+        )
+
     starters = []
     if config.code.set_starters:
         s = await config.code.set_starters(current_user, effective_language)
@@ -847,9 +939,6 @@ async def project_settings(
             starter_categories = [it.to_dict() for it in sc]
 
     data_layer = get_data_layer()
-    debug_url = (
-        await data_layer.build_debug_url() if data_layer and config.run.debug else None
-    )
 
     cfg = config
     if chat_profile and chat_profiles:
@@ -858,6 +947,21 @@ async def project_settings(
         )
         if current_profile and getattr(current_profile, "config_overrides", None):
             cfg = config.with_overrides(current_profile.config_overrides)
+
+    scheduled_hooks = [
+        {"name": name, "default": bool(value.get("default", True))}
+        for name, value in config.code.scheduled_task_after_hooks.items()
+    ]
+    scheduled_user = False
+    if current_user is not None and data_layer:
+        persisted = await data_layer.get_user(current_user.identifier)
+        scheduled_user = bool(
+            persisted
+            and (
+                not isinstance(current_user, PersistedUser)
+                or persisted.id == current_user.id
+            )
+        )
 
     return JSONResponse(
         content={
@@ -872,11 +976,22 @@ async def project_settings(
                 getattr(cfg.features, "allow_thread_sharing", False)
                 and getattr(config.code, "on_shared_thread_view", None)
             ),
+            "promptGallery": bool(
+                getattr(cfg.features, "prompt_gallery", False)
+                and _supports_prompt_gallery(data_layer)
+            ),
+            "promptScheduling": bool(
+                getattr(cfg.features, "prompt_scheduling", False)
+                and scheduled_user
+                and _supports_scheduled_tasks(data_layer)
+                and config.code.on_message is not None
+            ),
+            "scheduledTaskAfterHooks": scheduled_hooks,
             "markdown": markdown,
             "chatProfiles": profiles,
+            "scheduledTaskModels": scheduled_models,
             "starters": starters,
             "starterCategories": starter_categories,
-            "debugUrl": debug_url,
         }
     )
 
@@ -1036,6 +1151,400 @@ async def get_shared_thread(
     metadata.pop("env", None)
     thread["metadata"] = metadata
     return JSONResponse(content=thread)
+
+
+# ---- Prompt scheduling endpoints ----
+
+
+def _scheduled_feature_enabled() -> None:
+    if not config.features.prompt_scheduling:
+        raise HTTPException(
+            status_code=400, detail="Prompt scheduling feature is not enabled"
+        )
+
+
+async def _scheduled_user_id(
+    current_user: GenericUser, data_layer: BaseDataLayer
+) -> str:
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    persisted = await data_layer.get_user(identifier=current_user.identifier)
+    if not persisted or (
+        isinstance(current_user, PersistedUser) and persisted.id != current_user.id
+    ):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return persisted.id
+
+
+async def _scheduled_layer(current_user: GenericUser) -> tuple[BaseDataLayer, str]:
+    _scheduled_feature_enabled()
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    data_layer = get_data_layer()
+    if data_layer is None:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    if not _supports_scheduled_tasks(data_layer):
+        raise HTTPException(
+            status_code=501,
+            detail="Prompt scheduling is not supported by this data layer",
+        )
+    return data_layer, await _scheduled_user_id(current_user, data_layer)
+
+
+async def _validate_scheduled_payload(
+    payload: CreateScheduledTaskRequest | UpdateScheduledTaskRequest,
+    current_user: GenericUser,
+) -> None:
+    if payload.prompt is not None:
+        try:
+            validate_prompt(payload.prompt)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    for value, validator in (
+        (payload.cron, validate_cron),
+        (payload.timezone, validate_timezone),
+    ):
+        if value is not None:
+            try:
+                validator(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+    hooks = payload.afterHooks
+    if hooks is not None:
+        available = config.code.scheduled_task_after_hooks
+        if len(hooks) != len(set(hooks)) or any(
+            name not in available for name in hooks
+        ):
+            raise HTTPException(
+                status_code=422, detail="Unknown scheduled task after-hook"
+            )
+    if payload.chatProfile is not None:
+        if not config.code.set_chat_profiles:
+            raise HTTPException(status_code=422, detail="Unknown chat profile")
+        profiles = await config.code.set_chat_profiles(current_user, None)
+        if not any(profile.name == payload.chatProfile for profile in profiles):
+            raise HTTPException(status_code=422, detail="Unknown chat profile")
+    if payload.model is not None:
+        if not config.code.set_scheduled_task_models:
+            raise HTTPException(status_code=422, detail="Unknown scheduled task model")
+        models = await config.code.set_scheduled_task_models(current_user, None)
+        if payload.model not in models:
+            raise HTTPException(status_code=422, detail="Unknown scheduled task model")
+
+
+@router.get("/project/scheduled-tasks")
+async def list_scheduled_tasks(current_user: UserParam):
+    data_layer, user_id = await _scheduled_layer(current_user)
+    try:
+        tasks = await data_layer.list_scheduled_tasks(user_id)
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    return JSONResponse(content=tasks)
+
+
+@router.post("/project/scheduled-tasks")
+async def create_scheduled_task(
+    payload: CreateScheduledTaskRequest, current_user: UserParam
+):
+    data_layer, user_id = await _scheduled_layer(current_user)
+    await _validate_scheduled_payload(payload, current_user)
+    now = utc_now()
+    cron = validate_cron(payload.cron)
+    timezone_name = validate_timezone(payload.timezone)
+    import uuid as _uuid
+
+    task: ScheduledTaskDict = {
+        "id": str(_uuid.uuid4()),
+        "userId": user_id,
+        "userIdentifier": current_user.identifier,  # type: ignore[union-attr]
+        "prompt": validate_prompt(payload.prompt),
+        "chatProfile": payload.chatProfile,
+        "model": payload.model,
+        "cron": cron,
+        "timezone": timezone_name,
+        "enabled": payload.enabled,
+        "afterHooks": payload.afterHooks,
+        "nextRunAt": next_run_at(cron, timezone_name)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "manualRunRequestedAt": None,
+        "lastRunAt": None,
+        "lastStatus": None,
+        "lastError": None,
+        "lastThreadId": None,
+        "leaseId": None,
+        "leaseUntil": None,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    try:
+        return JSONResponse(content=await data_layer.create_scheduled_task(task))
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+
+
+@router.put("/project/scheduled-tasks/{task_id}")
+async def update_scheduled_task(
+    task_id: str, payload: UpdateScheduledTaskRequest, current_user: UserParam
+):
+    data_layer, user_id = await _scheduled_layer(current_user)
+    existing = await data_layer.get_scheduled_task(task_id)
+    if not existing or existing["userId"] != user_id:
+        raise HTTPException(status_code=404, detail="Scheduled task not found")
+    await _validate_scheduled_payload(payload, current_user)
+    updated = cast(ScheduledTaskDict, dict(existing))
+    for field in (
+        "prompt",
+        "chatProfile",
+        "model",
+        "cron",
+        "timezone",
+        "enabled",
+        "afterHooks",
+    ):
+        if field in payload.model_fields_set:
+            updated[field] = getattr(payload, field)
+    updated["prompt"] = validate_prompt(updated["prompt"])
+    updated["cron"] = validate_cron(updated["cron"])
+    updated["timezone"] = validate_timezone(updated["timezone"])
+    if {"cron", "timezone"} & payload.model_fields_set or (
+        "enabled" in payload.model_fields_set and updated["enabled"]
+    ):
+        updated["nextRunAt"] = (
+            next_run_at(updated["cron"], updated["timezone"])
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    updated["updatedAt"] = utc_now()
+    return JSONResponse(content=await data_layer.update_scheduled_task(updated))
+
+
+@router.delete("/project/scheduled-tasks/{task_id}")
+async def delete_scheduled_task(task_id: str, current_user: UserParam):
+    data_layer, user_id = await _scheduled_layer(current_user)
+    if not await data_layer.delete_scheduled_task(task_id, user_id):
+        raise HTTPException(status_code=404, detail="Scheduled task not found")
+    return JSONResponse(content={"success": True})
+
+
+@router.post("/project/scheduled-tasks/{task_id}/run", status_code=202)
+async def run_scheduled_task(task_id: str, current_user: UserParam):
+    data_layer, user_id = await _scheduled_layer(current_user)
+    existing = await data_layer.get_scheduled_task(task_id)
+    if not existing or existing["userId"] != user_id:
+        raise HTTPException(status_code=404, detail="Scheduled task not found")
+    requested_at = utc_now()
+    try:
+        queued = await data_layer.request_scheduled_task_run(
+            task_id, user_id, requested_at
+        )
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    if not queued:
+        raise HTTPException(
+            status_code=400, detail="A scheduled task run is already queued"
+        )
+    updated = await data_layer.get_scheduled_task(task_id)
+    return JSONResponse(
+        status_code=202,
+        content=updated or {**existing, "manualRunRequestedAt": requested_at},
+    )
+
+
+# ---- Prompt Gallery endpoints ----
+
+
+async def _get_user_id(current_user: GenericUser, data_layer: "BaseDataLayer") -> str:
+    """Return the persisted user id, looking it up when current_user is an unpersisted User."""
+    if isinstance(current_user, PersistedUser):
+        return current_user.id
+    if current_user is None:
+        if require_login():
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        # No-auth mode: use a stable anonymous user ID so prompt gallery works.
+        return "anonymous"
+    persisted = await data_layer.get_user(identifier=current_user.identifier)
+    if not persisted:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return persisted.id
+
+
+def _prompt_gallery_enabled() -> None:
+    """Raise 400 when the feature is disabled, to keep guards DRY."""
+    if not config.features.prompt_gallery:
+        raise HTTPException(
+            status_code=400, detail="Prompt gallery feature is not enabled"
+        )
+
+
+async def _dl_prompt(coro: Any) -> Any:
+    """Await a prompt data-layer call; map NotImplementedError to HTTP 501."""
+    try:
+        return await coro
+    except NotImplementedError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail=str(exc) or "Prompt gallery is not supported by this data layer",
+        ) from exc
+
+
+@router.get("/project/prompts")
+async def list_prompts(
+    request: Request,
+    current_user: UserParam,
+):
+    """List the current user's saved prompts."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    prompts = await _dl_prompt(
+        data_layer.list_prompts(await _get_user_id(current_user, data_layer))
+    )
+    return JSONResponse(content=prompts)
+
+
+@router.post("/project/prompts")
+async def create_prompt(
+    request: Request,
+    payload: CreatePromptRequest,
+    current_user: UserParam,
+):
+    """Save a new prompt to the gallery."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    import uuid as _uuid
+
+    now = utc_now()
+    prompt = {
+        "id": str(_uuid.uuid4()),
+        "title": payload.title,
+        "content": payload.content,
+        "userId": await _get_user_id(current_user, data_layer),
+        "isShared": False,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    created = await _dl_prompt(data_layer.create_prompt(prompt))  # type: ignore[arg-type]
+    return JSONResponse(content=created)
+
+
+@router.put("/project/prompts/{prompt_id}")
+async def update_prompt(
+    request: Request,
+    prompt_id: str,
+    payload: UpdatePromptRequest,
+    current_user: UserParam,
+):
+    """Edit a prompt (author only)."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    user_id = await _get_user_id(current_user, data_layer)
+    existing = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not existing or existing["userId"] != user_id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    updated = dict(existing)
+    if payload.title is not None:
+        updated["title"] = payload.title
+    if payload.content is not None:
+        updated["content"] = payload.content
+    updated["updatedAt"] = utc_now()
+    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+    return JSONResponse(content=result)
+
+
+@router.delete("/project/prompts/{prompt_id}")
+async def delete_prompt(
+    request: Request,
+    prompt_id: str,
+    current_user: UserParam,
+):
+    """Delete a prompt (author only)."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    deleted = await _dl_prompt(
+        data_layer.delete_prompt(
+            prompt_id, await _get_user_id(current_user, data_layer)
+        )
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return JSONResponse(content={"success": True})
+
+
+@router.post("/project/prompts/{prompt_id}/share")
+async def share_prompt(
+    request: Request,
+    prompt_id: str,
+    payload: SharePromptRequest,
+    current_user: UserParam,
+):
+    """Toggle sharing of a prompt (author only). Returns share URL."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    user_id = await _get_user_id(current_user, data_layer)
+    existing = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not existing or existing["userId"] != user_id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    updated = dict(existing)
+    updated["isShared"] = payload.isShared
+    updated["updatedAt"] = utc_now()
+    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+    return JSONResponse(content={"prompt": result, "shareUrl": f"/prompt/{prompt_id}"})
+
+
+@router.get("/project/prompt/share/{prompt_id}")
+async def get_shared_prompt(
+    request: Request,
+    prompt_id: str,
+):
+    """Fetch a shared prompt anonymously. Returns 404 if not shared."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not prompt or not prompt["isShared"]:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return JSONResponse(content=prompt)
+
+
+@router.post("/project/prompt/share/{prompt_id}/add")
+async def add_shared_prompt(
+    request: Request,
+    prompt_id: str,
+    current_user: UserParam,
+):
+    """Copy a shared prompt into the current user's gallery."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    source = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not source or not source["isShared"]:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    import uuid as _uuid
+
+    now = utc_now()
+    copy = {
+        "id": str(_uuid.uuid4()),
+        "title": source["title"],
+        "content": source["content"],
+        "userId": await _get_user_id(current_user, data_layer),
+        "isShared": False,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    created = await _dl_prompt(data_layer.create_prompt(copy))  # type: ignore[arg-type]
+    return JSONResponse(content=created)
 
 
 @router.get("/project/thread/{thread_id}/element/{element_id}")
@@ -1296,6 +1805,7 @@ async def connect_mcp(
 ):
     import asyncio
 
+    import httpx2
     from mcp import ClientSession
     from mcp.client.sse import sse_client
     from mcp.client.stdio import (
@@ -1303,7 +1813,7 @@ async def connect_mcp(
         get_default_environment,
         stdio_client,
     )
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
     from chainlit.context import init_ws_context
     from chainlit.mcp import (
@@ -1430,10 +1940,15 @@ async def connect_mcp(
                         stdio_client(server_params)
                     )
                 elif isinstance(mcp_connection, HttpMcpConnection):
-                    transport = await exit_stack.enter_async_context(
-                        streamablehttp_client(
-                            url=mcp_connection.url,
+                    http_client = await exit_stack.enter_async_context(
+                        httpx2.AsyncClient(
                             headers=mcp_connection.headers,
+                            timeout=httpx2.Timeout(30, read=300),
+                        )
+                    )
+                    transport = await exit_stack.enter_async_context(
+                        streamable_http_client(
+                            url=mcp_connection.url, http_client=http_client
                         )
                     )
                 else:

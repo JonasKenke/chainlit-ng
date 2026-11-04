@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRecoilState } from 'recoil';
 import { toast } from 'sonner';
 
 import {
-  resumeThreadErrorState,
+  useChainlitState,
   useChatInteract,
+  useChatMessages,
   useChatSession,
   useConfig
 } from '@chainlit/react-client';
@@ -19,12 +19,13 @@ export default function AutoResumeThread({ id }: Props) {
   const { config } = useConfig();
   const { clear, setIdToResume } = useChatInteract();
   const { session, idToResume } = useChatSession();
-  const [resumeThreadError, setResumeThreadError] = useRecoilState(
-    resumeThreadErrorState
-  );
+  const { threadId } = useChatMessages();
+  const [resumeThreadError, setResumeThreadError] =
+    useChainlitState('resumeThreadError');
 
   useEffect(() => {
-    if (!config?.threadResumable) return;
+    // Only resume on a route change, not when New Chat clears the thread.
+    if (!config?.threadResumable || id === threadId) return;
     clear();
     setIdToResume(id);
     if (!config?.dataPersistence) {

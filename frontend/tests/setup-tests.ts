@@ -1,11 +1,26 @@
-import matchers from '@testing-library/jest-dom/matchers';
+import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach, expect, vi } from 'vitest';
-
-expect.extend(matchers);
+import { afterEach, vi } from 'vitest';
 
 // Mock URL.createObjectURL
 global.URL.createObjectURL = vi.fn();
+
+if (typeof globalThis.localStorage === 'undefined') {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear(),
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() {
+        return values.size;
+      }
+    }
+  });
+}
 
 // Polyfill DOMMatrix for pdfjs-dist which requires it at import time in JSDOM
 if (typeof globalThis.DOMMatrix === 'undefined') {

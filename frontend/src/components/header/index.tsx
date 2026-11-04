@@ -1,6 +1,5 @@
 import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSetRecoilState } from 'recoil';
 
 import {
   useAudio,
@@ -21,7 +20,7 @@ import {
 } from '@/components/ui/tooltip';
 import { Translator } from 'components/i18n';
 
-import { chatSettingsSidebarOpenState } from '@/state/project';
+import { useAppStore } from '@/state/store';
 
 import ApiKeys from './ApiKeys';
 import ChatProfiles from './ChatProfiles';
@@ -39,8 +38,8 @@ const Header = memo(() => {
   const { config } = useConfig();
   const { chatSettingsInputs } = useChatData();
   const { open, openMobile, isMobile } = useSidebar();
-  const setChatSettingsSidebarOpen = useSetRecoilState(
-    chatSettingsSidebarOpenState
+  const setChatSettingsSidebarOpen = useAppStore(
+    (state) => state.setChatSettingsSidebarOpen
   );
 
   const sidebarOpen = isMobile ? openMobile : open;

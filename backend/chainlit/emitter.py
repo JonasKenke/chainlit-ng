@@ -1,16 +1,18 @@
 import asyncio
 import uuid
+from dataclasses import replace
 from typing import Any, Dict, List, Literal, Optional, Union, cast, get_args
 
 from socketio.exceptions import TimeoutError
 
 from chainlit.chat_context import chat_context
 from chainlit.config import config
+from chainlit.context import ChainlitContextException
 from chainlit.data import get_data_layer
 from chainlit.element import Element, ElementDict, File
 from chainlit.logger import logger
 from chainlit.message import Message
-from chainlit.mode import Mode
+from chainlit.mode import MODE_PREFERENCES_METADATA_KEY, Mode
 from chainlit.session import BaseSession, WebsocketSession
 from chainlit.step import StepDict
 from chainlit.types import (
@@ -28,6 +30,55 @@ from chainlit.types import (
 )
 from chainlit.user import PersistedUser
 from chainlit.utils import utc_now
+
+
+def _saved_mode_values(session: BaseSession) -> Dict[str, str]:
+    user = getattr(session, "user", None)
+    metadata = getattr(user, "metadata", None)
+    if not isinstance(metadata, dict):
+        return {}
+
+    values = metadata.get(MODE_PREFERENCES_METADATA_KEY)
+    return dict(values) if isinstance(values, dict) else {}
+
+
+def _resolve_modes(
+    session: BaseSession, modes: List[Mode]
+) -> tuple[List[Mode], Dict[str, str]]:
+    current_values = getattr(session, "mode_values", {})
+    current_values = current_values if isinstance(current_values, dict) else {}
+    saved_values = _saved_mode_values(session)
+    resolved_values: Dict[str, str] = {}
+    resolved_modes: List[Mode] = []
+
+    for mode in modes:
+        selected_id = None
+        for candidate in (
+            current_values.get(mode.id),
+            saved_values.get(mode.id) if mode.persist_to_user else None,
+        ):
+            if candidate and mode.get_option_by_id(candidate):
+                selected_id = candidate
+                break
+
+        default_option = mode.get_default_option()
+        selected_id = selected_id or (default_option.id if default_option else None)
+        if not selected_id:
+            resolved_modes.append(mode)
+            continue
+
+        resolved_values[mode.id] = selected_id
+        resolved_modes.append(
+            replace(
+                mode,
+                options=[
+                    replace(option, default=option.id == selected_id)
+                    for option in mode.options
+                ],
+            )
+        )
+
+    return resolved_modes, resolved_values
 
 
 class BaseChainlitEmitter:
@@ -448,10 +499,20 @@ class ChainlitEmitter(BaseChainlitEmitter):
         )
 
     def set_modes(self, modes: List[Mode]):
-        """Send the available modes to the UI."""
+        """Set the available modes and send them to the UI."""
+        resolved_modes, values = _resolve_modes(self.session, modes)
+        self.session.modes = list(modes)
+        self.session.mode_values = values
+
+        from chainlit.user_session import user_session
+
+        try:
+            user_session.set("modes", values)
+        except ChainlitContextException:
+            pass
         return self.emit(
             "set_modes",
-            [mode.to_dict() for mode in modes],
+            [mode.to_dict() for mode in resolved_modes],
         )
 
     def set_favorites(self, steps: List[StepDict]):

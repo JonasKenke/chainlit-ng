@@ -26,7 +26,7 @@ export const TagsInput = ({
   setField,
   placeholder,
   ...rest
-}: TagsInputProps): JSX.Element => {
+}: TagsInputProps): React.JSX.Element => {
   const [inputValue, setInputValue] = React.useState('');
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

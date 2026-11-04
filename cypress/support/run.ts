@@ -1,60 +1,52 @@
-import {
-  ChildProcessWithoutNullStreams,
-  SpawnOptionsWithoutStdio,
-  spawn
-} from 'child_process';
+import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import { access } from 'fs/promises';
 import { dirname, join } from 'path';
 
 export const runChainlit = async (
   spec: Cypress.Spec | null = null
 ): Promise<ChildProcessWithoutNullStreams> => {
-  const CHAILIT_DIR = join(process.cwd(), 'backend', 'chainlit');
-  const SAMPLE_DIR = join(CHAILIT_DIR, 'sample');
+  const chainlitDir = join(process.cwd(), 'backend', 'chainlit');
+  // Cypress checks baseUrl before before:spec runs; use a current test app for that bootstrap.
+  const bootstrapDir = join(process.cwd(), 'cypress', 'e2e', 'modes');
+  const testDir = spec ? dirname(spec.absolute) : bootstrapDir;
+  const entryPointFileName = spec
+    ? spec.name.startsWith('async')
+      ? 'main_async.py'
+      : spec.name.startsWith('sync')
+        ? 'main_sync.py'
+        : 'main.py'
+    : 'main.py';
+  const entryPointPath = join(testDir, entryPointFileName);
+
+  try {
+    await access(entryPointPath);
+  } catch {
+    throw new Error(`Entry point file does not exist: ${entryPointPath}`);
+  }
 
   return new Promise((resolve, reject) => {
-    const testDir = spec ? dirname(spec.absolute) : SAMPLE_DIR;
-    const entryPointFileName = spec
-      ? spec.name.startsWith('async')
-        ? 'main_async.py'
-        : spec.name.startsWith('sync')
-          ? 'main_sync.py'
-          : 'main.py'
-      : 'hello.py';
-
-    const entryPointPath = join(testDir, entryPointFileName);
-
-    if (!access(entryPointPath)) {
-      return reject(
-        new Error(`Entry point file does not exist: ${entryPointPath}`)
-      );
-    }
-
-    const command = 'uv';
-
-    const args = [
-      '--project',
-      CHAILIT_DIR,
-      'run',
-      'chainlit',
-      'run',
-      entryPointPath,
-      '-h',
-      '--ci'
-    ];
-
-    const options: SpawnOptionsWithoutStdio = {
-      env: {
-        ...process.env,
-        CHAINLIT_APP_ROOT: testDir
+    const chainlit = spawn(
+      'uv',
+      [
+        '--project',
+        chainlitDir,
+        'run',
+        'chainlit',
+        'run',
+        entryPointPath,
+        '-h',
+        '--ci'
+      ],
+      {
+        env: {
+          ...process.env,
+          CHAINLIT_APP_ROOT: testDir
+        }
       }
-    };
-
-    const chainlit = spawn(command, args, options);
+    );
 
     chainlit.stdout.on('data', (data) => {
-      const output = data.toString();
-      if (output.includes('Your app is available at')) {
+      if (data.toString().includes('Your app is available at')) {
         resolve(chainlit);
       }
     });
@@ -63,12 +55,9 @@ export const runChainlit = async (
       console.error(`[Chainlit stderr] ${data}`);
     });
 
-    chainlit.on('error', (error) => {
-      reject(error.message);
-    });
-
-    chainlit.on('exit', function (code) {
-      reject('Chainlit process exited with code ' + code);
+    chainlit.on('error', (error) => reject(error));
+    chainlit.on('exit', (code) => {
+      reject(new Error(`Chainlit process exited with code ${code}`));
     });
   });
 };

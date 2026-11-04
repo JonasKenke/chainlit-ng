@@ -19,7 +19,7 @@ Chainlit is a Python framework for building production-ready conversational AI a
 - Python: **3.13** (3.10+ is the framework's minimum, but development targets 3.13)
 - Node.js: **24+**
 - [uv](https://docs.astral.sh/uv/) — Python package manager
-- [pnpm 9](https://pnpm.io/) — Node.js package manager (Corepack)
+- [pnpm 12](https://pnpm.io/) — Node.js package manager (Corepack)
 
 ## Quick Start
 
@@ -102,12 +102,12 @@ Examples:
 
 | Layer                          | Stack                                                                                                                     |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| **Frontend**                   | React 18, TypeScript 5.2, Vite 5, Tailwind CSS 3, Vitest, Zod 3                                                           |
-| **Frontend (state & routing)** | Recoil, React Router 6, react-hook-form, socket.io-client, SWR                                                            |
+| **Frontend**                   | React 19, TypeScript 7, Vite 8, Tailwind CSS 4, Vitest 5, Zod 4                                                           |
+| **Frontend (state & routing)** | Zustand, React Router 7, react-hook-form, socket.io-client, SWR                                                           |
 | **Frontend (rendering)**       | react-markdown + remark-gfm/math + rehype-katex/raw, highlight.js, lucide-react (icons), Radix UI (primitives), Plotly.js |
 | **Backend**                    | Python 3.13, FastAPI, Starlette, Uvicorn, python-socketio, Pydantic 2, PyJWT, httpx                                       |
-| **LLM integrations**           | MCP, LangChain, LlamaIndex, OpenAI SDK, Semantic Kernel, MistralAI                                                        |
-| **Infra / persistence**        | SQLAlchemy (PostgreSQL/SQLite), DynamoDB + S3 (boto3), Azure Blob / Data Lake, Google Cloud Storage, LiteralAI            |
+| **LLM integrations**           | MCP, LangChain, LlamaIndex, Semantic Kernel                                                                               |
+| **Infra / persistence**        | SQLAlchemy (PostgreSQL/SQLite), DynamoDB + S3 (boto3), Azure Blob / Data Lake, Google Cloud Storage                       |
 | **DX**                         | pre-commit hooks, linting, formatting, type checking, unit testing, E2E testing                                           |
 
 ## Architecture
@@ -138,22 +138,22 @@ The pnpm workspace includes `frontend/`, `libs/react-client/`, and `libs/copilot
 - `session.py` — `WebsocketSession` (per-connection state: user, files, MCP connections, message queue) and `HTTPSession`
 - `context.py` — `ChainlitContext` per-coroutine context variable (similar to thread-local), providing access to the current session and emitter
 - `emitter.py` — Sends events back to the frontend through the SocketIO session
-- `data/base.py` — `BaseDataLayer` ABC for persistence (threads, steps, elements, users, feedback). Implementations: `sql_alchemy.py`, `dynamodb.py`, `literalai.py`
+- `data/base.py` — `BaseDataLayer` ABC for persistence (threads, steps, elements, users, feedback). Implementations: `sql_alchemy.py`, `dynamodb.py`
 - `auth/` — JWT creation/validation (`jwt.py`), OAuth state cookies (`cookie.py`)
 - `types.py` — Shared Pydantic models for API request/response types
 
-**Data layer pattern**: The data layer is optional (no persistence by default). Register a custom implementation with `@cl.data_layer` decorator or use the built-in SQLAlchemy/DynamoDB/LiteralAI implementations. The `@queue_until_user_message()` decorator on `BaseDataLayer` methods queues write operations until the first user message arrives.
+**Data layer pattern**: The data layer is optional (no persistence by default). Register a custom implementation with `@cl.data_layer` decorator or use the built-in SQLAlchemy/DynamoDB implementations. The `@queue_until_user_message()` decorator on `BaseDataLayer` methods queues write operations until the first user message arrives.
 
-**Integrations**: `langchain/`, `llama_index/`, `openai/`, `semantic_kernel/`, `mistralai/` — each provides callback handlers that bridge those frameworks into Chainlit steps/messages.
+**Integrations**: `langchain/`, `llama_index/`, and `semantic_kernel/` provide callback handlers that bridge those frameworks into Chainlit steps/messages.
 
 ### Frontend (`frontend/src/`)
 
-React 18 + TypeScript + Vite, styled with Tailwind CSS and Radix UI primitives.
+React 19 + TypeScript 7 + Vite 8, styled with Tailwind CSS 4 and Radix UI primitives.
 
-- `main.tsx` — React root, wraps app in `RecoilRoot` and `ChainlitContext.Provider`
+- `main.tsx` — React root, wraps app state and the `ChainlitContext.Provider`
 - `App.tsx` — Handles auth readiness, chat profile selection, and WebSocket connection lifecycle
 - `router.tsx` — Client-side routes: `/` (Home), `/thread/:id`, `/element/:id`, `/login`, `/login/callback`, `/share/:id`, `/env`
-- `state/` — Recoil atoms: `chat.ts` (messages, elements, tasks), `project.ts` (config, session), `user.ts` (env vars)
+- `state/` — Zustand store for app-local composer, chat-settings, and user-environment state; `@chainlit/react-client` owns chat-session state
 - `components/chat/` — Core chat UI (message list, input bar, elements, audio)
 - `components/header/` — Top navigation bar
 - `components/LeftSidebar/` — Thread history sidebar
@@ -167,16 +167,16 @@ Publishable npm package — the bridge between the React UI and the backend WebS
 - `useChatMessages.ts` — Exposes message tree state
 - `useChatData.ts` — Exposes elements, actions, tasklists, connection status
 - `useChatInteract.ts` — `sendMessage`, `replyMessage`, `callAction`, `stopTask`, `clear`
-- `state.ts` — Recoil atoms shared between the lib and consuming apps
+- `state.ts` — Zustand store scoped to each `ChainlitAPI` instance
 
-State is managed via Recoil; consuming apps must wrap the tree in `<RecoilRoot>` and provide a `ChainlitAPI` instance via `ChainlitContext.Provider`.
+State is managed with Zustand; consuming apps provide a `ChainlitAPI` instance via `ChainlitContext.Provider` (no state root is required).
 
 ### Communication flow
 
 1. User sends a message → `useChatInteract.sendMessage` → emits `client_message` over SocketIO
 2. Backend `socket.py` handler receives it → calls `config.code.on_message(message)`
 3. User's app calls `cl.Message(...).send()` → `emitter.py` emits `new_message` back over SocketIO
-4. Frontend `useChatMessages` updates Recoil state → component re-renders
+4. Frontend `useChatMessages` reads the Zustand store → component re-renders
 
 ### App configuration
 

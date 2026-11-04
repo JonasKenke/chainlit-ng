@@ -64,7 +64,7 @@ interface ProviderButtonProps {
 const ProviderButton = ({
   provider,
   onClick
-}: ProviderButtonProps): JSX.Element => {
+}: ProviderButtonProps): import('react').JSX.Element => {
   const { t } = useTranslation();
   return (
     <Button type="button" variant="outline" onClick={onClick}>

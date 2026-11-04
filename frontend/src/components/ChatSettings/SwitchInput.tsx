@@ -30,7 +30,7 @@ const SwitchInput = ({
   label,
   setField,
   tooltip
-}: SwitchInputProps): JSX.Element => {
+}: SwitchInputProps): React.JSX.Element => {
   return (
     <InputStateHandler
       description={description}

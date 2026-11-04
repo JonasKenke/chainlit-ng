@@ -1,23 +1,18 @@
 import { useCallback } from 'react';
-import {
-  DropzoneOptions,
-  FileRejection,
-  FileWithPath,
-  useDropzone
-} from 'react-dropzone';
+import { DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone';
 
 import type { FileSpec } from 'client-types/';
 
 interface useUploadProps {
   onError?: (error: string) => void;
-  onResolved: (payloads: FileWithPath[]) => void;
+  onResolved: (payloads: File[]) => void;
   options?: DropzoneOptions;
   spec: FileSpec;
 }
 
 const useUpload = ({ onError, onResolved, options, spec }: useUploadProps) => {
   const onDrop: DropzoneOptions['onDrop'] = useCallback(
-    (acceptedFiles: FileWithPath[], fileRejections: FileRejection[]) => {
+    <T extends File>(acceptedFiles: T[], fileRejections: FileRejection[]) => {
       if (fileRejections.length > 0) {
         if (fileRejections[0].errors[0].code === 'file-too-large') {
           onError?.(`File is larger than ${spec.max_size_mb} MB`);

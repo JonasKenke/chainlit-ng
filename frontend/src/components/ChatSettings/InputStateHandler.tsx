@@ -38,7 +38,7 @@ const InputStateHandler = ({
   notificationsProps,
   tooltip,
   className
-}: InputStateHandlerProps): JSX.Element => {
+}: InputStateHandlerProps): React.JSX.Element => {
   return (
     <div className={cn('space-y-2', className)}>
       {label && (
