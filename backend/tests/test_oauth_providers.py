@@ -1240,3 +1240,59 @@ class TestOAuthProviderEdgeCases:
 
             assert "prompt" in provider.authorize_params
             assert provider.authorize_params["prompt"] == "consent"
+
+
+@pytest.mark.asyncio
+async def test_azure_ad_get_token_reports_a_missing_access_token():
+    with patch.dict(
+        os.environ,
+        {
+            "OAUTH_AZURE_AD_CLIENT_ID": "azure_id",
+            "OAUTH_AZURE_AD_CLIENT_SECRET": "azure_secret",
+            "OAUTH_AZURE_AD_TENANT_ID": "tenant_123",
+        },
+    ):
+        provider = AzureADOAuthProvider()
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"error": "invalid_grant"}
+        mock_response.raise_for_status = Mock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock(
+                return_value=mock_response
+            )
+
+            with pytest.raises(HTTPException) as exc_info:
+                await provider.get_token("auth_code", "http://localhost/callback")
+
+            assert exc_info.value.status_code == 400
+            assert ACCESS_TOKEN_MISSING in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_azure_ad_hybrid_get_token_reports_a_missing_access_token():
+    with patch.dict(
+        os.environ,
+        {
+            "OAUTH_AZURE_AD_HYBRID_CLIENT_ID": "hybrid_id",
+            "OAUTH_AZURE_AD_HYBRID_CLIENT_SECRET": "hybrid_secret",
+            "OAUTH_AZURE_AD_HYBRID_TENANT_ID": "tenant_123",
+        },
+    ):
+        provider = AzureADHybridOAuthProvider()
+
+        mock_response = Mock()
+        mock_response.json.return_value = {"error": "invalid_grant"}
+        mock_response.raise_for_status = Mock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock(
+                return_value=mock_response
+            )
+
+            with pytest.raises(HTTPException) as exc_info:
+                await provider.get_token("auth_code", "http://localhost/callback")
+
+            assert exc_info.value.status_code == 400
+            assert ACCESS_TOKEN_MISSING in str(exc_info.value.detail)

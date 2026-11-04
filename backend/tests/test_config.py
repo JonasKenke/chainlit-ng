@@ -7,6 +7,18 @@ from chainlit import config as chainlit_config
 from chainlit.config import ChainlitConfig
 
 
+class TestLoadSettingsMetaGuard:
+    def test_meta_section_without_generated_by_raises_value_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        cfg_file = tmp_path / "config.toml"
+        cfg_file.write_text('[meta]\nsome_other_key = "value"\n', encoding="utf-8")
+        monkeypatch.setattr(chainlit_config, "config_file", str(cfg_file))
+
+        with pytest.raises(ValueError, match="outdated"):
+            chainlit_config.load_settings()
+
+
 @pytest.fixture
 def translation_dir(tmp_path: Path) -> Path:
     """Minimal translation directory with a controlled set of locale files."""

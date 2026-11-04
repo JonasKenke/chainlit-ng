@@ -185,6 +185,7 @@ def set_oauth_state_cookie(response: Response, token: str):
         samesite=_cookie_samesite,
         secure=_cookie_secure,
         max_age=_state_cookie_lifetime,
+        path=_cookie_path,
     )
 
 
@@ -199,4 +200,4 @@ def validate_oauth_state_cookie(request: Request, state: str):
 
 def clear_oauth_state_cookie(response: Response):
     """Oauth complete, delete state token."""
-    response.delete_cookie(_state_cookie_name)  # Do we set path here?
+    response.delete_cookie(_state_cookie_name, path=_cookie_path)

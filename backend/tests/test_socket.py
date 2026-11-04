@@ -9,6 +9,7 @@ from chainlit.socket import (
     _get_token,
     _get_token_from_cookie,
     clean_session,
+    connect,
     connection_successful,
     load_user_env,
     persist_user_session,
@@ -628,3 +629,18 @@ class TestConnectionSuccessfulIdempotency:
             await connection_successful("sid-1")
 
         assert on_chat_start.call_count == 1
+
+
+class TestConnectSessionIdValidation:
+    @pytest.mark.parametrize(
+        "session_id",
+        ["../../etc", "/tmp/x", "a/b", "..", "", None, 123, "a" * 129],
+    )
+    async def test_connect_refuses_unsafe_session_id(self, session_id):
+        auth = {"sessionId": session_id, "clientType": "webapp"}
+
+        with patch("chainlit.socket.WebsocketSession") as mock_session:
+            with pytest.raises(ConnectionRefusedError):
+                await connect("sid", {}, auth)
+
+        mock_session.assert_not_called()

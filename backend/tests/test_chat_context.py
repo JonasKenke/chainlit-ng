@@ -225,6 +225,23 @@ class TestChatContext:
             assert "session_123" in chat_contexts
             assert chat_contexts["session_123"] == []
 
+    def test_delete_session_removes_entry(self):
+        """Test delete_session removes the session context."""
+        mock_session = Mock()
+        mock_session.id = "session_123"
+
+        with mock_chainlit_context(session=mock_session):
+            chat_context.add(Mock())
+
+        chat_context.delete_session("session_123")
+
+        assert "session_123" not in chat_contexts
+
+    def test_delete_session_ignores_unknown_session(self):
+        chat_context.delete_session("unknown_session")
+
+        assert chat_contexts == {}
+
     def test_to_openai_with_assistant_message(self):
         """Test to_openai converts assistant messages correctly."""
         mock_session = Mock()

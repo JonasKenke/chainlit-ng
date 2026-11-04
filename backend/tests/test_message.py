@@ -84,6 +84,15 @@ class TestMessageBase:
             assert msg.language == "python"
             assert msg.metadata == {"key": "value"}
 
+    @pytest.mark.parametrize("tags", [["rag", "reviewed"], [], None])
+    def test_from_dict_preserves_tags(self, tags):
+        with mock_chainlit_context():
+            original = Message(content="Saved answer", tags=tags)
+            restored = MessageBase.from_dict(original.to_dict())
+
+            assert restored.tags == tags
+            assert restored.to_dict()["tags"] == tags
+
     def test_from_dict_with_minimal_data(self):
         """Test from_dict with minimal required fields."""
         step_dict = {

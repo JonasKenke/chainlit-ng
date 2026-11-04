@@ -1,6 +1,7 @@
 import json
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from sqlalchemy import text
@@ -10,6 +11,7 @@ from chainlit import User
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.data.storage_clients.base import BaseStorageClient
 from chainlit.element import Text
+from chainlit.types import Feedback, Pagination, ThreadFilter
 
 
 @pytest.fixture
@@ -98,7 +100,8 @@ async def data_layer(mock_storage_client: BaseStorageClient, tmp_path: Path):
                     "page" INT,
                     "language" TEXT,
                     "forId" UUID,
-                    "mime" TEXT
+                    "mime" TEXT,
+                    "props" JSONB DEFAULT '{}'
                 );
         """
             )
@@ -217,6 +220,62 @@ async def test_delete_thread(test_user: User, data_layer: SQLAlchemyDataLayer):
     await data_layer.delete_thread("test_thread")
     thread = await data_layer.get_thread("test_thread")
     assert thread is None
+
+
+async def test_list_threads_applies_negative_feedback_filter(
+    test_user: User, data_layer: SQLAlchemyDataLayer, mock_chainlit_context
+):
+    user = await data_layer.create_user(test_user)
+    other_user = await data_layer.create_user(User(identifier="other_feedback_user"))
+    assert user
+    assert other_user
+
+    threads: list[tuple[str, Literal[0, 1] | None, str]] = [
+        ("negative", 0, user.id),
+        ("positive", 1, user.id),
+        ("unrated", None, user.id),
+        ("other_user", 0, other_user.id),
+    ]
+
+    async with mock_chainlit_context:
+        for thread_id, feedback_value, owner_id in threads:
+            await data_layer.update_thread(thread_id, user_id=owner_id)
+            step_id = f"{thread_id}_step"
+            await data_layer.execute_sql(
+                query="""
+                    INSERT INTO steps (
+                        "id", "threadId", "name", "type", "disableFeedback",
+                        "streaming", "output", "createdAt"
+                    ) VALUES (
+                        :id, :thread_id, :name, :type, :disable_feedback,
+                        :streaming, :output, :created_at
+                    )
+                """,
+                parameters={
+                    "id": step_id,
+                    "thread_id": thread_id,
+                    "name": "Assistant",
+                    "type": "assistant_message",
+                    "disable_feedback": False,
+                    "streaming": False,
+                    "output": "Matching answer",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            )
+            if feedback_value is not None:
+                await data_layer.upsert_feedback(
+                    Feedback(
+                        forId=step_id,
+                        threadId=thread_id,
+                        value=feedback_value,
+                    )
+                )
+
+        response = await data_layer.list_threads(
+            Pagination(first=10), ThreadFilter(userId=user.id, feedback=0)
+        )
+
+    assert [thread["id"] for thread in response.data] == ["negative"]
 
 
 async def _get_thread_metadata_raw(

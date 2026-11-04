@@ -70,6 +70,7 @@ class MessageBase(ABC):
             type=type,  # type: ignore
             language=_dict.get("language"),
             metadata=_dict.get("metadata", {}),
+            tags=_dict.get("tags"),
         )
 
     def to_dict(self) -> StepDict:
