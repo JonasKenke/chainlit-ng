@@ -26,6 +26,10 @@ manual ports unless they only touch data-layer or auth code.
 | Upstream | Fix                                                                | Commit     |
 | -------- | ------------------------------------------------------------------ | ---------- |
 | #3070    | Verify azure-ad-hybrid OAuth state and `id_token`; per-login nonce | `c41814d6` |
+| #3053    | Limit thread metadata in list/get/resume responses                 | `7178bdc5` |
+| #2798    | Normalize data-layer timestamps and accept missing `Z`             | `7178bdc5` |
+| #2950    | Inline content disposition for browser-rendered elements           | `7178bdc5` |
+| #2915    | Delete child steps, feedback, and elements on message edit         | `7178bdc5` |
 | #3077    | Reentrant cache lock for nested/recursive cached calls             | `65ca0d1f` |
 | #3032    | Accept `thread_id` in `step()` so `Step.__call__` works            | `f8efb2bd` |
 | #3075    | Validate client-supplied websocket session IDs (path traversal)    | `55c1d069` |
@@ -40,47 +44,13 @@ manual ports unless they only touch data-layer or auth code.
 Compatibility work also landed in `fbba1152` (data-layer extras, removed-API
 warnings, lazy-export `AttributeError`, legacy generation serialization).
 
-Verification after the batch: 836 backend tests passed; lint, format, and mypy
-clean.
+Verification: 863 backend tests passed after the second batch; lint, format,
+and mypy clean.
 
-## Remaining: security and privacy
-
-### #3070 — `azure-ad-hybrid` OAuth callback (fixed)
-
-Fixed in `c41814d6`; implementation notes and the threat model are in
-[security hardening](security-hardening.md).
-
-### #3053 — thread metadata leaks to clients
-
-- Thread retrieval, listing, and resume events currently send all stored
-  metadata; shared threads only strip a few known fields.
-- Fix filters responses to `is_shared`, `viewer_read_only`, and owner-only
-  `chat_profile`/`chat_settings`; storage remains unchanged.
-- Size: new `thread_metadata.py` plus `server.py`/`emitter.py` changes.
+All currently known critical auth fixes are ported; the Azure hybrid threat
+model is in [security hardening](security-hardening.md).
 
 ## Remaining: data integrity and rendering
-
-### #2798 — inconsistent ISO timestamps
-
-- `ChainlitDataLayer` writes `...Z` timestamps but reads back `.isoformat()`
-  without `Z`; `update_step` then fails in `strptime` (`ValueError`).
-- Fix adds `_parse_iso_datetime()` and `_datetime_to_utc_iso()`; issue #2491
-  has 10 comments.
-- Status: upstream PR is `CONFLICTING`; port manually against our data layer.
-
-### #2950 — resumed blobs do not render
-
-- Uploaded PDFs, images, audio, and video use download disposition, so they
-  fail to display after thread resume.
-- Fix centralizes `Element.get_content_disposition()` and uses it in the
-  SQLAlchemy, Chainlit, and DynamoDB layers; generic files keep attachment.
-- Issue #2946 has 13 comments.
-
-### #2915 — edited messages leave orphaned rows
-
-- Editing a message never deletes child steps/elements from the data layer;
-  historical steps accumulate and reappear in the UI.
-- Delete child rows when a message is edited.
 
 ### #2799 — Base64 attachments crash thread reload
 
@@ -171,9 +141,10 @@ Fixed in `c41814d6`; implementation notes and the threat model are in
 | #2951 chat-context memory leak    | **Ported (#2959)** |
 | #3068 negative feedback filter    | **Ported (#3069)** |
 | #3061 reconnect re-resume         | #3062              |
-| #3052 thread metadata leak        | #3053              |
-| #2946 resumed blobs do not render | #2950              |
+| #3052 thread metadata leak        | **Ported (#3053)** |
+| #2946 resumed blobs do not render | **Ported (#2950)** |
 | #2784 Base64 reload crash         | #2799              |
+| #2491 timestamp failures          | **Ported (#2798)** |
 | #2492 unavailable chat profile    | #3066              |
 | #3078 PDF preview with root path  | No PR yet          |
 
@@ -187,13 +158,11 @@ Fixed in `c41814d6`; implementation notes and the threat model are in
 
 ## Suggested order
 
-1. **#3053** — thread metadata privacy.
-2. **#2798** — timestamp failure in the data layer.
-3. **#2950** — resumed file rendering.
-4. **#3062 / #2915 / #2799** — state and persistence correctness.
-5. **#3073 / #3064 / #3078** — root-path deployment fixes.
-6. Frontend batch (#3011, #3056, #3067) after the React 19/Zustand UI settles.
-7. Feature work (#3013, #2954, #3054).
+1. **#3062 / #2799** — state and persistence correctness.
+2. **#3066 / #3067** — unavailable profile and active-thread deletion.
+3. **#3073 / #3064 / #3078** — root-path deployment fixes.
+4. Frontend batch (#3011, #3056) after the React 19/Zustand UI settles.
+5. Feature work (#3013, #2954, #3054).
 
 ## Caveats
 
