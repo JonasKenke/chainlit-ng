@@ -1,3 +1,5 @@
+import { setupWebSocketListener } from '../../support/testUtils';
+
 const submitMessage = (message: string) => {
   cy.get('#chat-input').type(message);
   // ponytail: force skips actionability; remove when Cypress handles this route-change click.
@@ -23,7 +25,17 @@ const login = (user: 'alice' | 'bob') => {
 
 describe('Thread resume (author)', () => {
   it('resumes own thread, composer visible, can continue chatting', () => {
+    let resumed = false;
+    setupWebSocketListener('resume_thread', () => {
+      resumed = true;
+    });
+
     login('alice');
+
+    // Wait for the welcome composer to be replaced by the footer composer.
+    // The remount resets the draft, so typing before it drops the message.
+    cy.get('#message-composer').should('be.visible');
+    cy.get('#welcome-screen').should('not.exist');
 
     // Start a thread
     submitMessage('hi');
@@ -35,6 +47,9 @@ describe('Thread resume (author)', () => {
     // Composer present and no read-only banner
     cy.get('#message-composer').should('be.visible');
     cy.get('[data-testid="read-only-banner"]').should('not.exist');
+
+    // Wait for resume_thread to be applied before typing.
+    cy.wrap(null).should(() => expect(resumed).to.be.true);
 
     // Continue chatting
     submitMessage('still here');
