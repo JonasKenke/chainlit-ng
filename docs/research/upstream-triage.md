@@ -30,6 +30,8 @@ manual ports unless they only touch data-layer or auth code.
 | #2798    | Normalize data-layer timestamps and accept missing `Z`             | `7178bdc5` |
 | #2950    | Inline content disposition for browser-rendered elements           | `7178bdc5` |
 | #2915    | Delete child steps, feedback, and elements on message edit         | `7178bdc5` |
+| #3062    | Avoid replaying a resumed thread on reconnect                      | `3b5481db` |
+| #2799    | Harden resume for binary and missing element data                  | `1d25a241` |
 | #3077    | Reentrant cache lock for nested/recursive cached calls             | `65ca0d1f` |
 | #3032    | Accept `thread_id` in `step()` so `Step.__call__` works            | `f8efb2bd` |
 | #3075    | Validate client-supplied websocket session IDs (path traversal)    | `55c1d069` |
@@ -44,29 +46,13 @@ manual ports unless they only touch data-layer or auth code.
 Compatibility work also landed in `fbba1152` (data-layer extras, removed-API
 warnings, lazy-export `AttributeError`, legacy generation serialization).
 
-Verification: 863 backend tests passed after the second batch; lint, format,
+Verification: 866 backend tests passed after the third batch; lint, format,
 and mypy clean.
 
 All currently known critical auth fixes are ported; the Azure hybrid threat
 model is in [security hardening](security-hardening.md).
 
-## Remaining: data integrity and rendering
-
-### #2799 — Base64 attachments crash thread reload
-
-- `Element.from_dict()` stringifies bytes; data layers turn `None` into
-  `"None"`; frontend resume does not resolve `chainlitKey`; storage failures
-  abort resume.
-- Issue #2784; spans element, data layers, and frontend.
-
 ## Remaining: state and transport
-
-### #3062 — resumed thread replays on reconnect
-
-- Persisted thread is replayed on every reconnect instead of only on the
-  pending initial restore.
-- Fix serializes resume per session and caches the completed restore; overlaps
-  our new-chat race fix, so port carefully. Issue #3061.
 
 ### #3066 — unavailable chat profile leaves history unusable
 
@@ -140,10 +126,10 @@ model is in [security hardening](security-hardening.md).
 | --------------------------------- | ------------------ |
 | #2951 chat-context memory leak    | **Ported (#2959)** |
 | #3068 negative feedback filter    | **Ported (#3069)** |
-| #3061 reconnect re-resume         | #3062              |
+| #3061 reconnect re-resume         | **Ported (#3062)** |
 | #3052 thread metadata leak        | **Ported (#3053)** |
 | #2946 resumed blobs do not render | **Ported (#2950)** |
-| #2784 Base64 reload crash         | #2799              |
+| #2784 Base64 reload crash         | **Ported (#2799)** |
 | #2491 timestamp failures          | **Ported (#2798)** |
 | #2492 unavailable chat profile    | #3066              |
 | #3078 PDF preview with root path  | No PR yet          |
@@ -158,11 +144,10 @@ model is in [security hardening](security-hardening.md).
 
 ## Suggested order
 
-1. **#3062 / #2799** — state and persistence correctness.
-2. **#3066 / #3067** — unavailable profile and active-thread deletion.
-3. **#3073 / #3064 / #3078** — root-path deployment fixes.
-4. Frontend batch (#3011, #3056) after the React 19/Zustand UI settles.
-5. Feature work (#3013, #2954, #3054).
+1. **#3066 / #3067** — unavailable profile and active-thread deletion.
+2. **#3073 / #3064 / #3078** — root-path deployment fixes.
+3. Frontend batch (#3011, #3056) after the React 19/Zustand UI settles.
+4. Feature work (#3013, #2954, #3054).
 
 ## Caveats
 
