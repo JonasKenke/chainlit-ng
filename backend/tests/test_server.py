@@ -1,11 +1,17 @@
 import datetime as dt
 import os
 import pathlib
+import time
+import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 from unittest.mock import AsyncMock, Mock, create_autospec, mock_open
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
 
 from chainlit.auth import get_current_user
@@ -14,9 +20,9 @@ from chainlit.config import (
     ChainlitConfig,
     SpontaneousFileUploadFeature,
 )
-from chainlit.server import app
+from chainlit.server import _verify_azure_hf_id_token, app
 from chainlit.types import AskFileSpec
-from chainlit.user import PersistedUser
+from chainlit.user import PersistedUser, User
 
 
 @pytest.fixture
@@ -1151,3 +1157,270 @@ def test_health_check(test_client: TestClient):
     response = test_client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+AZURE_TENANT_ID = "11111111-1111-1111-1111-111111111111"
+AZURE_ISSUER = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/v2.0"
+
+
+@pytest.fixture
+def mock_oauth_provider(monkeypatch: pytest.MonkeyPatch):
+    provider = Mock()
+    provider.id = "azure-ad-hybrid"
+    provider.client_id = "test-client"
+    provider.authorize_url = (
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+    )
+    provider.authorize_params = {
+        "tenant": "common",
+        "response_type": "code id_token",
+        "scope": "openid",
+        "response_mode": "form_post",
+    }
+    provider.uses_per_login_nonce = True
+    provider.get_token = AsyncMock(return_value="access-token")
+    provider.get_user_info = AsyncMock(
+        return_value=(
+            {"upn": "user@example.com"},
+            User(identifier="user@example.com"),
+        )
+    )
+    monkeypatch.setattr("chainlit.server.get_oauth_provider", lambda _: provider)
+    return provider
+
+
+def test_azure_hf_callback_missing_state_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+):
+    callback = AsyncMock()
+    test_config.code.oauth_callback = callback
+
+    response = test_client.post(
+        "/auth/oauth/azure-ad-hybrid/callback",
+        data={"code": "fake_code", "id_token": "a.b.c"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    callback.assert_not_awaited()
+
+
+def test_azure_hf_callback_missing_id_token_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+):
+    callback = AsyncMock()
+    test_config.code.oauth_callback = callback
+
+    response = test_client.post(
+        "/auth/oauth/azure-ad-hybrid/callback",
+        data={"code": "fake_code", "state": "valid_state"},
+        cookies={"oauth_state": "valid_state"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    callback.assert_not_awaited()
+
+
+def test_azure_hf_callback_rejects_forged_id_token(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    verify = AsyncMock(side_effect=ValueError("signature verification failed"))
+    monkeypatch.setattr("chainlit.server._verify_azure_hf_id_token", verify)
+    callback = AsyncMock()
+    test_config.code.oauth_callback = callback
+
+    response = test_client.post(
+        "/auth/oauth/azure-ad-hybrid/callback",
+        data={"code": "fake_code", "state": "valid_state", "id_token": "forged"},
+        cookies={"oauth_state": "valid_state", "oauth_nonce": "login_nonce"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    verify.assert_awaited_once()
+    callback.assert_not_awaited()
+    assert "access_token" not in response.cookies
+
+
+def test_azure_hf_callback_verifies_token_with_login_nonce(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    verify = AsyncMock(return_value={"upn": "user@example.com"})
+    monkeypatch.setattr("chainlit.server._verify_azure_hf_id_token", verify)
+    monkeypatch.setattr(
+        "chainlit.server._authenticate_user",
+        AsyncMock(return_value=RedirectResponse("/", status_code=303)),
+    )
+    callback = AsyncMock(return_value=User(identifier="user@example.com"))
+    test_config.code.oauth_callback = callback
+
+    response = test_client.post(
+        "/auth/oauth/azure-ad-hybrid/callback",
+        data={"code": "fake_code", "state": "valid_state", "id_token": "good"},
+        cookies={"oauth_state": "valid_state", "oauth_nonce": "login_nonce"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" not in response.headers.get("location", "")
+    verify.assert_awaited_once_with(mock_oauth_provider, "good", "login_nonce")
+    callback.assert_awaited_once()
+
+
+def test_azure_hf_login_sets_a_fresh_nonce_cookie(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+):
+    test_config.code.oauth_callback = AsyncMock()
+
+    response = test_client.get("/auth/oauth/azure-ad-hybrid", follow_redirects=False)
+
+    assert response.status_code == 307
+    params = urllib.parse.parse_qs(
+        urllib.parse.urlparse(response.headers["location"]).query
+    )
+    assert params["nonce"]
+    assert response.cookies["oauth_nonce"].strip('"') == params["nonce"][0]
+    assert "nonce" not in mock_oauth_provider.authorize_params
+
+
+@pytest.fixture(scope="module")
+def rsa_key_pair():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return private_key, private_key.public_key()
+
+
+def _encode_id_token(private_key, **overrides):
+    now = int(time.time())
+    claims = {
+        "aud": "test-client",
+        "iss": AZURE_ISSUER,
+        "tid": AZURE_TENANT_ID,
+        "exp": now + 300,
+        "iat": now,
+        "nonce": "login-nonce",
+        "upn": "user@example.com",
+    }
+    claims.update(overrides)
+    return jwt.encode(
+        claims, private_key, algorithm="RS256", headers={"kid": "test-key"}
+    )
+
+
+def _use_local_jwks(monkeypatch: pytest.MonkeyPatch, public_key):
+    class FakeJWKS:
+        def get_signing_key_from_jwt(self, token):
+            return SimpleNamespace(key=public_key)
+
+    monkeypatch.setattr("chainlit.server._azure_hf_jwks_client", lambda _: FakeJWKS())
+
+
+@pytest.mark.asyncio
+async def test_verify_azure_hf_token_multi_tenant(
+    monkeypatch: pytest.MonkeyPatch, rsa_key_pair
+):
+    private_key, public_key = rsa_key_pair
+    monkeypatch.delenv("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT", raising=False)
+    monkeypatch.setenv("OAUTH_AZURE_AD_HYBRID_TENANT_ID", "common")
+    _use_local_jwks(monkeypatch, public_key)
+
+    token = _encode_id_token(private_key)
+    decoded = await _verify_azure_hf_id_token(
+        SimpleNamespace(client_id="test-client"), token, "login-nonce"
+    )
+
+    assert decoded["upn"] == "user@example.com"
+
+
+@pytest.mark.asyncio
+async def test_verify_azure_hf_token_rejects_bad_nonce(
+    monkeypatch: pytest.MonkeyPatch, rsa_key_pair
+):
+    private_key, public_key = rsa_key_pair
+    monkeypatch.delenv("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT", raising=False)
+    monkeypatch.setenv("OAUTH_AZURE_AD_HYBRID_TENANT_ID", "common")
+    _use_local_jwks(monkeypatch, public_key)
+
+    token = _encode_id_token(private_key, nonce="other-nonce")
+
+    with pytest.raises(ValueError, match="nonce"):
+        await _verify_azure_hf_id_token(
+            SimpleNamespace(client_id="test-client"), token, "login-nonce"
+        )
+
+
+@pytest.mark.asyncio
+async def test_verify_azure_hf_token_rejects_unexpected_issuer(
+    monkeypatch: pytest.MonkeyPatch, rsa_key_pair
+):
+    private_key, public_key = rsa_key_pair
+    monkeypatch.delenv("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT", raising=False)
+    monkeypatch.setenv("OAUTH_AZURE_AD_HYBRID_TENANT_ID", "common")
+    _use_local_jwks(monkeypatch, public_key)
+
+    token = _encode_id_token(private_key, iss="https://evil.example.com/tenant/v2.0")
+
+    with pytest.raises(ValueError, match="issuer"):
+        await _verify_azure_hf_id_token(
+            SimpleNamespace(client_id="test-client"), token, "login-nonce"
+        )
+
+
+@pytest.mark.asyncio
+async def test_verify_azure_hf_token_rejects_wrong_audience(
+    monkeypatch: pytest.MonkeyPatch, rsa_key_pair
+):
+    private_key, public_key = rsa_key_pair
+    monkeypatch.delenv("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT", raising=False)
+    monkeypatch.setenv("OAUTH_AZURE_AD_HYBRID_TENANT_ID", "common")
+    _use_local_jwks(monkeypatch, public_key)
+
+    token = _encode_id_token(private_key, aud="other-client")
+
+    with pytest.raises(jwt.InvalidAudienceError):
+        await _verify_azure_hf_id_token(
+            SimpleNamespace(client_id="test-client"), token, "login-nonce"
+        )
+
+
+@pytest.mark.asyncio
+async def test_verify_azure_hf_token_single_tenant_issuer(
+    monkeypatch: pytest.MonkeyPatch, rsa_key_pair
+):
+    private_key, public_key = rsa_key_pair
+    monkeypatch.setenv("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT", "1")
+    monkeypatch.setenv("OAUTH_AZURE_AD_HYBRID_TENANT_ID", AZURE_TENANT_ID)
+    _use_local_jwks(monkeypatch, public_key)
+
+    token = _encode_id_token(private_key)
+    decoded = await _verify_azure_hf_id_token(
+        SimpleNamespace(client_id="test-client"), token, "login-nonce"
+    )
+
+    assert decoded["tid"] == AZURE_TENANT_ID
+
+    wrong_token = _encode_id_token(
+        private_key,
+        iss="https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222/v2.0",
+    )
+    with pytest.raises(jwt.InvalidIssuerError):
+        await _verify_azure_hf_id_token(
+            SimpleNamespace(client_id="test-client"),
+            wrong_token,
+            "login-nonce",
+        )

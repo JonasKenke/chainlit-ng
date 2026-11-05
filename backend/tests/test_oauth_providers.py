@@ -675,7 +675,8 @@ class TestAzureADHybridOAuthProvider:
             assert provider.authorize_params["tenant"] == "tenant_456"
             assert provider.authorize_params["response_type"] == "code id_token"
             assert provider.authorize_params["response_mode"] == "form_post"
-            assert "nonce" in provider.authorize_params
+            assert provider.uses_per_login_nonce is True
+            assert "nonce" not in provider.authorize_params
 
     @pytest.mark.asyncio
     async def test_azure_ad_hybrid_get_token_success(self):

@@ -1,6 +1,7 @@
 import asyncio
 import fnmatch
 import glob
+import hmac
 import json
 import mimetypes
 import os
@@ -9,6 +10,7 @@ import shutil
 import urllib.parse
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Union, cast
 
@@ -43,8 +45,11 @@ from chainlit.auth import (
 )
 from chainlit.auth.cookie import (
     clear_auth_cookie,
+    clear_oauth_nonce_cookie,
     clear_oauth_state_cookie,
+    get_oauth_nonce_cookie,
     set_auth_cookie,
+    set_oauth_nonce_cookie,
     set_oauth_state_cookie,
     validate_oauth_state_cookie,
 )
@@ -528,14 +533,19 @@ def _get_auth_response(access_token: str, redirect_to_callback: bool) -> Respons
     return JSONResponse(response_dict)
 
 
-def _get_oauth_redirect_error(request: Request, error: str) -> Response:
+def _get_oauth_redirect_error(
+    request: Request, error: str, status_code: int = 307
+) -> Response:
     """Get the redirect response for an OAuth error."""
     params = urllib.parse.urlencode(
         {
             "error": error,
         }
     )
-    response = RedirectResponse(url=str(request.url_for("login")) + "?" + params)
+    response = RedirectResponse(
+        url=str(request.url_for("login")) + "?" + params,
+        status_code=status_code,
+    )
     return response
 
 
@@ -643,6 +653,92 @@ async def header_auth(request: Request):
     return await _authenticate_user(request, user)
 
 
+def _azure_hf_authority() -> str:
+    return os.environ.get(
+        "OAUTH_AZURE_AD_HYBRID_AUTHORITY",
+        "https://login.microsoftonline.com",
+    ).rstrip("/")
+
+
+def _azure_hf_tenant() -> str:
+    return os.environ.get("OAUTH_AZURE_AD_HYBRID_TENANT_ID", "common")
+
+
+def _azure_hf_pinned_issuer() -> Optional[str]:
+    if not os.environ.get("OAUTH_AZURE_AD_HYBRID_ENABLE_SINGLE_TENANT"):
+        return None
+    tenant = _azure_hf_tenant()
+    if tenant.lower() in {"common", "organizations", "consumers"}:
+        return None
+    return f"{_azure_hf_authority()}/{tenant}/v2.0"
+
+
+def _azure_hf_jwks_url() -> str:
+    tenant = _azure_hf_tenant() if _azure_hf_pinned_issuer() else "common"
+    return f"{_azure_hf_authority()}/{tenant}/discovery/v2.0/keys"
+
+
+@lru_cache(maxsize=4)
+def _azure_hf_jwks_client(url: str):
+    import jwt
+
+    return jwt.PyJWKClient(url, cache_keys=True)
+
+
+def _azure_hf_issuer_allowed(decoded: dict) -> bool:
+    issuer = str(decoded.get("iss") or "")
+    parsed = urllib.parse.urlparse(issuer)
+    authority = urllib.parse.urlparse(_azure_hf_authority())
+    if parsed.scheme != "https" or parsed.netloc != authority.netloc:
+        return False
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) != 2 or parts[1] != "v2.0":
+        return False
+    tenant_id = parts[0]
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", tenant_id):
+        return False
+    token_tenant = decoded.get("tid")
+    return not token_tenant or str(token_tenant).lower() == tenant_id.lower()
+
+
+async def _verify_azure_hf_id_token(
+    provider, id_token: str, expected_nonce: Optional[str]
+) -> dict:
+    """Verify the browser-supplied azure-ad-hybrid id_token before trusting it."""
+    import jwt
+
+    if not expected_nonce:
+        raise ValueError("missing nonce cookie for azure-ad-hybrid login")
+    if not provider.client_id:
+        raise ValueError("azure-ad-hybrid client id is not configured")
+
+    jwks_client = _azure_hf_jwks_client(_azure_hf_jwks_url())
+    signing_key = await asyncio.to_thread(
+        jwks_client.get_signing_key_from_jwt, id_token
+    )
+
+    decode_kwargs: dict = {
+        "algorithms": ["RS256"],
+        "audience": provider.client_id,
+        "options": {"require": ["exp", "aud", "iss", "nonce"]},
+    }
+    if pinned_issuer := _azure_hf_pinned_issuer():
+        decode_kwargs["issuer"] = pinned_issuer
+
+    decoded = jwt.decode(id_token, signing_key.key, **decode_kwargs)
+
+    if not _azure_hf_pinned_issuer() and not _azure_hf_issuer_allowed(decoded):
+        raise ValueError("unexpected id_token issuer")
+
+    token_nonce = decoded.get("nonce")
+    if not isinstance(token_nonce, str) or not hmac.compare_digest(
+        token_nonce, expected_nonce
+    ):
+        raise ValueError("id_token nonce does not match the login nonce")
+
+    return decoded
+
+
 @router.get("/auth/oauth/{provider_id}")
 async def oauth_login(provider_id: str, request: Request):
     """Redirect the user to the oauth provider login page."""
@@ -661,12 +757,18 @@ async def oauth_login(provider_id: str, request: Request):
 
     random = random_secret(32)
 
+    authorize_params = dict(provider.authorize_params)
+    nonce = None
+    if getattr(provider, "uses_per_login_nonce", False):
+        nonce = random_secret(16)
+        authorize_params["nonce"] = nonce
+
     params = urllib.parse.urlencode(
         {
             "client_id": provider.client_id,
             "redirect_uri": f"{get_user_facing_url(request.url)}/callback",
             "state": random,
-            **provider.authorize_params,
+            **authorize_params,
         }
     )
     response = RedirectResponse(
@@ -674,6 +776,8 @@ async def oauth_login(provider_id: str, request: Request):
     )
 
     set_oauth_state_cookie(response, random)
+    if nonce is not None:
+        set_oauth_nonce_cookie(response, nonce)
 
     return response
 
@@ -742,6 +846,7 @@ async def oauth_azure_hf_callback(
     request: Request,
     error: Optional[str] = None,
     code: Annotated[Optional[str], Form()] = None,
+    state: Annotated[Optional[str], Form()] = None,
     id_token: Annotated[Optional[str], Form()] = None,
 ):
     """Handle the azure ad hybrid flow callback and login the user."""
@@ -769,6 +874,31 @@ async def oauth_azure_hf_callback(
             detail="Missing code",
         )
 
+    # The provider posts both code and id_token back to the browser
+    # (response_mode=form_post). Validate the state cookie, then verify the
+    # id_token before it is trusted or forwarded to the app callback.
+    if not state:
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
+
+    try:
+        validate_oauth_state_cookie(request, state)
+    except Exception as e:
+        logger.warning("Unable to validate oauth state: %s", e, exc_info=True)
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
+
+    if not id_token:
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
+
+    try:
+        await _verify_azure_hf_id_token(
+            provider, id_token, get_oauth_nonce_cookie(request)
+        )
+    except Exception as e:
+        logger.warning(
+            "Unable to verify azure-ad-hybrid id_token: %s", e, exc_info=True
+        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
+
     url = get_user_facing_url(request.url)
     token = await provider.get_token(code, url)
 
@@ -781,6 +911,7 @@ async def oauth_azure_hf_callback(
     response = await _authenticate_user(request, user, redirect_to_callback=True)
 
     clear_oauth_state_cookie(response)
+    clear_oauth_nonce_cookie(response)
 
     return response
 

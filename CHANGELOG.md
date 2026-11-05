@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 - Declare `aiohttp` and SQLAlchemy's `asyncio` extra in the `custom-data` extra so the SQLAlchemy and DynamoDB data layers import on a clean install.
+- Verify `azure-ad-hybrid` OAuth state and `id_token`, and generate a per-login nonce.
 - Warn when `LITERAL_API_KEY` is set, since the LiteralAI data layer was removed.
 - Raise `AttributeError` for unknown lazy `chainlit` attributes so `hasattr` works.
 - Serialize generation objects with `to_dict()` when persisting steps, preserving compatibility with legacy generation models.
