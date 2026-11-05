@@ -41,7 +41,12 @@ describe('Thread resume (author)', () => {
     submitMessage('hi');
     cy.location('pathname').should('match', /\/thread\//);
 
-    // Reload to trigger resume
+    // Reload to trigger resume. Reset the flag on load so the wait below can
+    // only be satisfied by the resume that follows this reload; the route
+    // change above also resumes the thread on a fresh socket.
+    cy.on('window:before:load', () => {
+      resumed = false;
+    });
     cy.reload();
 
     // Composer present and no read-only banner
