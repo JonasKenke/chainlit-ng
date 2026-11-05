@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Normalize data-layer timestamps and accept stored timestamps without a trailing `Z`.
 - Serve images, PDFs, audio, and video with an inline content disposition after resume.
 - Delete child steps, feedback, and elements when a message is edited.
+- Avoid replaying a resumed thread on reconnect and cache resume state per session.
 - Warn when `LITERAL_API_KEY` is set, since the LiteralAI data layer was removed.
 - Raise `AttributeError` for unknown lazy `chainlit` attributes so `hasattr` works.
 - Serialize generation objects with `to_dict()` when persisting steps, preserving compatibility with legacy generation models.

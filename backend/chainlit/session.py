@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from chainlit.config import ChainlitConfig
     from chainlit.mode import Mode
-    from chainlit.types import FileDict
+    from chainlit.types import FileDict, ThreadDict
     from chainlit.user import PersistedUser, User
 
 _CLOSE_TIMEOUT = 10.0  # seconds to wait for a background MCP task to finish
@@ -333,6 +333,8 @@ class WebsocketSession(BaseSession):
         self.emit = emit
 
         self.restored = False
+        self._thread_resume_lock = asyncio.Lock()
+        self._resumed_thread: Optional[ThreadDict] = None
 
         self.thread_queues: Dict[str, ThreadQueue] = {}
         self.mcp_sessions = {}
