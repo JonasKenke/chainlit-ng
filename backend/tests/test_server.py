@@ -3,6 +3,7 @@ import os
 import pathlib
 import time
 import urllib.parse
+from http.cookies import SimpleCookie
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable
@@ -1295,7 +1296,9 @@ def test_azure_hf_login_sets_a_fresh_nonce_cookie(
         urllib.parse.urlparse(response.headers["location"]).query
     )
     assert params["nonce"]
-    assert response.cookies["oauth_nonce"].strip('"') == params["nonce"][0]
+    parsed_cookie = SimpleCookie()
+    parsed_cookie.load(f"oauth_nonce={response.cookies['oauth_nonce']}")
+    assert parsed_cookie["oauth_nonce"].value == params["nonce"][0]
     assert "nonce" not in mock_oauth_provider.authorize_params
 
 
