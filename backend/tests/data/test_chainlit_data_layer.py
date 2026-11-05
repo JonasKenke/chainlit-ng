@@ -1,9 +1,17 @@
 import json
+from datetime import datetime
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
 
-from chainlit.data.chainlit_data_layer import ChainlitDataLayer
+from chainlit.data.chainlit_data_layer import (
+    ChainlitDataLayer,
+    _datetime_to_utc_iso,
+    _parse_iso_datetime,
+)
+from chainlit.data.storage_clients.base import BaseStorageClient
+from chainlit.element import Element, File, Image, Pdf
 
 
 @pytest.mark.asyncio
@@ -221,4 +229,139 @@ async def test_create_step_uses_nullif_for_output_and_input():
     )
     assert "NULLIF(EXCLUDED.input, '')" in source, (
         "input should use NULLIF to treat empty string as NULL"
+    )
+
+
+class TestIsoTimestampHelpers:
+    def test_parse_with_and_without_z(self):
+        with_z = _parse_iso_datetime("2025-09-04T02:00:42.164000Z")
+        without_z = _parse_iso_datetime("2025-09-04T02:00:42.164000")
+        assert with_z == without_z == datetime(2025, 9, 4, 2, 0, 42, 164000)
+
+    def test_parse_rejects_other_formats(self):
+        with pytest.raises(ValueError, match="does not match format"):
+            _parse_iso_datetime("2025-09-04 02:00:42")
+
+    def test_roundtrip_adds_z(self):
+        original = "2025-09-04T02:00:42.164000"
+        parsed = _parse_iso_datetime(original)
+        assert _datetime_to_utc_iso(parsed) == original + "Z"
+
+    def test_handles_aware_datetimes(self):
+        dt = datetime.fromisoformat("2025-09-04T04:00:42.164000+02:00")
+        assert _datetime_to_utc_iso(dt) == "2025-09-04T02:00:42.164000Z"
+
+    def test_step_row_timestamps_are_reparseable(self):
+        layer = ChainlitDataLayer(database_url="postgresql://fake", storage_client=None)
+        row = {
+            "id": "step-1",
+            "threadId": "thread-1",
+            "parentId": None,
+            "name": "test_step",
+            "type": "run",
+            "input": "{}",
+            "output": "{}",
+            "metadata": "{}",
+            "createdAt": datetime(2025, 9, 4, 2, 0, 42, 164000),
+            "startTime": datetime(2025, 9, 4, 2, 0, 42, 164000),
+            "endTime": datetime(2025, 9, 4, 2, 0, 43),
+            "showInput": "json",
+            "isError": False,
+            "feedback_id": None,
+        }
+
+        result = layer._convert_step_row_to_dict(row)
+
+        assert result["createdAt"] == "2025-09-04T02:00:42.164000Z"
+        assert result["start"] == "2025-09-04T02:00:42.164000Z"
+        assert result["end"] == "2025-09-04T02:00:43Z"
+        assert _parse_iso_datetime(result["createdAt"]) == row["createdAt"]
+
+    def test_step_row_none_timestamps_stay_none(self):
+        layer = ChainlitDataLayer(database_url="postgresql://fake", storage_client=None)
+        row = {
+            "id": "step-1",
+            "threadId": "thread-1",
+            "parentId": None,
+            "name": "test_step",
+            "type": "run",
+            "input": "{}",
+            "output": "{}",
+            "metadata": "{}",
+            "createdAt": None,
+            "startTime": None,
+            "endTime": None,
+            "showInput": "json",
+            "isError": False,
+            "feedback_id": None,
+        }
+
+        result = layer._convert_step_row_to_dict(row)
+
+        assert result["createdAt"] is None
+        assert result["start"] is None
+        assert result["end"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("element_type", [Image, Pdf])
+async def test_create_element_uses_inline_disposition_for_browser_rendered_types(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_chainlit_context,
+    mock_storage_client: BaseStorageClient,
+    element_type: type[Element],
+):
+    data_layer = ChainlitDataLayer(
+        database_url="postgresql://test",
+        storage_client=mock_storage_client,
+        show_logger=False,
+    )
+    monkeypatch.setattr(
+        data_layer, "execute_query", AsyncMock(return_value=[{"id": "existing"}])
+    )
+
+    async with mock_chainlit_context:
+        element = element_type(
+            name="rendered-element",
+            content=b"content",
+            for_id="test-step",
+        )
+        await data_layer.create_element(element)
+
+    upload_file = cast(AsyncMock, mock_storage_client.upload_file)
+    upload_file.assert_awaited_once()
+    upload_call = upload_file.await_args
+    assert upload_call is not None
+    assert upload_call.kwargs["content_disposition"] == "inline"
+
+
+@pytest.mark.asyncio
+async def test_create_element_preserves_attachment_disposition_for_generic_files(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_chainlit_context,
+    mock_storage_client: BaseStorageClient,
+):
+    data_layer = ChainlitDataLayer(
+        database_url="postgresql://test",
+        storage_client=mock_storage_client,
+        show_logger=False,
+    )
+    monkeypatch.setattr(
+        data_layer, "execute_query", AsyncMock(return_value=[{"id": "existing"}])
+    )
+
+    async with mock_chainlit_context:
+        element = File(
+            name="report.txt",
+            content=b"content",
+            for_id="test-step",
+        )
+        await data_layer.create_element(element)
+
+    upload_file = cast(AsyncMock, mock_storage_client.upload_file)
+    upload_file.assert_awaited_once()
+    upload_call = upload_file.await_args
+    assert upload_call is not None
+    assert upload_call.kwargs["content_disposition"] == (
+        'attachment; filename="report.txt"'
     )

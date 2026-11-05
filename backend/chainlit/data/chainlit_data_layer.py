@@ -1,6 +1,7 @@
 import json
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import aiofiles
@@ -35,6 +36,29 @@ if TYPE_CHECKING:
     from chainlit.step import StepDict
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+ISO_FORMAT_NO_Z = "%Y-%m-%dT%H:%M:%S.%f"
+
+
+def _utcnow() -> datetime:
+    """Return naive UTC now for timestamp columns without timezone info."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _parse_iso_datetime(date_string: str) -> datetime:
+    """Parse an ISO datetime string, tolerating both with and without trailing Z."""
+    if date_string.endswith("Z"):
+        return datetime.strptime(date_string, ISO_FORMAT)
+    return datetime.strptime(date_string, ISO_FORMAT_NO_Z)
+
+
+def _datetime_to_utc_iso(dt: datetime) -> str:
+    """Convert a datetime to a UTC ISO string with trailing Z for consistency."""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    value = dt.isoformat()
+    if not value.endswith("Z"):
+        value = re.sub(r"[+-]\d{2}:\d{2}$", "", value) + "Z"
+    return value
 
 
 class ChainlitDataLayer(BaseDataLayer):
@@ -54,7 +78,7 @@ class ChainlitDataLayer(BaseDataLayer):
             self.pool = await asyncpg.create_pool(self.database_url)
 
     async def get_current_timestamp(self) -> datetime:
-        return datetime.now()
+        return _utcnow()
 
     async def execute_query(
         self, query: str, params: Union[Dict, None] = None
@@ -95,7 +119,7 @@ class ChainlitDataLayer(BaseDataLayer):
         return PersistedUser(
             id=str(row.get("id")),
             identifier=str(row.get("identifier")),
-            createdAt=row.get("createdAt").isoformat(),  # type: ignore
+            createdAt=_datetime_to_utc_iso(row.get("createdAt")),  # type: ignore
             metadata=json.loads(row.get("metadata", "{}")),
         )
 
@@ -121,7 +145,7 @@ class ChainlitDataLayer(BaseDataLayer):
         return PersistedUser(
             id=str(row.get("id")),
             identifier=str(row.get("identifier")),
-            createdAt=row.get("createdAt").isoformat(),  # type: ignore
+            createdAt=_datetime_to_utc_iso(row.get("createdAt")),  # type: ignore
             metadata=json.loads(row.get("metadata", "{}")),
         )
 
@@ -195,14 +219,12 @@ class ChainlitDataLayer(BaseDataLayer):
                 else:
                     path = f"files/{element.id}"
 
-                content_disposition = (
-                    f'attachment; filename="{element.name}"'
-                    if not (
-                        GCSStorageClient is not None
-                        and isinstance(self.storage_client, GCSStorageClient)
-                    )
-                    else None
-                )
+                content_disposition: str | None = element.get_content_disposition()
+                if content_disposition is None and not (
+                    GCSStorageClient is not None
+                    and isinstance(self.storage_client, GCSStorageClient)
+                ):
+                    content_disposition = f'attachment; filename="{element.name}"'
                 await self.storage_client.upload_file(
                     object_key=path,
                     data=content,
@@ -372,7 +394,7 @@ class ChainlitDataLayer(BaseDataLayer):
         timestamp = await self.get_current_timestamp()
         created_at = step_dict.get("createdAt")
         if created_at:
-            timestamp = datetime.strptime(created_at, ISO_FORMAT)
+            timestamp = _parse_iso_datetime(created_at)
 
         params = {
             "id": step_dict["id"],
@@ -497,7 +519,7 @@ class ChainlitDataLayer(BaseDataLayer):
         for thread in threads:
             thread_dict = ThreadDict(
                 id=str(thread["id"]),
-                createdAt=thread["updatedAt"].isoformat(),
+                createdAt=_datetime_to_utc_iso(thread["updatedAt"]),
                 name=thread["name"],
                 userId=str(thread["userId"]) if thread["userId"] else None,
                 userIdentifier=thread["user_identifier"],
@@ -561,7 +583,7 @@ class ChainlitDataLayer(BaseDataLayer):
 
         return ThreadDict(
             id=str(thread["id"]),
-            createdAt=thread["createdAt"].isoformat(),
+            createdAt=_datetime_to_utc_iso(thread["createdAt"]),
             name=thread["name"],
             userId=str(thread["userId"]) if thread["userId"] else None,
             userIdentifier=thread["user_identifier"],
@@ -630,7 +652,7 @@ class ChainlitDataLayer(BaseDataLayer):
             "userId": user_id,
             "tags": tags,
             "metadata": json.dumps(metadata),
-            "updatedAt": datetime.now(),
+            "updatedAt": _utcnow(),
         }
 
         # Remove None values
@@ -691,11 +713,15 @@ class ChainlitDataLayer(BaseDataLayer):
             input=row.get("input", {}),
             output=row.get("output", {}),
             metadata=json.loads(row.get("metadata", "{}")),
-            createdAt=row["createdAt"].isoformat() if row.get("createdAt") else None,
-            start=row["startTime"].isoformat() if row.get("startTime") else None,
+            createdAt=_datetime_to_utc_iso(row["createdAt"])
+            if row.get("createdAt")
+            else None,
+            start=_datetime_to_utc_iso(row["startTime"])
+            if row.get("startTime")
+            else None,
             showInput=row.get("showInput"),
             isError=row.get("isError"),
-            end=row["endTime"].isoformat() if row.get("endTime") else None,
+            end=_datetime_to_utc_iso(row["endTime"]) if row.get("endTime") else None,
             feedback=self._extract_feedback_dict_from_step_row(row),
         )
 

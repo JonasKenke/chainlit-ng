@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - Declare `aiohttp` and SQLAlchemy's `asyncio` extra in the `custom-data` extra so the SQLAlchemy and DynamoDB data layers import on a clean install.
 - Verify `azure-ad-hybrid` OAuth state and `id_token`, and generate a per-login nonce.
+- Limit thread metadata in list, get, and resume responses to browser-visible keys.
+- Normalize data-layer timestamps and accept stored timestamps without a trailing `Z`.
+- Serve images, PDFs, audio, and video with an inline content disposition after resume.
+- Delete child steps, feedback, and elements when a message is edited.
 - Warn when `LITERAL_API_KEY` is set, since the LiteralAI data layer was removed.
 - Raise `AttributeError` for unknown lazy `chainlit` attributes so `hasattr` works.
 - Serialize generation objects with `to_dict()` when persisting steps, preserving compatibility with legacy generation models.

@@ -764,3 +764,87 @@ class TestMessageEdgeCases:
             result = msg.to_dict()
 
             assert result["metadata"] == {}
+
+
+class TestRemoveChildren:
+    def _make_message(self, msg_id="msg_1", thread_id="thread_1"):
+        with mock_chainlit_context():
+            msg = Message(content="test")
+        msg.id = msg_id
+        msg.thread_id = thread_id
+        return msg
+
+    def _tracked_layer(self, thread):
+        events = []
+
+        async def get_thread(thread_id):
+            events.append(("get_thread", thread_id))
+            return thread
+
+        async def delete_feedback(feedback_id):
+            events.append(("delete_feedback", feedback_id))
+
+        async def delete_element(element_id, thread_id=None):
+            events.append(("delete_element", element_id, thread_id))
+
+        async def delete_step(step_id):
+            events.append(("delete_step", step_id))
+
+        layer = AsyncMock()
+        layer.get_thread = AsyncMock(side_effect=get_thread)
+        layer.delete_feedback = AsyncMock(side_effect=delete_feedback)
+        layer.delete_element = AsyncMock(side_effect=delete_element)
+        layer.delete_step = AsyncMock(side_effect=delete_step)
+        return layer, events
+
+    @pytest.mark.asyncio
+    async def test_no_data_layer(self):
+        msg = self._make_message()
+
+        with patch("chainlit.message.get_data_layer", return_value=None):
+            await msg.remove_children()
+
+    @pytest.mark.asyncio
+    async def test_deletes_descendants_feedback_and_elements(self):
+        msg = self._make_message()
+        thread = {
+            "steps": [
+                {"id": "msg_1", "parentId": None},
+                {"id": "child_1", "parentId": "msg_1", "feedback": {"id": "fb_1"}},
+                {"id": "grandchild", "parentId": "child_1"},
+                {"id": "unrelated", "parentId": None},
+            ],
+            "elements": [
+                {"id": "el_1", "forId": "child_1"},
+                {"id": "el_unrelated", "forId": "unrelated"},
+            ],
+        }
+        layer, events = self._tracked_layer(thread)
+
+        with patch("chainlit.message.get_data_layer", return_value=layer):
+            await msg.remove_children()
+
+        assert events == [
+            ("get_thread", "thread_1"),
+            ("delete_feedback", "fb_1"),
+            ("delete_element", "el_1", "thread_1"),
+            ("delete_step", "grandchild"),
+            ("delete_step", "child_1"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_children(self):
+        msg = self._make_message()
+        thread = {
+            "steps": [
+                {"id": "msg_1", "parentId": None},
+                {"id": "unrelated", "parentId": None},
+            ],
+            "elements": [],
+        }
+        layer, events = self._tracked_layer(thread)
+
+        with patch("chainlit.message.get_data_layer", return_value=layer):
+            await msg.remove_children()
+
+        assert events == [("get_thread", "thread_1")]

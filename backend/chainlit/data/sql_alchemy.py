@@ -616,7 +616,11 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             element.mime = "application/octet-stream"
 
         uploaded_file = await self.storage_provider.upload_file(
-            object_key=file_object_key, data=content, mime=element.mime, overwrite=True
+            object_key=file_object_key,
+            data=content,
+            mime=element.mime,
+            overwrite=True,
+            content_disposition=element.get_content_disposition(),
         )
         if not uploaded_file:
             raise ValueError(

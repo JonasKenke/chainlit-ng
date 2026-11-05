@@ -79,6 +79,7 @@ from chainlit.scheduled_task import (
 )
 from chainlit.scheduler import ScheduledTaskWorker
 from chainlit.secret import random_secret
+from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AskFileSpec,
     CallActionRequest,
@@ -1205,7 +1206,9 @@ async def get_user_threads(
         payload.filter.userId = current_user.id
 
     res = await data_layer.list_threads(payload.pagination, payload.filter)
-    return JSONResponse(content=res.to_dict())
+    response = res.to_dict()
+    response["data"] = [public_thread(thread) for thread in response["data"]]
+    return JSONResponse(content=response)
 
 
 @router.get("/project/thread/{thread_id}")
@@ -1226,7 +1229,7 @@ async def get_thread(
     await is_thread_author(current_user.identifier, thread_id)
 
     res = await data_layer.get_thread(thread_id)
-    return JSONResponse(content=res)
+    return JSONResponse(content=public_thread(res, include_settings=True))
 
 
 @router.get("/project/share/{thread_id}")
@@ -1277,11 +1280,7 @@ async def get_shared_thread(
     if (not user_can_view) and (not is_shared):
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    metadata.pop("chat_profile", None)
-    metadata.pop("chat_settings", None)
-    metadata.pop("env", None)
-    thread["metadata"] = metadata
-    return JSONResponse(content=thread)
+    return JSONResponse(content=public_thread(thread))
 
 
 # ---- Prompt scheduling endpoints ----

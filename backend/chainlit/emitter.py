@@ -15,6 +15,7 @@ from chainlit.message import Message
 from chainlit.mode import MODE_PREFERENCES_METADATA_KEY, Mode
 from chainlit.session import BaseSession, WebsocketSession
 from chainlit.step import StepDict
+from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AskActionResponse,
     AskElementResponse,
@@ -244,8 +245,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
         return self._get_session_property("emit_call")
 
     def resume_thread(self, thread_dict: ThreadDict):
-        """Send a thread to the UI to resume it"""
-        return self.emit("resume_thread", thread_dict)
+        """Send a thread to the UI with only public metadata."""
+        return self.emit(
+            "resume_thread", public_thread(thread_dict, include_settings=True)
+        )
 
     def send_resume_thread_error(self, error: str):
         """Send a thread resume error to the UI"""

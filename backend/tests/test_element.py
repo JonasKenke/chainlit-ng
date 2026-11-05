@@ -164,6 +164,14 @@ class TestElementBase:
         assert Element.infer_type_from_mime("text/plain") == "file"
         assert Element.infer_type_from_mime("application/json") == "file"
 
+    def test_content_disposition_by_element_type(self):
+        assert Image.get_content_disposition() == "inline"
+        assert Pdf.get_content_disposition() == "inline"
+        assert Audio.get_content_disposition() == "inline"
+        assert Video.get_content_disposition() == "inline"
+        assert File.get_content_disposition() is None
+        assert Text.get_content_disposition() is None
+
 
 @pytest.mark.asyncio
 class TestImageElement:
