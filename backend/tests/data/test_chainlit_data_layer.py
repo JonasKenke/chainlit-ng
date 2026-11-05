@@ -365,3 +365,37 @@ async def test_create_element_preserves_attachment_disposition_for_generic_files
     assert upload_call.kwargs["content_disposition"] == (
         'attachment; filename="report.txt"'
     )
+
+
+@pytest.mark.asyncio
+async def test_get_element_preserves_none_fields():
+    layer = ChainlitDataLayer(database_url="postgresql://fake", storage_client=None)
+    layer.execute_query = AsyncMock(
+        return_value=[
+            {
+                "id": "elem-1",
+                "threadId": "thread-1",
+                "stepId": "step-1",
+                "metadata": json.dumps({"type": "file"}),
+                "url": None,
+                "name": "test.txt",
+                "mime": None,
+                "objectKey": None,
+                "chainlitKey": "ck-1",
+                "display": "inline",
+                "size": None,
+                "language": None,
+                "page": None,
+                "autoPlay": None,
+                "playerConfig": None,
+                "props": "{}",
+            }
+        ]
+    )
+
+    result = await layer.get_element("thread-1", "elem-1")
+
+    assert result is not None
+    assert result["url"] is None
+    assert result["objectKey"] is None
+    assert result["mime"] is None

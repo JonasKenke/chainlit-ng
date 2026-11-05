@@ -137,6 +137,23 @@ class TestElementBase:
             assert element.name == "test_file"
             assert element.url == "https://example.com/file.pdf"
 
+    async def test_element_from_dict_preserves_bytes_content(
+        self, mock_chainlit_context
+    ):
+        async with mock_chainlit_context:
+            content = b"\x89PNG\r\n"
+            element = Element.from_dict(
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": "image.png",
+                    "type": "image",
+                    "content": content,
+                    "display": "inline",
+                }
+            )
+
+            assert element.content == content
+
     async def test_element_from_dict_image(self, mock_chainlit_context):
         """Test Element.from_dict() for Image type."""
         async with mock_chainlit_context:

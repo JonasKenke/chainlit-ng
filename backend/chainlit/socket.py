@@ -270,7 +270,14 @@ async def connection_successful(sid):
             thread = context.session._resumed_thread
             interaction_sid = None
             if thread is None:
-                thread = await resume_thread(context.session)
+                try:
+                    thread = await resume_thread(context.session)
+                except Exception as e:
+                    logger.error(f"Failed to resume thread: {e!s}")
+                    await context.emitter.send_resume_thread_error(
+                        "Failed to load conversation history."
+                    )
+                    return
                 if thread:
                     context.session.has_first_interaction = True
                     interaction_sid = context.session.socket_id
@@ -281,8 +288,13 @@ async def connection_successful(sid):
                     await config.code.on_chat_resume(thread)
 
                     for step in thread.get("steps", []):
-                        if "message" in step["type"]:
-                            chat_context.add(Message.from_dict(step))
+                        try:
+                            if "message" in step["type"]:
+                                chat_context.add(Message.from_dict(step))
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to restore step {step.get('id')}: {e!s}"
+                            )
 
                     # Server initialization is complete even if delivery retries.
                     context.session._resumed_thread = thread
@@ -296,7 +308,14 @@ async def connection_successful(sid):
                         "first_interaction",
                         {"interaction": "resume", "thread_id": thread.get("id")},
                     )
-                await context.emitter.resume_thread(thread)
+                try:
+                    await context.emitter.resume_thread(thread)
+                except Exception as e:
+                    logger.error(f"Failed to emit resume_thread: {e!s}")
+                    await context.emitter.send_resume_thread_error(
+                        "Failed to load conversation history."
+                    )
+                    return
                 if (
                     context.session.socket_id != delivery_sid
                     or not sio.manager.is_connected(delivery_sid, "/")
