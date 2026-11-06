@@ -12,6 +12,11 @@ from chainlit.auth import (
     get_token_from_cookies,
     set_auth_cookie,
 )
+from chainlit.auth.cookie import (
+    clear_oauth_cookies,
+    set_oauth_nonce_cookie,
+    set_oauth_state_cookie,
+)
 
 
 @pytest.fixture
@@ -220,3 +225,134 @@ def test_clear_auth_cookie(client):
     assert len(clear_response.cookies) == 0
     final_response = client.get("/get-token")
     assert final_response.json()["token"] is None
+
+
+COOKIE_SECURE_MATRIX = [
+    ("lax", None, False),
+    ("lax", "true", True),
+    ("lax", " TRUE ", True),
+    ("lax", "1", True),
+    ("lax", "false", False),
+    ("lax", "0", False),
+    ("none", None, True),
+    ("none", "true", True),
+    ("none", "false", True),
+    ("none", "0", True),
+]
+
+
+def _make_request(cookie_header: str = "") -> Request:
+    headers = [(b"cookie", cookie_header.encode())] if cookie_header else []
+    return Request(
+        {
+            "type": "http",
+            "headers": headers,
+            "query_string": b"",
+            "method": "GET",
+            "path": "/",
+        }
+    )
+
+
+def _assert_cookie_attributes(response, *, secure, samesite, max_age=None):
+    raw_headers = response.headers
+    headers = (
+        raw_headers.getlist("set-cookie")
+        if hasattr(raw_headers, "getlist")
+        else raw_headers.get_list("set-cookie")
+    )
+    assert headers
+    for header in headers:
+        lowered = header.lower()
+        assert ("secure" in [part.strip() for part in lowered.split(";")]) is secure, (
+            header
+        )
+        assert f"samesite={samesite}" in lowered, header
+        if max_age is not None:
+            assert f"max-age={max_age}" in lowered, header
+    return headers
+
+
+@pytest.mark.parametrize(("samesite", "flag", "expected_secure"), COOKIE_SECURE_MATRIX)
+def test_cookie_secure_matrix(monkeypatch, samesite, flag, expected_secure):
+    monkeypatch.setenv("CHAINLIT_COOKIE_SAMESITE", samesite)
+    if flag is None:
+        monkeypatch.delenv("CHAINLIT_COOKIE_SECURE", raising=False)
+    else:
+        monkeypatch.setenv("CHAINLIT_COOKIE_SECURE", flag)
+    try:
+        importlib.reload(cookie_module)
+        assert cookie_module._cookie_secure is expected_secure
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cookie_module)
+
+
+@pytest.mark.parametrize("value", ["yes", "", "true-ish"])
+def test_cookie_secure_invalid_value_fails_at_import(monkeypatch, value):
+    monkeypatch.setenv("CHAINLIT_COOKIE_SECURE", value)
+    try:
+        with pytest.raises(ValueError, match="CHAINLIT_COOKIE_SECURE"):
+            importlib.reload(cookie_module)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cookie_module)
+
+
+@pytest.mark.parametrize("secure", [False, True])
+@pytest.mark.parametrize("samesite", ["lax", "none"])
+@pytest.mark.parametrize("token", ["short", "x" * 3001])
+def test_auth_cookie_secure_flag(monkeypatch, secure, samesite, token):
+    monkeypatch.setattr(cookie_module, "_cookie_secure", secure)
+    monkeypatch.setattr(cookie_module, "_cookie_samesite", samesite)
+
+    response = Response()
+    set_auth_cookie(_make_request(), response, token)
+
+    headers = _assert_cookie_attributes(response, secure=secure, samesite=samesite)
+    if len(token) > 3000:
+        assert len(headers) > 1
+    else:
+        assert len(headers) == 1
+
+    clear_response = Response()
+    clear_auth_cookie(
+        _make_request("access_token=a; access_token_0=b; access_token_1=c"),
+        clear_response,
+    )
+    headers = _assert_cookie_attributes(
+        clear_response, secure=secure, samesite=samesite, max_age=0
+    )
+    assert len(headers) == 3
+
+
+@pytest.mark.parametrize("secure", [False, True])
+@pytest.mark.parametrize("samesite", ["lax", "none"])
+def test_oauth_state_and_nonce_cookie_attributes(monkeypatch, secure, samesite):
+    monkeypatch.setattr(cookie_module, "_cookie_secure", secure)
+    monkeypatch.setattr(cookie_module, "_cookie_samesite", samesite)
+
+    response = Response()
+    set_oauth_state_cookie(response, "state")
+    set_oauth_nonce_cookie(response, "nonce")
+
+    headers = _assert_cookie_attributes(response, secure=secure, samesite=samesite)
+    names = {header.split("=", 1)[0].lower() for header in headers}
+    assert names == {"oauth_state", "oauth_nonce"}
+    assert all("httponly" in header.lower() for header in headers)
+
+
+@pytest.mark.parametrize("secure", [False, True])
+@pytest.mark.parametrize("samesite", ["lax", "none"])
+def test_delete_cookie_attributes(monkeypatch, secure, samesite):
+    monkeypatch.setattr(cookie_module, "_cookie_secure", secure)
+    monkeypatch.setattr(cookie_module, "_cookie_samesite", samesite)
+
+    response = Response()
+    clear_oauth_cookies(response)
+
+    headers = _assert_cookie_attributes(
+        response, secure=secure, samesite=samesite, max_age=0
+    )
+    names = {header.split("=", 1)[0].lower() for header in headers}
+    assert names == {"oauth_state", "oauth_nonce"}

@@ -23,7 +23,32 @@ assert _cookie_samesite in [
 ], (
     "Invalid value for CHAINLIT_COOKIE_SAMESITE. Must be one of 'lax', 'strict' or 'none'."
 )
-_cookie_secure = _cookie_samesite == "none"
+
+
+def _get_cookie_secure() -> bool:
+    """Resolve the Secure flag; SameSite=None always requires it.
+
+    CHAINLIT_COOKIE_SECURE=true forces Secure on HTTPS deployments. The flag is
+    opt-in because Secure cookies are dropped by browsers on plain HTTP. Leave
+    it unset for HTTP deployments; CHAINLIT_COOKIE_SAMESITE=none still forces
+    Secure on its own because browsers reject SameSite=None without it.
+    """
+    raw = os.environ.get("CHAINLIT_COOKIE_SECURE")
+    if raw is None:
+        return _cookie_samesite == "none"
+
+    value = raw.strip().lower()
+    if value in ("true", "1"):
+        return True
+    if value in ("false", "0"):
+        return _cookie_samesite == "none"
+
+    raise ValueError(
+        "Invalid value for CHAINLIT_COOKIE_SECURE. Must be 'true', '1', 'false' or '0'."
+    )
+
+
+_cookie_secure = _get_cookie_secure()
 if _cookie_root_path := os.environ.get("CHAINLIT_ROOT_PATH", None):
     _cookie_path = _cookie_root_path
 else:
@@ -219,9 +244,25 @@ def get_oauth_nonce_cookie(request: Request) -> Optional[str]:
 
 def clear_oauth_state_cookie(response: Response):
     """Oauth complete, delete state token."""
-    response.delete_cookie(_state_cookie_name, path=_cookie_path)
+    response.delete_cookie(
+        _state_cookie_name,
+        path=_cookie_path,
+        secure=_cookie_secure,
+        samesite=_cookie_samesite,
+    )
 
 
 def clear_oauth_nonce_cookie(response: Response):
     """Oauth complete, delete nonce token."""
-    response.delete_cookie(_nonce_cookie_name, path=_cookie_path)
+    response.delete_cookie(
+        _nonce_cookie_name,
+        path=_cookie_path,
+        secure=_cookie_secure,
+        samesite=_cookie_samesite,
+    )
+
+
+def clear_oauth_cookies(response: Response):
+    """Clear both cookies that belong to an in-flight login."""
+    clear_oauth_state_cookie(response)
+    clear_oauth_nonce_cookie(response)
