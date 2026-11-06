@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { getAppUrl } from '../src/lib/router';
+import { getAppUrl, prefixAssetUrl } from '../src/lib/router';
 
 let rootPathMeta: HTMLMetaElement | undefined;
 
@@ -51,6 +51,36 @@ describe('getAppUrl', () => {
     setRootPath('/app');
     expect(getAppUrl('https://cdn.example.com/share/abc')).toBe(
       'https://cdn.example.com/share/abc'
+    );
+  });
+});
+
+describe('prefixAssetUrl', () => {
+  afterEach(() => setRootPath());
+
+  it('prefixes root-relative paths with the root path', () => {
+    setRootPath('/app');
+    expect(prefixAssetUrl('/assets/worker.mjs')).toBe('/app/assets/worker.mjs');
+  });
+
+  it('normalizes trailing slashes on the root path', () => {
+    setRootPath('/apps//');
+    expect(prefixAssetUrl('/assets/worker.mjs')).toBe(
+      '/apps/assets/worker.mjs'
+    );
+  });
+
+  it('leaves protocol-relative URLs untouched', () => {
+    setRootPath('/app');
+    expect(prefixAssetUrl('//cdn.example.com/worker.mjs')).toBe(
+      '//cdn.example.com/worker.mjs'
+    );
+  });
+
+  it('leaves absolute URLs untouched', () => {
+    setRootPath('/app');
+    expect(prefixAssetUrl('https://cdn.example.com/worker.mjs')).toBe(
+      'https://cdn.example.com/worker.mjs'
     );
   });
 });
