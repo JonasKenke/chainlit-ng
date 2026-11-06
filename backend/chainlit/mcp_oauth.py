@@ -1,8 +1,10 @@
 """Per-user OAuth state for HTTP MCP connections.
 
-This module currently contains the in-memory token store only. The OAuth flow
-wiring (pending authorizations, provider factory, callback route) lands on top of
-it; nothing here is reachable from the rest of Chainlit yet.
+This module holds the in-memory token store, the pending-authorization map that
+correlates an OAuth redirect back to the user who started it, and the factory
+that adapts the MCP SDK's ``OAuthClientProvider`` to both. The OAuth flow wiring
+(callback route, ``/mcp`` integration) lands on top of it; nothing here is
+reachable from the rest of Chainlit yet.
 
 Tokens and dynamic-client-registration data live in one process-wide
 ``McpOAuthTokenStore`` keyed by ``(user identifier, canonical server key)``.
@@ -33,15 +35,33 @@ remembers the stamp it saw at ``get_tokens``. On refresh failure,
 provider has written a newer token in the meantime. Because the counter is
 store-wide, an LRU eviction followed by a re-creation of the same key cannot
 reuse an older value either.
+
+Pending authorizations
+----------------------
+The authorization redirect leaves Chainlit and returns on a route every user
+shares, so the SDK-minted ``state`` is the only correlation handle. A
+``PendingAuthorization`` is single-use, expires after ``AUTHORIZATION_TIMEOUT``
+and can only be completed or abandoned by the user it was registered for. One
+timer task per entry wakes a parked waiter at the deadline; every terminal
+outcome removes the entry, cancels the timer and settles the waiter exactly
+once. A user may have at most ``MAX_PENDING_PER_USER`` flows in flight.
 """
 
+import asyncio
 import ipaddress
 import time
 from dataclasses import dataclass
-from typing import NamedTuple, Optional
-from urllib.parse import urlsplit
+from typing import Awaitable, Callable, NamedTuple, Optional
+from urllib.parse import parse_qs, urlsplit
 
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.client.auth import OAuthClientProvider, TokenStorage
+from mcp.shared.auth import (
+    AuthorizationCodeResult,
+    OAuthClientInformationFull,
+    OAuthClientMetadata,
+    OAuthToken,
+)
+from pydantic import AnyUrl
 
 # Per-user entry cap. Enforced when a new flow starts (and on a new-entry write
 # as a backstop), evicting that user's least recently used entry.
@@ -50,6 +70,30 @@ MAX_ENTRIES_PER_USER = 20
 MAX_ENTRIES_TOTAL = 500
 # How long an entry that holds only a dynamic client registration survives.
 _CLIENT_INFO_TTL = 3600.0
+# How long a user has to finish authorizing in the browser. It bounds both the
+# pending entry and the SDK's wait for the callback.
+AUTHORIZATION_TIMEOUT = 300.0
+# How long the SDK gets to produce an authorization URL (discovery and dynamic
+# client registration included) before the caller reports the failure.
+AUTHORIZATION_URL_TIMEOUT = 30.0
+# In-flight flows one user may have at once.
+MAX_PENDING_PER_USER = 3
+
+
+class McpOAuthError(Exception):
+    """Base class for MCP OAuth flow errors."""
+
+
+class McpAuthorizationError(McpOAuthError):
+    """A user's authorization ended without a code: refused, cancelled or dropped."""
+
+
+class McpAuthorizationTimeout(McpAuthorizationError):
+    """The user did not finish authorizing before the deadline."""
+
+
+class McpTooManyFlows(McpOAuthError):
+    """A user already has the maximum number of flows in flight."""
 
 
 class Origin(NamedTuple):
@@ -140,6 +184,12 @@ def canonical_server_key(url: str) -> str:
     path = parsed.path or "/"
     query = f"?{parsed.query}" if parsed.query else ""
     return f"{origin.scheme}://{_format_origin(origin)}{path}{query}"
+
+
+def extract_state(authorization_url: str) -> Optional[str]:
+    """Return the ``state`` the SDK embedded in an authorization URL."""
+    values = parse_qs(urlsplit(authorization_url).query).get("state")
+    return values[0] if values else None
 
 
 @dataclass(repr=False)
@@ -406,3 +456,458 @@ class ScopedTokenStorage:
         return self._store.delete_if_unchanged(
             self._user_identifier, self._server_key, self._generation
         )
+
+
+class PendingAuthorization:
+    """One in-flight authorization, reachable through its SDK-minted ``state``.
+
+    ``PendingAuthorizations.register`` returns the handle, and the provider keeps
+    it for the SDK flow. That matters because the callback can land before the
+    SDK starts waiting: the code is then already set on ``wait()``'s future, not
+    looked up in a map that a ``resolve`` has already emptied.
+    """
+
+    def __init__(
+        self,
+        parent: "PendingAuthorizations",
+        state: str,
+        user_identifier: str,
+        server_key: str,
+        session_id: Optional[str],
+        name: Optional[str],
+        expires_at: float,
+        future: "asyncio.Future[AuthorizationCodeResult]",
+    ) -> None:
+        self.state = state
+        self.user_identifier = user_identifier
+        self.server_key = server_key
+        self.session_id = session_id
+        self.name = name
+        self.expires_at = expires_at
+        self._parent = parent
+        self._future = future
+        self._timer: Optional[asyncio.Task[None]] = None
+
+    def __repr__(self) -> str:
+        # The state is a bearer-like secret: keep it out of logs and tracebacks.
+        return (
+            f"PendingAuthorization(user_identifier={self.user_identifier!r}, "
+            f"server_key={self.server_key!r}, name={self.name!r})"
+        )
+
+    async def wait(self) -> AuthorizationCodeResult:
+        """Wait for the authorization code, at most until the deadline.
+
+        The wait is bounded by the flow's remaining lifetime, so a waiter parked
+        after the deadline wakes immediately and one parked before it wakes at
+        the deadline even if the timer task has not run yet.
+        """
+        remaining = self.expires_at - time.monotonic()
+        try:
+            return await asyncio.wait_for(self._future, remaining)
+        except asyncio.TimeoutError:
+            # ``wait_for`` cancelled the future, so this only drops the entry and
+            # its timer; the single-use guarantee is the pop inside ``_finish``.
+            self._parent._expire(self.state)
+            raise McpAuthorizationTimeout(
+                "The MCP authorization was not completed in time."
+            ) from None
+
+    def _complete(self, result: AuthorizationCodeResult) -> None:
+        if not self._future.done():
+            self._future.set_result(result)
+
+    def _fail(self, exc: McpAuthorizationError) -> None:
+        if not self._future.done():
+            self._future.set_exception(exc)
+            # Mark the exception retrieved: flows nobody waits on (logout,
+            # session teardown, cap cleanup) would otherwise log it at GC.
+            # Awaiting the future later still raises it.
+            self._future.exception()
+
+    def _stop_timer(self) -> None:
+        if self._timer is not None and not self._timer.done():
+            self._timer.cancel()
+
+
+class PendingAuthorizations:
+    """Correlates an OAuth redirect back to the user who started it.
+
+    The redirect leaves Chainlit and returns on a route every user shares, so
+    the ``state`` the SDK minted is the only link to the originating user.
+    Resolving a callback requires the state to be known *and* to belong to the
+    user presenting it, otherwise one user could complete another's flow and
+    have the resulting token stored against them.
+
+    States are single-use, expire after ``ttl_seconds`` (a timer task wakes the
+    parked waiter) and are capped per user, so neither a leaked redirect URL nor
+    an abandoned flow accumulates.
+    """
+
+    def __init__(
+        self,
+        ttl_seconds: float = AUTHORIZATION_TIMEOUT,
+        max_per_user: int = MAX_PENDING_PER_USER,
+    ) -> None:
+        self._ttl = ttl_seconds
+        self._max_per_user = max_per_user
+        self._pending: dict[str, PendingAuthorization] = {}
+
+    def register(
+        self,
+        state: str,
+        user_identifier: str,
+        server_key: str,
+        *,
+        session_id: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> PendingAuthorization:
+        """Record the owner of an in-flight authorization and start its timer.
+
+        ``state`` is generated by the SDK and already embedded in the
+        authorization URL, so it is passed in rather than minted here: the SDK
+        compares the returned state against its own and would reject anything
+        else. Await the returned handle to get the authorization code.
+        """
+        if not state:
+            raise ValueError("an authorization state must be a non-empty string")
+        _validate_user(user_identifier)
+        _validate_server_key(server_key)
+        self._sweep()
+        if state in self._pending:
+            raise ValueError("authorization state is already pending")
+        if self._flow_count(user_identifier) >= self._max_per_user:
+            raise McpTooManyFlows(
+                f"MCP OAuth already has {self._max_per_user} flows in flight "
+                "for this user; finish or cancel one first."
+            )
+
+        expires_at = time.monotonic() + self._ttl
+        handle = PendingAuthorization(
+            self,
+            state,
+            user_identifier,
+            server_key,
+            session_id,
+            name,
+            expires_at,
+            asyncio.get_running_loop().create_future(),
+        )
+        self._pending[state] = handle
+        handle._timer = asyncio.create_task(
+            self._expire_after(state, expires_at), name="mcp-oauth-expiry"
+        )
+        return handle
+
+    def resolve(self, state: str, user_identifier: str, code: str) -> None:
+        """Complete the flow named by ``state`` on behalf of ``user_identifier``.
+
+        Raises ``KeyError`` when the state is unknown or already used,
+        ``McpAuthorizationTimeout`` when it expired, and ``PermissionError``
+        when it belongs to a different user. The entry is only consumed on
+        success, so a mistaken or malicious resolve leaves the owner's flow
+        intact.
+        """
+        handle = self._pending.get(state)
+        if handle is None:
+            raise KeyError("Unknown or expired MCP OAuth state.")
+        if handle.expires_at <= time.monotonic():
+            exc = McpAuthorizationTimeout("The MCP authorization expired.")
+            self._finish(state, exc=exc)
+            raise exc
+        if handle.user_identifier != user_identifier:
+            # Do not consume it: the rightful owner may still complete it.
+            raise PermissionError("MCP OAuth state belongs to a different user.")
+        self._finish(state, result=AuthorizationCodeResult(code=code, state=state))
+
+    def abandon(
+        self,
+        state: str,
+        user_identifier: str,
+        reason: str = "The MCP authorization was not completed.",
+    ) -> bool:
+        """Drop a flow its owner gave up on, releasing the waiting caller.
+
+        Ownership is checked for the same reason ``resolve`` checks it: without
+        it, anyone holding a state could cancel someone else's connection.
+        Returns whether anything was dropped.
+        """
+        handle = self._pending.get(state)
+        if handle is None or handle.user_identifier != user_identifier:
+            return False
+        self._finish(state, exc=McpAuthorizationError(reason))
+        return True
+
+    def cancel(
+        self, state: str, reason: str = "The MCP authorization was cancelled."
+    ) -> bool:
+        """Drop one flow without an ownership check, e.g. when its session ends."""
+        return self._finish(state, exc=McpAuthorizationError(reason))
+
+    def cancel_session(
+        self, session_id: str, reason: str = "The MCP session was closed."
+    ) -> int:
+        """Drop every flow started by one websocket session."""
+        return self._cancel_where(
+            lambda handle: handle.session_id == session_id, reason
+        )
+
+    def cancel_name(
+        self,
+        session_id: str,
+        name: str,
+        reason: str = "The MCP connection was removed.",
+    ) -> int:
+        """Drop the flow for one connection name of one websocket session."""
+        return self._cancel_where(
+            lambda handle: handle.session_id == session_id and handle.name == name,
+            reason,
+        )
+
+    def cancel_user(
+        self, user_identifier: str, reason: str = "The user logged out."
+    ) -> int:
+        """Drop every flow a user has in flight."""
+        return self._cancel_where(
+            lambda handle: handle.user_identifier == user_identifier, reason
+        )
+
+    def __len__(self) -> int:
+        self._sweep()
+        return len(self._pending)
+
+    def _flow_count(self, user_identifier: str) -> int:
+        return sum(
+            1
+            for handle in self._pending.values()
+            if handle.user_identifier == user_identifier
+        )
+
+    def _cancel_where(
+        self, predicate: Callable[[PendingAuthorization], bool], reason: str
+    ) -> int:
+        states = [state for state, handle in self._pending.items() if predicate(handle)]
+        for state in states:
+            self._finish(state, exc=McpAuthorizationError(reason))
+        return len(states)
+
+    def _expire(self, state: str) -> bool:
+        return self._finish(
+            state, exc=McpAuthorizationTimeout("The MCP authorization expired.")
+        )
+
+    def _finish(
+        self,
+        state: str,
+        *,
+        result: Optional[AuthorizationCodeResult] = None,
+        exc: Optional[McpAuthorizationError] = None,
+        stop_timer: bool = True,
+    ) -> bool:
+        """Remove one entry and settle its waiter, at most once.
+
+        The pop is the single-use gate: concurrent resolve, abandon, cancel and
+        expiry paths all funnel here, and only the first finds the entry.
+        """
+        handle = self._pending.pop(state, None)
+        if handle is None:
+            return False
+        if stop_timer:
+            handle._stop_timer()
+        if exc is not None:
+            handle._fail(exc)
+        elif result is not None:
+            handle._complete(result)
+        return True
+
+    def _sweep(self) -> None:
+        """Expire entries whose timer task has not run yet."""
+        now = time.monotonic()
+        for state in [
+            state for state, handle in self._pending.items() if handle.expires_at <= now
+        ]:
+            self._expire(state)
+
+    async def _expire_after(self, state: str, expires_at: float) -> None:
+        delay = expires_at - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        # The timer is this task, so do not cancel it from inside itself.
+        self._finish(
+            state,
+            exc=McpAuthorizationTimeout("The MCP authorization expired."),
+            stop_timer=False,
+        )
+
+
+class McpOAuthFlow:
+    """The SDK OAuth provider for one flow plus the handles Chainlit needs.
+
+    ``provider`` is the ``httpx2.Auth`` the MCP transport is built with. The SDK
+    calls ``redirect_handler`` once it has an authorization URL (discovery and
+    dynamic client registration are done) and ``callback_handler`` to wait for
+    the code; ``wait_for_authorization_url`` lets the caller learn about the URL
+    without racing the SDK.
+    """
+
+    def __init__(
+        self,
+        *,
+        storage: TokenStorage,
+        pending: PendingAuthorizations,
+        user_identifier: str,
+        server_url: str,
+        session_id: str,
+        name: str,
+        redirect_uri: str,
+        client_name: str = "Chainlit",
+        on_redirect: Optional[Callable[[str], Awaitable[None]]] = None,
+        on_failure: Optional[Callable[[McpOAuthError], None]] = None,
+    ) -> None:
+        self._pending = pending
+        self._user_identifier = user_identifier
+        self._server_key = canonical_server_key(server_url)
+        self._session_id = session_id
+        self._name = name
+        self._on_redirect = on_redirect
+        self._on_failure = on_failure
+        self._authorization_url: Optional[str] = None
+        self._authorization_url_ready = asyncio.Event()
+        self._authorization: Optional[PendingAuthorization] = None
+
+        self.provider = OAuthClientProvider(
+            server_url=server_url,
+            client_metadata=OAuthClientMetadata(
+                client_name=client_name,
+                redirect_uris=[AnyUrl(redirect_uri)],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                application_type="web",
+            ),
+            storage=storage,
+            redirect_handler=self._redirect,
+            callback_handler=self._callback,
+        )
+
+    async def _redirect(self, authorization_url: str) -> None:
+        state = extract_state(authorization_url)
+        if state is None:
+            exc = McpAuthorizationError(
+                "The MCP authorization URL carries no state parameter."
+            )
+            self._report_failure(exc)
+            raise exc
+        # A re-authorization inside one connection replaces its own flow; only
+        # one entry per connection may be pending, or repeated failures would
+        # eat the user's cap.
+        previous = self._authorization
+        if previous is not None:
+            self._pending.cancel(previous.state, "Replaced by a new MCP authorization.")
+            self._authorization = None
+        try:
+            self._authorization = self._pending.register(
+                state,
+                self._user_identifier,
+                self._server_key,
+                session_id=self._session_id,
+                name=self._name,
+            )
+        except McpOAuthError as exc:
+            self._report_failure(exc)
+            raise
+        self._authorization_url = authorization_url
+        self._authorization_url_ready.set()
+        if self._on_redirect is not None:
+            await self._on_redirect(authorization_url)
+
+    async def _callback(self) -> AuthorizationCodeResult:
+        authorization = self._authorization
+        if authorization is None:  # pragma: no cover - the SDK redirects first
+            exc = McpAuthorizationError(
+                "MCP authorization was awaited before it started."
+            )
+            self._report_failure(exc)
+            raise exc
+        try:
+            return await authorization.wait()
+        except McpAuthorizationError as exc:
+            self._report_failure(exc)
+            raise
+        except asyncio.CancelledError:
+            # The connection gave up first (timeout, teardown). Drop the flow so
+            # a late callback is refused instead of completing into nothing.
+            self._pending.cancel(
+                authorization.state, "The MCP connection was cancelled."
+            )
+            raise
+
+    async def wait_for_authorization_url(
+        self, timeout: float = AUTHORIZATION_URL_TIMEOUT
+    ) -> str:
+        """Wait for the SDK to produce the sign-in URL, bounded by ``timeout``.
+
+        Discovery and dynamic client registration can stall on a slow server;
+        the caller must fail the connection rather than hold it open.
+        """
+        if self._authorization_url is None:
+            try:
+                await asyncio.wait_for(self._authorization_url_ready.wait(), timeout)
+            except asyncio.TimeoutError:
+                raise McpAuthorizationError(
+                    "The MCP authorization server did not provide a sign-in URL."
+                ) from None
+        url = self._authorization_url
+        if url is None:  # pragma: no cover - the event is only set with the URL
+            raise McpAuthorizationError(
+                "The MCP authorization server did not provide a sign-in URL."
+            )
+        return url
+
+    def _report_failure(self, exc: McpOAuthError) -> None:
+        if self._on_failure is not None:
+            self._on_failure(exc)
+
+
+def build_oauth_provider(
+    *,
+    storage: TokenStorage,
+    pending: PendingAuthorizations,
+    user_identifier: str,
+    server_url: str,
+    session_id: str,
+    name: str,
+    redirect_uri: str,
+    client_name: str = "Chainlit",
+    on_redirect: Optional[Callable[[str], Awaitable[None]]] = None,
+    on_failure: Optional[Callable[[McpOAuthError], None]] = None,
+) -> McpOAuthFlow:
+    """Build the SDK OAuth provider for one user's MCP connection.
+
+    The SDK owns discovery, dynamic client registration, PKCE, ``state``
+    generation and refresh; this function only supplies what it cannot know:
+    which user the flow belongs to, where the browser comes back, and how to
+    reach the caller.
+
+    Client metadata is fixed to what a browser-based server needs: ``web`` as
+    the application type (the SDK defaults to ``native``), the given
+    ``redirect_uri`` verbatim, and the authorization-code and refresh grants.
+    The callback handler returns ``AuthorizationCodeResult``, which is the mcp
+    2.x contract. ``on_redirect`` is awaited with every authorization URL the
+    SDK produces, so the caller can emit it to the browser (a re-authorization
+    inside one connection produces another). ``on_failure`` is called when the
+    flow ends without a code, because the SDK's transports swallow exceptions
+    raised from the auth flow and the connection would otherwise wait out its
+    timeout.
+    """
+    return McpOAuthFlow(
+        storage=storage,
+        pending=pending,
+        user_identifier=user_identifier,
+        server_url=server_url,
+        session_id=session_id,
+        name=name,
+        redirect_uri=redirect_uri,
+        client_name=client_name,
+        on_redirect=on_redirect,
+        on_failure=on_failure,
+    )

@@ -1,17 +1,52 @@
 import asyncio
 
 import pytest
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.client.auth import OAuthClientProvider
+from mcp.shared.auth import (
+    AuthorizationCodeResult,
+    OAuthClientInformationFull,
+    OAuthToken,
+)
 from mcp.shared.auth_utils import resource_url_from_server_url
 
 from chainlit import mcp_oauth
 from chainlit.mcp_oauth import (
+    McpAuthorizationError,
+    McpAuthorizationTimeout,
     McpOAuthTokenStore,
+    McpTooManyFlows,
     Origin,
+    PendingAuthorizations,
     ScopedTokenStorage,
+    build_oauth_provider,
     canonical_server_key,
+    extract_state,
     normalize_origin,
 )
+
+SERVER_KEY = "https://mcp.example.com/mcp"
+REDIRECT_URI = "https://app.example.com/mcp/oauth/callback"
+
+
+def make_authorization_url(state: str = "sdk-state") -> str:
+    return (
+        "https://auth.example.com/authorize?response_type=code"
+        f"&state={state}&code_challenge=abc&code_challenge_method=S256"
+    )
+
+
+async def join_timer(handle: mcp_oauth.PendingAuthorization) -> None:
+    """Join a flow's timer so a leak assertion cannot race the event loop."""
+    timer = handle._timer
+    assert timer is not None
+    await asyncio.wait({timer}, timeout=1)
+    assert timer.done()
+
+
+def expiry_tasks() -> list[asyncio.Task]:
+    return [
+        task for task in asyncio.all_tasks() if task.get_name() == "mcp-oauth-expiry"
+    ]
 
 
 def make_tokens(access: str = "access-token", refresh: str = "refresh-token"):
@@ -27,6 +62,38 @@ def make_client_info(
 @pytest.fixture
 def store() -> McpOAuthTokenStore:
     return McpOAuthTokenStore()
+
+
+@pytest.fixture
+async def pending():
+    flows = PendingAuthorizations()
+    yield flows
+    # Every registered flow owns a timer task; leave none behind for the next
+    # test or for the loop teardown.
+    handles = list(flows._pending.values())
+    for handle in handles:
+        flows.cancel(handle.state)
+    for handle in handles:
+        await join_timer(handle)
+
+
+@pytest.fixture
+def failures() -> list[mcp_oauth.McpOAuthError]:
+    return []
+
+
+@pytest.fixture
+def flow(store, pending, failures):
+    return build_oauth_provider(
+        storage=store.scoped("alice", SERVER_KEY),
+        pending=pending,
+        user_identifier="alice",
+        server_url=SERVER_KEY,
+        session_id="session-1",
+        name="weather",
+        redirect_uri=REDIRECT_URI,
+        on_failure=failures.append,
+    )
 
 
 class TestNormalizeOrigin:
@@ -401,3 +468,424 @@ class TestDiscardClientInfo:
 
         assert store.discard_client_info("alice", key, "client-a") is False
         assert await scoped.get_client_info() is not None
+
+
+class TestExtractState:
+    def test_reads_the_state_from_an_authorization_url(self):
+        assert extract_state(make_authorization_url("abc123")) == "abc123"
+
+    def test_returns_none_when_absent_or_blank(self):
+        assert extract_state("https://auth.example.com/authorize?code=x") is None
+        assert extract_state("https://auth.example.com/authorize?state=") is None
+
+
+class TestPendingAuthorizations:
+    async def test_resolve_delivers_the_code_to_a_parked_waiter(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+        waiter = asyncio.create_task(handle.wait())
+        await asyncio.sleep(0)
+        pending.resolve("state", "alice", "the-code")
+
+        result = await waiter
+        assert isinstance(result, AuthorizationCodeResult)
+        assert result.code == "the-code"
+        assert result.state == "state"
+        assert len(pending) == 0
+        await join_timer(handle)
+        assert expiry_tasks() == []
+
+    async def test_code_that_lands_before_the_waiter_is_not_lost(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+        pending.resolve("state", "alice", "the-code")
+
+        assert (await handle.wait()).code == "the-code"
+        await join_timer(handle)
+        assert expiry_tasks() == []
+
+    async def test_state_is_single_use(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+        pending.resolve("state", "alice", "first")
+
+        with pytest.raises(KeyError):
+            pending.resolve("state", "alice", "second")
+        assert (await handle.wait()).code == "first"
+        await join_timer(handle)
+
+    async def test_resolve_by_another_user_does_not_consume_the_entry(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+
+        with pytest.raises(PermissionError):
+            pending.resolve("state", "bob", "stolen")
+        assert len(pending) == 1
+
+        pending.resolve("state", "alice", "the-code")
+        assert (await handle.wait()).code == "the-code"
+        await join_timer(handle)
+
+    async def test_expiry_wakes_the_waiter_and_leaves_nothing_behind(self):
+        flows = PendingAuthorizations(ttl_seconds=0.05)
+        handle = flows.register("state", "alice", SERVER_KEY)
+        waiter = asyncio.create_task(handle.wait())
+
+        with pytest.raises(McpAuthorizationTimeout):
+            await waiter
+
+        assert len(flows) == 0
+        assert handle._future.done()
+        await join_timer(handle)
+        assert expiry_tasks() == []
+        with pytest.raises(KeyError):
+            flows.resolve("state", "alice", "late")
+
+    async def test_resolve_after_the_deadline_raises_timeout(self):
+        flows = PendingAuthorizations(ttl_seconds=0)
+        handle = flows.register("state", "alice", SERVER_KEY)
+
+        with pytest.raises(McpAuthorizationTimeout):
+            flows.resolve("state", "alice", "too-late")
+
+        assert len(flows) == 0
+        with pytest.raises(McpAuthorizationTimeout):
+            await handle.wait()
+        await join_timer(handle)
+        assert expiry_tasks() == []
+
+    async def test_abandon_wakes_the_waiter_and_releases_the_entry(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+        waiter = asyncio.create_task(handle.wait())
+        await asyncio.sleep(0)
+
+        assert pending.abandon("state", "alice") is True
+        with pytest.raises(McpAuthorizationError):
+            await waiter
+        assert len(pending) == 0
+        await join_timer(handle)
+
+    async def test_abandon_by_another_user_does_not_consume_the_entry(self, pending):
+        pending.register("state", "alice", SERVER_KEY)
+
+        assert pending.abandon("state", "bob") is False
+        assert len(pending) == 1
+        assert pending.cancel("state") is True
+
+    async def test_cancel_wakes_the_waiter_once_and_cannot_be_repeated(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+        waiter = asyncio.create_task(handle.wait())
+        await asyncio.sleep(0)
+
+        assert pending.cancel("state") is True
+        assert pending.cancel("state") is False
+        with pytest.raises(McpAuthorizationError):
+            await waiter
+        assert pending.abandon("state", "alice") is False
+        assert len(pending) == 0
+        await join_timer(handle)
+
+    async def test_resolve_wins_over_abandon(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+        waiter = asyncio.create_task(handle.wait())
+        await asyncio.sleep(0)
+
+        pending.resolve("state", "alice", "the-code")
+        assert pending.abandon("state", "alice") is False
+        assert (await waiter).code == "the-code"
+        await join_timer(handle)
+
+    async def test_abandon_wins_over_resolve(self, pending):
+        handle = pending.register("state", "alice", SERVER_KEY)
+        waiter = asyncio.create_task(handle.wait())
+        await asyncio.sleep(0)
+
+        assert pending.abandon("state", "alice") is True
+        with pytest.raises(KeyError):
+            pending.resolve("state", "alice", "the-code")
+        with pytest.raises(McpAuthorizationError):
+            await waiter
+        await join_timer(handle)
+
+
+class TestPendingCaps:
+    async def test_fourth_flow_is_refused_and_resolve_frees_the_slot(self, pending):
+        handles = [
+            pending.register(f"state-{index}", "alice", f"{SERVER_KEY}/{index}")
+            for index in range(mcp_oauth.MAX_PENDING_PER_USER)
+        ]
+        with pytest.raises(McpTooManyFlows):
+            pending.register("state-3", "alice", f"{SERVER_KEY}/3")
+
+        pending.resolve("state-0", "alice", "the-code")
+        replacement = pending.register("state-3", "alice", f"{SERVER_KEY}/3")
+        assert len(pending) == 3
+
+        pending.cancel_user("alice")
+        for handle in [*handles, replacement]:
+            await join_timer(handle)
+
+    async def test_abandon_frees_the_slot(self, pending):
+        handles = [
+            pending.register(f"state-{index}", "alice", f"{SERVER_KEY}/{index}")
+            for index in range(mcp_oauth.MAX_PENDING_PER_USER)
+        ]
+        assert pending.abandon("state-0", "alice") is True
+
+        replacement = pending.register("state-3", "alice", f"{SERVER_KEY}/3")
+        assert len(pending) == 3
+        pending.cancel_user("alice")
+        for handle in [*handles, replacement]:
+            await join_timer(handle)
+
+    async def test_cancel_frees_the_slot(self, pending):
+        handles = [
+            pending.register(f"state-{index}", "alice", f"{SERVER_KEY}/{index}")
+            for index in range(mcp_oauth.MAX_PENDING_PER_USER)
+        ]
+        assert pending.cancel("state-0") is True
+
+        replacement = pending.register("state-3", "alice", f"{SERVER_KEY}/3")
+        assert len(pending) == 3
+        pending.cancel_user("alice")
+        for handle in [*handles, replacement]:
+            await join_timer(handle)
+
+    async def test_timeout_frees_the_slot(self):
+        flows = PendingAuthorizations(ttl_seconds=0.02)
+        handles = [
+            flows.register(f"state-{index}", "alice", f"{SERVER_KEY}/{index}")
+            for index in range(mcp_oauth.MAX_PENDING_PER_USER)
+        ]
+        with pytest.raises(McpTooManyFlows):
+            flows.register("state-3", "alice", f"{SERVER_KEY}/3")
+
+        with pytest.raises(McpAuthorizationTimeout):
+            await handles[0].wait()
+        for handle in handles:
+            await join_timer(handle)
+
+        replacement = flows.register("state-3", "alice", f"{SERVER_KEY}/3")
+        flows.cancel_user("alice")
+        await join_timer(replacement)
+
+    async def test_the_cap_is_per_user(self, pending):
+        handles = [
+            pending.register(f"state-{index}", "alice", f"{SERVER_KEY}/{index}")
+            for index in range(mcp_oauth.MAX_PENDING_PER_USER)
+        ]
+        other = pending.register("bob-state", "bob", SERVER_KEY)
+        assert len(pending) == 4
+
+        pending.cancel_user("alice")
+        pending.cancel("bob-state")
+        for handle in [*handles, other]:
+            await join_timer(handle)
+
+
+class TestCancelScopes:
+    async def test_cancel_session_drops_only_that_session(self, pending):
+        one = pending.register("a1", "alice", SERVER_KEY, session_id="a", name="one")
+        two = pending.register("a2", "alice", SERVER_KEY, session_id="a", name="two")
+        other = pending.register("b1", "alice", SERVER_KEY, session_id="b", name="one")
+
+        assert pending.cancel_session("a") == 2
+        assert len(pending) == 1
+        with pytest.raises(KeyError):
+            pending.resolve("a1", "alice", "code")
+        with pytest.raises(KeyError):
+            pending.resolve("a2", "alice", "code")
+        pending.resolve("b1", "alice", "code")
+
+        for handle in (one, two, other):
+            await join_timer(handle)
+
+    async def test_cancel_name_drops_only_that_connection(self, pending):
+        one = pending.register("a1", "alice", SERVER_KEY, session_id="a", name="one")
+        two = pending.register("a2", "alice", SERVER_KEY, session_id="a", name="two")
+        other = pending.register("b1", "alice", SERVER_KEY, session_id="b", name="one")
+
+        assert pending.cancel_name("a", "one") == 1
+        with pytest.raises(KeyError):
+            pending.resolve("a1", "alice", "code")
+        pending.resolve("a2", "alice", "code")
+        pending.resolve("b1", "alice", "code")
+
+        for handle in (one, two, other):
+            await join_timer(handle)
+
+    async def test_cancel_user_drops_only_that_user(self, pending):
+        alice = pending.register("a1", "alice", SERVER_KEY)
+        bob = pending.register("b1", "bob", SERVER_KEY)
+
+        assert pending.cancel_user("alice") == 1
+        with pytest.raises(KeyError):
+            pending.resolve("a1", "alice", "code")
+        pending.resolve("b1", "bob", "code")
+
+        for handle in (alice, bob):
+            await join_timer(handle)
+
+
+class TestBuildOAuthProvider:
+    def test_client_metadata_is_a_web_application(self, flow):
+        provider = flow.provider
+        assert isinstance(provider, OAuthClientProvider)
+
+        metadata = provider.context.client_metadata
+        assert metadata.application_type == "web"
+        assert [str(uri) for uri in metadata.redirect_uris] == [REDIRECT_URI]
+        assert metadata.grant_types == ["authorization_code", "refresh_token"]
+        assert metadata.response_types == ["code"]
+
+    async def test_storage_is_scoped_to_the_user_and_server(self, flow, store):
+        storage = flow.provider.context.storage
+        await storage.set_tokens(make_tokens("alice-token"))
+        await storage.set_client_info(make_client_info("alice-client"))
+
+        alice = store.scoped("alice", SERVER_KEY)
+        assert (await alice.get_tokens()).access_token == "alice-token"
+        assert (await alice.get_client_info()).client_id == "alice-client"
+        assert await store.scoped("bob", SERVER_KEY).get_tokens() is None
+        assert (
+            await store.scoped("alice", "https://other.example.com/mcp").get_tokens()
+            is None
+        )
+
+    async def test_redirect_registers_the_state_and_publishes_the_url(
+        self, flow, pending
+    ):
+        url = make_authorization_url("sdk-state")
+        await flow.provider.context.redirect_handler(url)
+
+        assert len(pending) == 1
+        assert await flow.wait_for_authorization_url(timeout=0.1) == url
+        pending.cancel("sdk-state")
+
+    async def test_a_second_redirect_replaces_the_first_flow(self, store, pending):
+        urls = []
+
+        async def record(url: str) -> None:
+            urls.append(url)
+
+        flow = build_oauth_provider(
+            storage=store.scoped("alice", SERVER_KEY),
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+            on_redirect=record,
+        )
+        first = make_authorization_url("state-1")
+        second = make_authorization_url("state-2")
+
+        await flow.provider.context.redirect_handler(first)
+        await flow.provider.context.redirect_handler(second)
+
+        assert urls == [first, second]
+        assert len(pending) == 1
+        with pytest.raises(KeyError):
+            pending.resolve("state-1", "alice", "old-code")
+        pending.resolve("state-2", "alice", "new-code")
+
+    async def test_callback_handler_returns_an_authorization_code_result(
+        self, flow, pending
+    ):
+        await flow.provider.context.redirect_handler(
+            make_authorization_url("sdk-state")
+        )
+        pending.resolve("sdk-state", "alice", "the-code")
+
+        result = await flow.provider.context.callback_handler()
+        assert isinstance(result, AuthorizationCodeResult)
+        assert not isinstance(result, tuple)
+        assert result == AuthorizationCodeResult(code="the-code", state="sdk-state")
+
+    async def test_callback_handler_is_bounded_by_the_flow_ttl(self, store, failures):
+        flows = PendingAuthorizations(ttl_seconds=0.02)
+        flow = build_oauth_provider(
+            storage=store.scoped("alice", SERVER_KEY),
+            pending=flows,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+            on_failure=failures.append,
+        )
+        await flow.provider.context.redirect_handler(
+            make_authorization_url("sdk-state")
+        )
+
+        with pytest.raises(McpAuthorizationTimeout):
+            await flow.provider.context.callback_handler()
+
+        assert len(flows) == 0
+        assert isinstance(failures[-1], McpAuthorizationTimeout)
+
+    async def test_cancelled_callback_drops_the_pending_flow(self, flow, pending):
+        await flow.provider.context.redirect_handler(
+            make_authorization_url("sdk-state")
+        )
+        callback = asyncio.create_task(flow.provider.context.callback_handler())
+        await asyncio.sleep(0)
+
+        callback.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await callback
+
+        assert len(pending) == 0
+
+    async def test_flow_cap_is_reported_to_the_caller(self, store, failures):
+        flows = PendingAuthorizations()
+        created = []
+        for index in range(mcp_oauth.MAX_PENDING_PER_USER):
+            flow = build_oauth_provider(
+                storage=store.scoped("alice", SERVER_KEY),
+                pending=flows,
+                user_identifier="alice",
+                server_url=SERVER_KEY,
+                session_id="session-1",
+                name=f"weather-{index}",
+                redirect_uri=REDIRECT_URI,
+            )
+            await flow.provider.context.redirect_handler(
+                make_authorization_url(f"state-{index}")
+            )
+            created.append(flow)
+
+        refused = build_oauth_provider(
+            storage=store.scoped("alice", SERVER_KEY),
+            pending=flows,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather-4",
+            redirect_uri=REDIRECT_URI,
+            on_failure=failures.append,
+        )
+        with pytest.raises(McpTooManyFlows):
+            await refused.provider.context.redirect_handler(
+                make_authorization_url("state-4")
+            )
+
+        assert isinstance(failures[-1], McpTooManyFlows)
+        assert len(flows) == mcp_oauth.MAX_PENDING_PER_USER
+        handles = [handle._authorization for handle in created if handle._authorization]
+        flows.cancel_user("alice")
+        for handle in handles:
+            await join_timer(handle)
+
+    async def test_redirect_without_a_state_fails_the_flow(
+        self, flow, pending, failures
+    ):
+        with pytest.raises(McpAuthorizationError):
+            await flow.provider.context.redirect_handler(
+                "https://auth.example.com/authorize?code=abc"
+            )
+
+        assert len(pending) == 0
+        assert len(failures) == 1
+        assert isinstance(failures[0], McpAuthorizationError)
+
+    async def test_authorization_url_wait_is_bounded(self, flow):
+        with pytest.raises(McpAuthorizationError):
+            await flow.wait_for_authorization_url(timeout=0.01)
