@@ -34,7 +34,8 @@ function App() {
 
   const { isAuthenticated, data, isReady } = useAuth();
   const userEnv = useAppStore((state) => state.userEnv);
-  const { connect, chatProfile, setChatProfile } = useChatSession();
+  const { connect, chatProfile, setChatProfile, idToResume, sessionId } =
+    useChatSession();
 
   const configLoaded = !!config;
 
@@ -53,7 +54,16 @@ function App() {
       transports: window.transports,
       userEnv
     });
-  }, [userEnv, isAuthenticated, connect, isReady, chatProfileOk]);
+  }, [
+    userEnv,
+    isAuthenticated,
+    connect,
+    isReady,
+    chatProfileOk,
+    chatProfile,
+    idToResume,
+    sessionId
+  ]);
 
   useEffect(() => {
     if (
