@@ -563,6 +563,123 @@ class TestWebsocketSession:
         assert len(session.thread_queues["test_method"]) == 0
 
 
+class TestSessionRequest:
+    """Test suite for the Request view of the Socket.IO handshake."""
+
+    @staticmethod
+    def make_session(environ=None):
+        return WebsocketSession(
+            id=str(uuid.uuid4()),
+            socket_id=str(uuid.uuid4()),
+            emit=Mock(),
+            emit_call=Mock(),
+            user_env={},
+            client_type="webapp",
+            environ=environ,
+        )
+
+    @staticmethod
+    def http_scope():
+        return {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/socket.io/",
+            "raw_path": b"/socket.io/",
+            "query_string": b"EIO=4&transport=polling&sid=abc",
+            "root_path": "",
+            "headers": [
+                (b"host", b"chat.example.com"),
+                (b"cookie", b"session=abc123; theme=dark"),
+                (b"x-custom", b"value"),
+            ],
+            "client": ("203.0.113.7", 54321),
+            "server": ("chat.example.com", 443),
+        }
+
+    def test_request_from_http_scope(self):
+        scope = self.http_scope()
+        session = self.make_session({"asgi.scope": scope})
+
+        request = session.request
+
+        assert request is not None
+        assert request.method == "GET"
+        assert str(request.url) == (
+            "https://chat.example.com/socket.io/?EIO=4&transport=polling&sid=abc"
+        )
+        assert request.headers["x-custom"] == "value"
+        assert request.query_params["transport"] == "polling"
+        assert request.cookies == {"session": "abc123", "theme": "dark"}
+        assert request.client == ("203.0.113.7", 54321)
+        # The raw handshake scope stays untouched.
+        assert scope["type"] == "http"
+        assert scope["method"] == "POST"
+
+    @pytest.mark.parametrize(
+        ("scheme", "expected"),
+        [("ws", "http"), ("wss", "https")],
+    )
+    def test_request_from_websocket_scope(self, scheme, expected):
+        scope = {
+            "type": "websocket",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "scheme": scheme,
+            "path": "/socket.io/",
+            "raw_path": b"/socket.io/",
+            "query_string": b"EIO=4&transport=websocket",
+            "root_path": "",
+            "headers": [
+                (b"host", b"chat.example.com"),
+                (b"cookie", b"session=abc123"),
+            ],
+            "client": ("203.0.113.7", 54321),
+            "server": ("chat.example.com", 443),
+            "subprotocols": [],
+        }
+        session = self.make_session({"asgi.scope": scope})
+
+        request = session.request
+
+        assert request is not None
+        assert request.method == "GET"
+        assert request.url.scheme == expected
+        assert request.url.path == "/socket.io/"
+        assert request.query_params["transport"] == "websocket"
+        assert request.cookies == {"session": "abc123"}
+        assert scope["type"] == "websocket"
+
+    def test_request_without_asgi_scope_is_none(self):
+        session = HTTPSession(
+            id="http_id",
+            client_type="webapp",
+            user_env={},
+            environ={"HTTP_COOKIE": "session=abc123"},
+        )
+
+        assert session.request is None
+
+    def test_websocket_request_without_asgi_scope_is_none(self):
+        session = self.make_session({"HTTP_ACCEPT_LANGUAGE": "en-US"})
+
+        assert session.request is None
+
+    @pytest.mark.asyncio
+    async def test_request_body_and_form_are_unavailable(self):
+        scope = self.http_scope()
+        scope["headers"].append((b"content-type", b"application/x-www-form-urlencoded"))
+        request = self.make_session({"asgi.scope": scope}).request
+
+        assert request is not None
+        with pytest.raises(RuntimeError, match="Receive channel"):
+            await request.body()
+        with pytest.raises(RuntimeError, match="Receive channel"):
+            await request.form()
+
+
 class TestSessionEdgeCases:
     """Test suite for session edge cases."""
 

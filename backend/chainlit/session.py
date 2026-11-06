@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, Literal, Optional, Union
 
 import aiofiles
+from starlette.requests import Request
 
 from chainlit.logger import logger
 from chainlit.types import AskFileSpec, FileReference
@@ -160,6 +161,33 @@ class BaseSession:
         self.chat_settings: Dict[str, Any] = {}
         self.modes: list[Mode] = []
         self.mode_values: Dict[str, str] = {}
+
+    @property
+    def request(self) -> Optional[Request]:
+        """Return the Socket.IO handshake as an HTTP ``Request`` view.
+
+        This is the request that opened the transport, not the browser page URL.
+        It reflects the latest handshake after a reconnect. ``environ`` remains
+        the raw source and is not modified.
+
+        WebSocket scopes are normalized to an HTTP ``GET`` view (``ws`` ->
+        ``http``, ``wss`` -> ``https``). The request body and form are
+        unavailable because there is no receive channel; reading them raises
+        ``RuntimeError``.
+        """
+        scope = self.environ.get("asgi.scope")
+        if scope is None:
+            return None
+
+        http_scope = dict(scope)
+        http_scope["type"] = "http"
+        http_scope["method"] = "GET"
+        if http_scope.get("scheme") == "ws":
+            http_scope["scheme"] = "http"
+        elif http_scope.get("scheme") == "wss":
+            http_scope["scheme"] = "https"
+
+        return Request(http_scope)
 
     @property
     def files_dir(self):
