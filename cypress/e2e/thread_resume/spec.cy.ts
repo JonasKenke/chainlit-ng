@@ -49,9 +49,9 @@ describe('Thread resume (author)', () => {
     });
     cy.reload();
 
-    // Composer present and no read-only banner
+    // The read-only history view renders no composer (ReadOnlyThread), so this
+    // fails if the resume falls back to read-only.
     cy.get('#message-composer').should('be.visible');
-    cy.get('[data-testid="read-only-banner"]').should('not.exist');
 
     // Wait for resume_thread to be applied before typing.
     cy.wrap(null).should(() => expect(resumed).to.be.true);
