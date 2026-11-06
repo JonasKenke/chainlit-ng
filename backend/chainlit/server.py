@@ -46,8 +46,7 @@ from chainlit.auth import (
 )
 from chainlit.auth.cookie import (
     clear_auth_cookie,
-    clear_oauth_nonce_cookie,
-    clear_oauth_state_cookie,
+    clear_oauth_cookies,
     get_oauth_nonce_cookie,
     set_auth_cookie,
     set_oauth_nonce_cookie,
@@ -616,6 +615,7 @@ def _get_oauth_redirect_error(
         url=str(request.url_for("login")) + "?" + params,
         status_code=status_code,
     )
+    clear_oauth_cookies(response)
     return response
 
 
@@ -897,33 +897,48 @@ async def oauth_callback(
         return _get_oauth_redirect_error(request, error)
 
     if not code or not state:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing code or state",
-        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
     try:
         validate_oauth_state_cookie(request, state)
-    except Exception as e:
-        logger.exception("Unable to validate oauth state: %s", e)
-
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized",
-        )
+    except Exception:
+        logger.warning("Unable to validate oauth state for provider %s", provider_id)
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
     url = get_user_facing_url(request.url)
-    token = await provider.get_token(code, url)
+    try:
+        token = await provider.get_token(code, url)
+    except Exception:
+        logger.warning(
+            "OAuth token exchange failed for provider %s", provider_id, exc_info=True
+        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    (raw_user_data, default_user) = await provider.get_user_info(token)
+    try:
+        (raw_user_data, default_user) = await provider.get_user_info(token)
+    except Exception:
+        logger.warning(
+            "OAuth user info failed for provider %s", provider_id, exc_info=True
+        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    user = await config.code.oauth_callback(
-        provider_id, token, raw_user_data, default_user
-    )
+    try:
+        user = await config.code.oauth_callback(
+            provider_id, token, raw_user_data, default_user
+        )
+    except Exception as e:
+        logger.warning(
+            "OAuth callback failed for provider %s: %s", provider_id, type(e).__name__
+        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    response = await _authenticate_user(request, user, redirect_to_callback=True)
+    try:
+        response = await _authenticate_user(request, user, redirect_to_callback=True)
+    except Exception:
+        logger.warning("OAuth authentication failed for provider %s", provider_id)
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    clear_oauth_state_cookie(response)
+    clear_oauth_cookies(response)
 
     return response
 
@@ -932,7 +947,7 @@ async def oauth_callback(
 @router.post("/auth/oauth/azure-ad-hybrid/callback")
 async def oauth_azure_hf_callback(
     request: Request,
-    error: Optional[str] = None,
+    error: Annotated[Optional[str], Form()] = None,
     code: Annotated[Optional[str], Form()] = None,
     state: Annotated[Optional[str], Form()] = None,
     id_token: Annotated[Optional[str], Form()] = None,
@@ -957,10 +972,7 @@ async def oauth_azure_hf_callback(
         return _get_oauth_redirect_error(request, error)
 
     if not code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing code",
-        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
     # The provider posts both code and id_token back to the browser
     # (response_mode=form_post). Validate the state cookie, then verify the
@@ -970,8 +982,8 @@ async def oauth_azure_hf_callback(
 
     try:
         validate_oauth_state_cookie(request, state)
-    except Exception as e:
-        logger.warning("Unable to validate oauth state: %s", e, exc_info=True)
+    except Exception:
+        logger.warning("Unable to validate oauth state for provider %s", provider_id)
         return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
     if not id_token:
@@ -981,25 +993,44 @@ async def oauth_azure_hf_callback(
         await _verify_azure_hf_id_token(
             provider, id_token, get_oauth_nonce_cookie(request)
         )
-    except Exception as e:
-        logger.warning(
-            "Unable to verify azure-ad-hybrid id_token: %s", e, exc_info=True
-        )
+    except Exception:
+        logger.warning("Unable to verify azure-ad-hybrid id_token", exc_info=True)
         return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
     url = get_user_facing_url(request.url)
-    token = await provider.get_token(code, url)
+    try:
+        token = await provider.get_token(code, url)
+    except Exception:
+        logger.warning(
+            "OAuth token exchange failed for provider %s", provider_id, exc_info=True
+        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    (raw_user_data, default_user) = await provider.get_user_info(token)
+    try:
+        (raw_user_data, default_user) = await provider.get_user_info(token)
+    except Exception:
+        logger.warning(
+            "OAuth user info failed for provider %s", provider_id, exc_info=True
+        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    user = await config.code.oauth_callback(
-        provider_id, token, raw_user_data, default_user, id_token
-    )
+    try:
+        user = await config.code.oauth_callback(
+            provider_id, token, raw_user_data, default_user, id_token
+        )
+    except Exception as e:
+        logger.warning(
+            "OAuth callback failed for provider %s: %s", provider_id, type(e).__name__
+        )
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    response = await _authenticate_user(request, user, redirect_to_callback=True)
+    try:
+        response = await _authenticate_user(request, user, redirect_to_callback=True)
+    except Exception:
+        logger.warning("OAuth authentication failed for provider %s", provider_id)
+        return _get_oauth_redirect_error(request, "oauthSignin", status_code=303)
 
-    clear_oauth_state_cookie(response)
-    clear_oauth_nonce_cookie(response)
+    clear_oauth_cookies(response)
 
     return response
 

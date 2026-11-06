@@ -1168,6 +1168,265 @@ def test_health_check(test_client: TestClient):
 AZURE_TENANT_ID = "11111111-1111-1111-1111-111111111111"
 AZURE_ISSUER = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/v2.0"
 
+OAUTH_COOKIES = {"oauth_state": "valid_state", "oauth_nonce": "login_nonce"}
+GENERIC_CALLBACK = "/auth/oauth/generic/callback"
+AZURE_CALLBACK = "/auth/oauth/azure-ad-hybrid/callback"
+
+
+def _assert_oauth_cookies_cleared(response, *, secure=None):
+    headers = response.headers.get_list("set-cookie")
+    deleted = {}
+    for header in headers:
+        name = header.split("=", 1)[0].strip().lower()
+        if name in ("oauth_state", "oauth_nonce"):
+            deleted[name] = header
+
+    for name in ("oauth_state", "oauth_nonce"):
+        assert name in deleted, headers
+        lowered = deleted[name].lower()
+        assert "max-age=0" in lowered, deleted[name]
+        assert "path=" in lowered, deleted[name]
+        if secure is not None:
+            assert (
+                "secure" in [part.strip() for part in lowered.split(";")]
+            ) is secure, deleted[name]
+
+
+@pytest.fixture
+def mock_generic_oauth_provider(monkeypatch: pytest.MonkeyPatch):
+    provider = Mock()
+    provider.id = "generic"
+    provider.get_token = AsyncMock(return_value="access-token")
+    provider.get_user_info = AsyncMock(
+        return_value=(
+            {"sub": "user@example.com"},
+            User(identifier="user@example.com"),
+        )
+    )
+    monkeypatch.setattr("chainlit.server.get_oauth_provider", lambda _: provider)
+    return provider
+
+
+def test_oauth_callback_provider_error_clears_cookies(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+):
+    test_config.code.oauth_callback = AsyncMock()
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params={"error": "access_denied"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 307
+    assert "error=access_denied" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+@pytest.mark.parametrize("params", [{}, {"code": "code"}, {"state": "valid_state"}])
+def test_oauth_callback_missing_code_or_state_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+    params: dict,
+):
+    callback = AsyncMock()
+    test_config.code.oauth_callback = callback
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params=params,
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+    callback.assert_not_awaited()
+
+
+def test_oauth_callback_invalid_state_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+):
+    callback = AsyncMock()
+    test_config.code.oauth_callback = callback
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "wrong_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+    callback.assert_not_awaited()
+
+
+def test_oauth_callback_token_error_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+):
+    mock_generic_oauth_provider.get_token.side_effect = RuntimeError("token exchange")
+    test_config.code.oauth_callback = AsyncMock()
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "valid_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+def test_oauth_callback_user_info_error_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+):
+    mock_generic_oauth_provider.get_user_info.side_effect = RuntimeError("user info")
+    test_config.code.oauth_callback = AsyncMock()
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "valid_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+def test_oauth_callback_app_error_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+):
+    callback = AsyncMock(side_effect=ValueError("app callback secret"))
+    test_config.code.oauth_callback = callback
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "valid_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+    callback.assert_awaited_once()
+
+
+def test_oauth_callback_no_user_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+):
+    test_config.code.oauth_callback = AsyncMock(return_value=None)
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "valid_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+def test_oauth_callback_success_clears_state_and_nonce(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv(
+        "CHAINLIT_AUTH_SECRET", "test-secret-test-secret-test-secret-1234"
+    )
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: None)
+    test_config.code.oauth_callback = AsyncMock(
+        return_value=User(identifier="user@example.com")
+    )
+
+    response = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "valid_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "/login/callback?" in response.headers["location"]
+    auth_headers = [
+        header
+        for header in response.headers.get_list("set-cookie")
+        if header.startswith("access_token=")
+    ]
+    assert auth_headers
+    assert "max-age=0" not in auth_headers[0].lower()
+    _assert_oauth_cookies_cleared(response)
+
+
+@pytest.mark.parametrize("secure", [False, True])
+def test_oauth_callback_cookie_deletions_carry_secure(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_generic_oauth_provider: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    secure: bool,
+):
+    import chainlit.auth.cookie as cookie_module
+
+    monkeypatch.setattr(cookie_module, "_cookie_secure", secure)
+    monkeypatch.setattr(
+        "chainlit.server._authenticate_user",
+        AsyncMock(return_value=RedirectResponse("/", status_code=302)),
+    )
+    test_config.code.oauth_callback = AsyncMock(
+        return_value=User(identifier="user@example.com")
+    )
+
+    success = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "valid_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+    assert success.status_code == 302
+    _assert_oauth_cookies_cleared(success, secure=secure)
+
+    failure = test_client.get(
+        GENERIC_CALLBACK,
+        params={"code": "code", "state": "wrong_state"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+    assert failure.status_code == 303
+    _assert_oauth_cookies_cleared(failure, secure=secure)
+
+
+@pytest.fixture
+def mock_azure_hf_verify(monkeypatch: pytest.MonkeyPatch):
+    verify = AsyncMock(return_value={"upn": "user@example.com"})
+    monkeypatch.setattr("chainlit.server._verify_azure_hf_id_token", verify)
+    return verify
+
 
 @pytest.fixture
 def mock_oauth_provider(monkeypatch: pytest.MonkeyPatch):
@@ -1206,11 +1465,13 @@ def test_azure_hf_callback_missing_state_redirects(
     response = test_client.post(
         "/auth/oauth/azure-ad-hybrid/callback",
         data={"code": "fake_code", "id_token": "a.b.c"},
+        cookies=OAUTH_COOKIES,
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
     callback.assert_not_awaited()
 
 
@@ -1225,12 +1486,13 @@ def test_azure_hf_callback_missing_id_token_redirects(
     response = test_client.post(
         "/auth/oauth/azure-ad-hybrid/callback",
         data={"code": "fake_code", "state": "valid_state"},
-        cookies={"oauth_state": "valid_state"},
+        cookies=OAUTH_COOKIES,
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
     callback.assert_not_awaited()
 
 
@@ -1248,12 +1510,13 @@ def test_azure_hf_callback_rejects_forged_id_token(
     response = test_client.post(
         "/auth/oauth/azure-ad-hybrid/callback",
         data={"code": "fake_code", "state": "valid_state", "id_token": "forged"},
-        cookies={"oauth_state": "valid_state", "oauth_nonce": "login_nonce"},
+        cookies=OAUTH_COOKIES,
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
     verify.assert_awaited_once()
     callback.assert_not_awaited()
     assert "access_token" not in response.cookies
@@ -1277,12 +1540,13 @@ def test_azure_hf_callback_verifies_token_with_login_nonce(
     response = test_client.post(
         "/auth/oauth/azure-ad-hybrid/callback",
         data={"code": "fake_code", "state": "valid_state", "id_token": "good"},
-        cookies={"oauth_state": "valid_state", "oauth_nonce": "login_nonce"},
+        cookies=OAUTH_COOKIES,
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert "error=oauthSignin" not in response.headers.get("location", "")
+    _assert_oauth_cookies_cleared(response)
     verify.assert_awaited_once_with(mock_oauth_provider, "good", "login_nonce")
     callback.assert_awaited_once()
 
@@ -1305,6 +1569,191 @@ def test_azure_hf_login_sets_a_fresh_nonce_cookie(
     parsed_cookie.load(f"oauth_nonce={response.cookies['oauth_nonce']}")
     assert parsed_cookie["oauth_nonce"].value == params["nonce"][0]
     assert "nonce" not in mock_oauth_provider.authorize_params
+
+
+def test_azure_hf_provider_error_clears_cookies(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+):
+    test_config.code.oauth_callback = AsyncMock()
+
+    response = test_client.post(
+        AZURE_CALLBACK,
+        data={"error": "access_denied"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 307
+    assert "error=access_denied" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+def test_azure_hf_callback_missing_code_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+):
+    callback = AsyncMock()
+    test_config.code.oauth_callback = callback
+
+    response = test_client.post(
+        AZURE_CALLBACK,
+        data={"state": "valid_state", "id_token": "a.b.c"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+    callback.assert_not_awaited()
+
+
+def test_azure_hf_callback_invalid_state_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+):
+    callback = AsyncMock()
+    test_config.code.oauth_callback = callback
+
+    response = test_client.post(
+        AZURE_CALLBACK,
+        data={"code": "code", "state": "wrong_state", "id_token": "a.b.c"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+    callback.assert_not_awaited()
+
+
+def test_azure_hf_callback_token_error_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+    mock_azure_hf_verify: AsyncMock,
+):
+    mock_oauth_provider.get_token.side_effect = RuntimeError("token exchange")
+    test_config.code.oauth_callback = AsyncMock()
+
+    response = test_client.post(
+        AZURE_CALLBACK,
+        data={"code": "code", "state": "valid_state", "id_token": "good"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+def test_azure_hf_callback_user_info_error_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+    mock_azure_hf_verify: AsyncMock,
+):
+    mock_oauth_provider.get_user_info.side_effect = RuntimeError("user info")
+    test_config.code.oauth_callback = AsyncMock()
+
+    response = test_client.post(
+        AZURE_CALLBACK,
+        data={"code": "code", "state": "valid_state", "id_token": "good"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+def test_azure_hf_callback_app_error_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+    mock_azure_hf_verify: AsyncMock,
+):
+    callback = AsyncMock(side_effect=ValueError("app callback secret"))
+    test_config.code.oauth_callback = callback
+
+    response = test_client.post(
+        AZURE_CALLBACK,
+        data={"code": "code", "state": "valid_state", "id_token": "good"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+    callback.assert_awaited_once()
+
+
+def test_azure_hf_callback_no_user_redirects(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+    mock_azure_hf_verify: AsyncMock,
+):
+    test_config.code.oauth_callback = AsyncMock(return_value=None)
+
+    response = test_client.post(
+        AZURE_CALLBACK,
+        data={"code": "code", "state": "valid_state", "id_token": "good"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=oauthSignin" in response.headers["location"]
+    _assert_oauth_cookies_cleared(response)
+
+
+@pytest.mark.parametrize("secure", [False, True])
+def test_azure_hf_cookie_deletions_carry_secure(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_oauth_provider: Mock,
+    mock_azure_hf_verify: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    secure: bool,
+):
+    import chainlit.auth.cookie as cookie_module
+
+    monkeypatch.setattr(cookie_module, "_cookie_secure", secure)
+    monkeypatch.setattr(
+        "chainlit.server._authenticate_user",
+        AsyncMock(return_value=RedirectResponse("/", status_code=303)),
+    )
+    test_config.code.oauth_callback = AsyncMock(
+        return_value=User(identifier="user@example.com")
+    )
+
+    success = test_client.post(
+        AZURE_CALLBACK,
+        data={"code": "code", "state": "valid_state", "id_token": "good"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+    assert success.status_code == 303
+    assert "error=oauthSignin" not in success.headers["location"]
+    _assert_oauth_cookies_cleared(success, secure=secure)
+
+    failure = test_client.post(
+        AZURE_CALLBACK,
+        data={"code": "code", "state": "wrong_state", "id_token": "good"},
+        cookies=OAUTH_COOKIES,
+        follow_redirects=False,
+    )
+    assert failure.status_code == 303
+    _assert_oauth_cookies_cleared(failure, secure=secure)
 
 
 @pytest.fixture(scope="module")
