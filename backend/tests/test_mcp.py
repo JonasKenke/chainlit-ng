@@ -22,9 +22,16 @@ from chainlit.config import (
     config,
 )
 from chainlit.mcp import (
+    _RESTRICTED_HEADERS,
     HttpMcpConnection,
+    McpDestinationError,
     SseMcpConnection,
     StdioMcpConnection,
+    _destination_in_allowlist,
+    _destination_on_origin,
+    make_mcp_http_client_factory,
+    validate_mcp_headers,
+    validate_mcp_url,
 )
 from chainlit.mcp_oauth import (
     MCP_OAUTH_DETAILS,
@@ -283,6 +290,170 @@ class TestMcpConnectionEdgeCases:
         assert "Python" in stdio_conn.name
         assert "Production" in sse_conn.name
         assert "Development" in http_conn.name
+
+
+@pytest.mark.parametrize(
+    ("url", "allowed_urls", "should_raise"),
+    [
+        ("https://api.example.com/mcp", ["https://api.example.com/mcp"], False),
+        ("https://api.example.com/mcp/tools", ["https://api.example.com/mcp"], False),
+        ("https://API.example.com/mcp", ["https://api.example.com/mcp"], False),
+        (
+            "https://api.example.com:443/mcp",
+            ["https://api.example.com/mcp"],
+            False,
+        ),
+        ("https://example.com/any/path", ["https://example.com"], False),
+        ("https://evil.com/mcp", ["https://api.example.com/mcp"], True),
+        ("https://api.example.com/mcp", [], True),
+        # Scheme, port and path-subtree boundaries.
+        ("http://api.example.com/mcp", ["https://api.example.com/mcp"], True),
+        (
+            "https://api.example.com:9000/mcp",
+            ["https://api.example.com:8000/mcp"],
+            True,
+        ),
+        ("https://api.example.com/v1-evil", ["https://api.example.com/v1"], True),
+        ("https://api.example.com/v1beta", ["https://api.example.com/v1"], True),
+        ("file:///etc/passwd", ["https://allowed.com/api"], True),
+        # Ambiguous paths must be rejected, never normalised.
+        ("https://allowed.com/api/../../admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/./../admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/%2e%2e/admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api%2f..%2fadmin", ["https://allowed.com/api"], True),
+        (
+            "https://allowed.com/api/%252e%252e/admin",
+            ["https://allowed.com/api"],
+            True,
+        ),
+        ("https://allowed.com/api/..%5cadmin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/..\\admin", ["https://allowed.com/api"], True),
+        (
+            "https://allowed.com/api/\uff0e\uff0e/admin",
+            ["https://allowed.com/api"],
+            True,
+        ),
+        (
+            "https://allowed.com/api/%EF%BC%8E%EF%BC%8E/admin",
+            ["https://allowed.com/api"],
+            True,
+        ),
+        (
+            "https://allowed.com/api/\u2024\u2024/admin",
+            ["https://allowed.com/api"],
+            True,
+        ),
+        ("https://allowed.com/api/\uff0f../admin", ["https://allowed.com/api"], True),
+    ],
+)
+def test_validate_mcp_url(url, allowed_urls, should_raise):
+    if should_raise:
+        with pytest.raises(ValueError, match="not in the allowed"):
+            validate_mcp_url(url, allowed_urls)
+    else:
+        validate_mcp_url(url, allowed_urls)
+
+
+class TestValidateMcpHeaders:
+    @pytest.mark.parametrize("header_name", sorted(_RESTRICTED_HEADERS))
+    def test_restricted_headers_are_stripped(self, header_name):
+        result = validate_mcp_headers({header_name: "value", "X-Custom": "keep"})
+
+        assert result == {"X-Custom": "keep"}
+
+    @pytest.mark.parametrize("header_name", ["COOKIE", "X-Forwarded-For"])
+    def test_restricted_headers_are_case_insensitive(self, header_name):
+        assert validate_mcp_headers({header_name: "value"}) is None
+
+    def test_authorization_survives(self):
+        headers = {"Authorization": "Bearer secret-token"}
+
+        assert validate_mcp_headers(headers) == headers
+
+    def test_empty_results_become_none(self):
+        assert validate_mcp_headers(None) is None
+        assert validate_mcp_headers({}) is None
+        assert validate_mcp_headers({"Cookie": "a=b", "Host": "evil.com"}) is None
+
+
+class TestMakeMcpHttpClientFactory:
+    async def test_disables_redirects_and_sets_default_timeout(self):
+        client = make_mcp_http_client_factory(lambda _url: None)()
+        try:
+            assert client.follow_redirects is False
+            assert client.timeout == httpx2.Timeout(30.0)
+        finally:
+            await client.aclose()
+
+    async def test_passed_headers_timeout_and_auth_are_honored(self):
+        class DummyAuth(httpx2.Auth):
+            def auth_flow(self, request):
+                yield request
+
+        auth = DummyAuth()
+        timeout = httpx2.Timeout(5.0)
+        client = make_mcp_http_client_factory(lambda _url: None)(
+            headers={"X-Test": "value"}, timeout=timeout, auth=auth
+        )
+        try:
+            assert client.headers["x-test"] == "value"
+            assert client.timeout == timeout
+            assert client.auth is auth
+        finally:
+            await client.aclose()
+
+    async def test_every_request_is_checked_and_blocked_with_on_blocked(self):
+        calls: list[str] = []
+        blocked: list[McpDestinationError] = []
+
+        def check(url: str) -> None:
+            calls.append(url)
+            if "evil" in url:
+                raise McpDestinationError(f"blocked: {url}")
+
+        client = make_mcp_http_client_factory(check, on_blocked=blocked.append)()
+        try:
+            hook = client.event_hooks["request"][0]
+            await hook(httpx2.Request("GET", "https://good.example.com/x"))
+            with pytest.raises(McpDestinationError):
+                await hook(httpx2.Request("GET", "https://evil.example.com/x"))
+        finally:
+            await client.aclose()
+
+        assert calls == [
+            "https://good.example.com/x",
+            "https://evil.example.com/x",
+        ]
+        assert len(blocked) == 1
+        assert "evil.example.com" in str(blocked[0])
+
+
+class TestDestinationGrants:
+    async def test_allowlist_hook_blocks_out_of_subtree_and_allows_subtree(self):
+        client = make_mcp_http_client_factory(
+            _destination_in_allowlist(["https://allowed.com/mcp/users/alice"])
+        )()
+        try:
+            hook = client.event_hooks["request"][0]
+            with pytest.raises(McpDestinationError):
+                await hook(httpx2.Request("POST", "https://allowed.com/admin"))
+            await hook(
+                httpx2.Request("POST", "https://allowed.com/mcp/users/alice/messages")
+            )
+        finally:
+            await client.aclose()
+
+    async def test_origin_hook_allows_sibling_path_and_blocks_cross_origin(self):
+        client = make_mcp_http_client_factory(
+            _destination_on_origin("https://server.example.com/sse")
+        )()
+        try:
+            hook = client.event_hooks["request"][0]
+            await hook(httpx2.Request("POST", "https://server.example.com/messages/"))
+            with pytest.raises(McpDestinationError):
+                await hook(httpx2.Request("POST", "https://evil.example.com/messages/"))
+        finally:
+            await client.aclose()
 
 
 ALICE = User(identifier="alice")
@@ -714,6 +885,10 @@ def oauth_config(test_config, monkeypatch):
     test_config.features.mcp.enabled = True
     test_config.features.mcp.oauth_authorization_origins = [OAUTH_SERVER]
     test_config.features.mcp.user_oauth.enabled = True
+    # The OAuth branch is a user-provided connection: it is gated by the same
+    # user_servers switch and allowlist as the plain SSE/HTTP path.
+    test_config.features.mcp.user_servers.enabled = True
+    test_config.features.mcp.user_servers.allowed_urls = ["https://mcp.example.com"]
     test_config.features.mcp.user_oauth.max_starts_per_user_per_minute = 5
     test_config.features.mcp.user_oauth.max_pending_per_user = 3
     monkeypatch.setenv("CHAINLIT_URL", "https://app.example.com")
@@ -945,7 +1120,7 @@ class TestMcpOAuthGates:
         assert response.json()["detail"] == MCP_OAUTH_HEADERS_DETAIL
         assert fake_sdk.transport == []
 
-    async def test_a_plain_connection_is_refused_before_any_outbound_request(
+    async def test_a_plain_connection_outside_the_allowlist_is_refused(
         self,
         client,
         oauth_config,
@@ -956,6 +1131,7 @@ class TestMcpOAuthGates:
         mcp_store,
         mcp_rate_limiter,
     ):
+        oauth_config.features.mcp.user_servers.allowed_urls = []
         login_as(ALICE)
         headers = {"X-Api-Key": "static-key"}
 
@@ -964,7 +1140,7 @@ class TestMcpOAuthGates:
         )
 
         assert response.status_code == 400
-        assert response.json()["detail"] == MCP_USER_SERVERS_DISABLED_DETAIL
+        assert "not in the allowed" in response.json()["detail"]
         assert fake_sdk.clients == []
         assert fake_sdk.transport == []
 
@@ -1119,8 +1295,8 @@ class TestMcpOAuthGates:
         plain = await client.post(
             "/mcp", json=oauth_body(ws_session, name="plain", useOAuth=False)
         )
-        assert plain.status_code == 400
-        assert plain.json()["detail"] == MCP_USER_SERVERS_DISABLED_DETAIL
+        # A plain (non-OAuth) connect is not subject to the OAuth limiter.
+        assert plain.status_code == 200
 
     async def test_the_fourth_pending_flow_is_refused(
         self,
@@ -1152,8 +1328,8 @@ class TestMcpOAuthGates:
         plain = await client.post(
             "/mcp", json=oauth_body(ws_session, name="plain", useOAuth=False)
         )
-        assert plain.status_code == 400
-        assert plain.json()["detail"] == MCP_USER_SERVERS_DISABLED_DETAIL
+        # A plain (non-OAuth) connect is not subject to the OAuth limiter.
+        assert plain.status_code == 200
 
 
 class TestMcpOAuthConnect:
@@ -1580,11 +1756,14 @@ class TestMcpOAuthConnect:
         plain = await client.post(
             "/mcp", json=oauth_body(ws_session, name="plain", useOAuth=False)
         )
-        # Only the OAuth client exists: the plain path makes no request at all.
-        assert plain.status_code == 400
-        assert plain.json()["detail"] == MCP_USER_SERVERS_DISABLED_DETAIL
-        assert len(fake_sdk.clients) == 1
-        assert fake_sdk.clients[0] is oauth_client
+        # The plain path is not OAuth, so it gets a destination-checking client
+        # without the OAuth request guard (which bounds AS/PRM traffic).
+        assert plain.status_code == 200
+        assert len(fake_sdk.clients) == 2
+        plain_client = fake_sdk.clients[1]
+        assert plain_client is not oauth_client
+        assert plain_client.auth is None
+        assert len(plain_client.event_hooks["request"]) == 1
 
 
 class TestMcpPlainRegression:
@@ -1617,6 +1796,7 @@ class TestMcpPlainRegression:
             "mcp": {
                 "name": "weather",
                 "tools": [{"name": "echo"}],
+                "isUserProvided": False,
                 "type": "streamable-http",
             },
         }
@@ -1662,6 +1842,7 @@ class TestNamedMcpServers:
             "mcp": {
                 "name": "local",
                 "tools": [{"name": "echo"}],
+                "isUserProvided": False,
                 "type": "stdio",
             },
         }
@@ -1763,8 +1944,8 @@ class TestNamedMcpServers:
         sse_calls = []
 
         @contextlib.asynccontextmanager
-        async def fake_sse(url, headers=None):
-            sse_calls.append((url, headers))
+        async def fake_sse(url, headers=None, httpx_client_factory=None):
+            sse_calls.append((url, headers, httpx_client_factory))
             yield (AsyncMock(), AsyncMock())
 
         monkeypatch.setattr("mcp.client.sse.sse_client", fake_sse)
@@ -1779,14 +1960,14 @@ class TestNamedMcpServers:
         assert response.json()["mcp"] == {
             "name": "events",
             "tools": [{"name": "echo"}],
+            "isUserProvided": False,
             "type": "sse",
         }
-        assert sse_calls == [
-            (
-                "https://mcp.example.com/sse",
-                {"Authorization": "Bearer configured-secret"},
-            )
-        ]
+        assert len(sse_calls) == 1
+        url, headers, factory = sse_calls[0]
+        assert url == "https://mcp.example.com/sse"
+        assert headers == {"Authorization": "Bearer configured-secret"}
+        assert factory is not None
         assert "configured-secret" not in response.text
 
     async def test_reconnect_replaces_the_session_atomically(
@@ -1867,3 +2048,283 @@ def test_oauth_origins_are_validated_at_config_load():
 
     configured = McpFeature(oauth_authorization_origins=["https://as.example"])
     assert configured.oauth_authorization_origins == ["https://as.example"]
+
+
+class TestUserProvidedMcpServers:
+    """P2: user-provided SSE/HTTP is enabled only behind the operator allowlist."""
+
+    def _enable_user_servers(self, test_config, allowed_urls):
+        test_config.features.mcp.enabled = True
+        test_config.features.mcp.user_servers.enabled = True
+        test_config.features.mcp.user_servers.allowed_urls = allowed_urls
+
+    async def test_allowlisted_sse_connects_and_strips_restricted_headers(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        self._enable_user_servers(test_config, ["https://allowed.example.com/api"])
+        sse_calls = []
+
+        @contextlib.asynccontextmanager
+        async def fake_sse(url, headers=None, httpx_client_factory=None):
+            sse_calls.append((url, headers, httpx_client_factory))
+            yield (AsyncMock(), AsyncMock())
+
+        monkeypatch.setattr("mcp.client.sse.sse_client", fake_sse)
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "name": "custom",
+                "url": "https://allowed.example.com/api/sse",
+                "clientType": "sse",
+                "headers": {
+                    "Host": "evil.example.com",
+                    "Cookie": "session=stolen",
+                    "X-Forwarded-For": "10.0.0.1",
+                    "Authorization": "Bearer user-token",
+                    "X-Custom": "keep",
+                },
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()["mcp"]
+        assert body["isUserProvided"] is True
+        assert body["url"] == "https://allowed.example.com/api/sse"
+        assert body["clientType"] == "sse"
+        assert body["headers"] == {
+            "Authorization": "Bearer user-token",
+            "X-Custom": "keep",
+        }
+        assert "session=stolen" not in response.text
+        assert "10.0.0.1" not in response.text
+
+        url, headers, factory = sse_calls[0]
+        assert url == "https://allowed.example.com/api/sse"
+        assert headers == {
+            "Authorization": "Bearer user-token",
+            "X-Custom": "keep",
+        }
+        assert factory is not None
+
+        http_client = factory(headers=headers)
+        assert http_client.kwargs["follow_redirects"] is False
+        assert len(http_client.kwargs["event_hooks"]["request"]) == 1
+
+    async def test_non_allowlisted_user_url_is_refused_before_any_outbound_call(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        self._enable_user_servers(test_config, ["https://allowed.example.com/api"])
+        sse_calls = []
+        monkeypatch.setattr(
+            "mcp.client.sse.sse_client", lambda *a, **k: sse_calls.append((a, k))
+        )
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "name": "custom",
+                "url": "http://169.254.169.254/latest/meta-data/",
+                "clientType": "sse",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "not in the allowed" in response.json()["detail"]
+        assert sse_calls == []
+        assert fake_sdk.clients == []
+        assert fake_sdk.transport == []
+
+    async def test_user_servers_disabled_is_refused_before_any_outbound_call(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        test_config.features.mcp.enabled = True
+        test_config.features.mcp.user_servers.enabled = False
+        test_config.features.mcp.user_servers.allowed_urls = [
+            "https://allowed.example.com/api"
+        ]
+        sse_calls = []
+        monkeypatch.setattr(
+            "mcp.client.sse.sse_client", lambda *a, **k: sse_calls.append((a, k))
+        )
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "name": "custom",
+                "url": "https://allowed.example.com/api",
+                "clientType": "sse",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_USER_SERVERS_DISABLED_DETAIL
+        assert sse_calls == []
+        assert fake_sdk.clients == []
+
+    @pytest.mark.parametrize(
+        "claimed_name", ["github", "GitHub", "GITHUB", "  github  "]
+    )
+    async def test_user_server_cannot_alias_a_named_server(
+        self, claimed_name, client, test_config, ws_session
+    ):
+        test_config.features.mcp.enabled = True
+        test_config.features.mcp.servers = [
+            SseMcpServer(name="github", type="sse", url="https://mcp.example.com/sse")
+        ]
+        self._enable_user_servers(test_config, ["https://evil.example.com"])
+        sentinel = SimpleNamespace(name="github", close=AsyncMock())
+        ws_session.mcp_sessions["github"] = sentinel
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "name": claimed_name,
+                "url": "https://evil.example.com",
+                "clientType": "sse",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "reserved" in response.json()["detail"]
+        # The rejected alias must not have evicted the real session.
+        assert ws_session.mcp_sessions["github"] is sentinel
+
+    async def test_oauth_is_gated_by_user_servers_enabled(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        oauth_config.features.mcp.user_servers.enabled = False
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_USER_SERVERS_DISABLED_DETAIL
+        assert fake_sdk.clients == []
+        assert fake_sdk.transport == []
+
+    async def test_oauth_url_must_be_allowlisted(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        oauth_config.features.mcp.user_servers.allowed_urls = [
+            "https://other.example.com"
+        ]
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 400
+        assert "not in the allowed" in response.json()["detail"]
+        assert fake_sdk.clients == []
+        assert fake_sdk.transport == []
+
+    async def test_hanging_initialize_times_out_and_returns_400(
+        self, client, test_config, ws_session, monkeypatch
+    ):
+        self._enable_user_servers(test_config, ["https://allowed.example.com/api"])
+        monkeypatch.setattr("chainlit.mcp._MCP_CONNECT_TIMEOUT_HTTP", 0.05)
+        monkeypatch.setattr("chainlit.session._CLOSE_TIMEOUT", 0.2)
+
+        @contextlib.asynccontextmanager
+        async def fake_sse(url, headers=None, httpx_client_factory=None):
+            yield (AsyncMock(), AsyncMock())
+
+        class HangingInitializeClientSession:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc_info):
+                return False
+
+            async def initialize(self):
+                await asyncio.Event().wait()
+
+            async def list_tools(self):  # pragma: no cover - unreachable
+                return SimpleNamespace(tools=[])
+
+        monkeypatch.setattr("mcp.client.sse.sse_client", fake_sse)
+        monkeypatch.setattr("mcp.ClientSession", HangingInitializeClientSession)
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "name": "custom",
+                "url": "https://allowed.example.com/api",
+                "clientType": "sse",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Timed out after" in response.json()["detail"]
+
+    async def test_blocked_destination_fails_fast_instead_of_hanging(
+        self, client, test_config, ws_session, monkeypatch
+    ):
+        self._enable_user_servers(test_config, ["https://allowed.example.com/api"])
+        monkeypatch.setattr("chainlit.session._CLOSE_TIMEOUT", 0.2)
+
+        @contextlib.asynccontextmanager
+        async def blocked_swallowing_transport(
+            url, headers=None, httpx_client_factory=None
+        ):
+            # Mirrors the SDK: build the client, let the request hook run, and
+            # swallow whatever it raises, then hang forever.
+            client = httpx_client_factory()
+            try:
+                hook = client.event_hooks["request"][0]
+                try:
+                    await hook(httpx2.Request("GET", "https://evil.example.com/x"))
+                except McpDestinationError:
+                    pass
+            finally:
+                await client.aclose()
+            await asyncio.Event().wait()
+            yield (AsyncMock(), AsyncMock())  # pragma: no cover - unreachable
+
+        monkeypatch.setattr("mcp.client.sse.sse_client", blocked_swallowing_transport)
+        login_as(ALICE)
+
+        start = asyncio.get_running_loop().time()
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "name": "custom",
+                "url": "https://allowed.example.com/api",
+                "clientType": "sse",
+            },
+        )
+        elapsed = asyncio.get_running_loop().time() - start
+
+        assert response.status_code == 400
+        assert "evil.example.com" in response.json()["detail"]
+        assert elapsed < 5, f"fail-fast did not fire; took {elapsed:.1f}s"

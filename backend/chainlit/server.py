@@ -2127,10 +2127,19 @@ async def connect_mcp(
     from chainlit.config import SseMcpServer, StdioMcpServer, StreamableHttpMcpServer
     from chainlit.context import init_ws_context
     from chainlit.mcp import (
+        _MCP_CONNECT_TIMEOUT_HTTP,
+        _MCP_CONNECT_TIMEOUT_STDIO,
         HttpMcpConnection,
         McpConnection,
+        McpDestinationError,
+        McpHttpClientFactory,
         SseMcpConnection,
         StdioMcpConnection,
+        _destination_in_allowlist,
+        _destination_on_origin,
+        make_mcp_http_client_factory,
+        validate_mcp_headers,
+        validate_mcp_url,
     )
     from chainlit.session import McpSession, WebsocketSession, stop_mcp_task
 
@@ -2152,6 +2161,23 @@ async def connect_mcp(
         raise HTTPException(
             status_code=400,
             detail="This app does not support MCP.",
+        )
+
+    # Reject user-provided connections that try to claim a configured server's
+    # name — must run BEFORE any eviction, otherwise a rejected attempt would
+    # still have killed the legitimate session. Compared case-insensitively
+    # and whitespace-stripped so a near-miss name can't impersonate a
+    # configured server in the UI.
+    if payload.url is not None and any(
+        s.name.strip().casefold() == payload.name.strip().casefold()
+        for s in config.features.mcp.servers
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"MCP server name {payload.name!r} is reserved by a configured server "
+                "and cannot be used for a user-provided connection."
+            ),
         )
 
     use_oauth = getattr(payload, "useOAuth", False)
@@ -2263,6 +2289,21 @@ async def connect_mcp(
                 status_code=400,
                 detail=MCP_OAUTH_WELL_KNOWN_DETAIL,
             )
+
+        # User-provided servers, including the OAuth flow, stay behind the
+        # allowlist: the OAuth branch opens a transport to a client-supplied
+        # URL before any named-server lookup, so leaving it ungated would
+        # bypass the allowlist with "useOAuth": true. Runs after the OAuth
+        # URL gates above so their fixed details keep precedence.
+        if not config.features.mcp.user_servers.enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=MCP_USER_SERVERS_DISABLED_DETAIL,
+            )
+        try:
+            validate_mcp_url(oauth_url, config.features.mcp.user_servers.allowed_urls)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         oauth_user_identifier = current_user.identifier
         oauth_pending = get_pending_authorizations()
@@ -2449,6 +2490,7 @@ async def connect_mcp(
                     mcp_data = {
                         "name": payload.name,
                         "tools": [{"name": tool.name} for tool in tool_list.tools],
+                        "isUserProvided": True,
                         "clientType": payload.clientType,
                         "command": None,
                         "url": oauth_url,
@@ -2569,6 +2611,7 @@ async def connect_mcp(
                     "mcp": {
                         "name": payload.name,
                         "tools": [],
+                        "isUserProvided": True,
                         "clientType": payload.clientType,
                         "command": None,
                         "url": oauth_url,
@@ -2629,6 +2672,9 @@ async def connect_mcp(
 
     # ── Validate config before launching the background task ──
     mcp_connection: McpConnection
+    # Computed once and reused by the destination-binding factory and the
+    # connect-response / error-hygiene branches below.
+    is_user_provided = payload.url is not None
     # Only set for stdio named servers; merged into the spawn environment in
     # the background runner.
     stdio_env: Optional[Dict[str, str]] = None
@@ -2675,14 +2721,27 @@ async def connect_mcp(
                     status_code=500, detail="Unknown server config type"
                 )
         else:
-            # User-provided SSE/HTTP connections are closed in this release.
-            # The allowlist + destination checks that make them safe land in
-            # KRE-61 (CVE-2026-45019); until then nothing a client sends can
-            # cause an outbound request.
-            raise HTTPException(
-                status_code=400,
-                detail=MCP_USER_SERVERS_DISABLED_DETAIL,
-            )
+            # User-provided SSE/HTTP connections are enabled only behind the
+            # operator's allowlist (CVE-2026-45019); an empty list denies all.
+            if not config.features.mcp.user_servers.enabled:
+                raise HTTPException(
+                    status_code=400,
+                    detail=MCP_USER_SERVERS_DISABLED_DETAIL,
+                )
+            validate_mcp_url(payload.url, config.features.mcp.user_servers.allowed_urls)
+            filtered_headers = validate_mcp_headers(payload.headers)
+            if payload.clientType == "sse":
+                mcp_connection = SseMcpConnection(
+                    url=payload.url,
+                    name=payload.name,
+                    headers=filtered_headers,
+                )
+            else:  # streamable-http
+                mcp_connection = HttpMcpConnection(
+                    url=payload.url,
+                    name=payload.name,
+                    headers=filtered_headers,
+                )
     except HTTPException:
         raise
     except ValueError as exc:
@@ -2702,15 +2761,52 @@ async def connect_mcp(
     # Mutable container to pass the ClientSession back from the bg task.
     result_holder: dict[str, object] = {}
 
+    def _record_blocked(exc: McpDestinationError) -> None:
+        # Fail-fast side channel: mcp/client/sse.py and
+        # mcp/client/streamable_http.py swallow exceptions raised from the
+        # httpx2 request hook (bare ``except Exception: logger.exception``,
+        # no re-raise), so a blocked destination would otherwise never reach
+        # ``ClientSession.initialize()`` and ``ready_event`` would never be
+        # set — hanging the bounded wait below until its timeout. This
+        # unblocks it immediately instead.
+        if "error" not in result_holder:
+            result_holder["error"] = exc
+        ready_event.set()
+
+    # ── Bind the destination-checking httpx2 client factory ──
+    #
+    # The SSE transport takes its POST target from the server's ``endpoint``
+    # event, and the SDK only validates that event's netloc/scheme — not its
+    # path. Re-checking every outgoing request against the *right* grant
+    # closes that gap: user-provided connections are bound to the allowlist,
+    # named servers to their configured origin (sibling paths are normal for
+    # SSE message endpoints).
+    mcp_http_client_factory: Optional[McpHttpClientFactory] = None
+    if isinstance(mcp_connection, (SseMcpConnection, HttpMcpConnection)):
+        if is_user_provided:
+            mcp_http_client_factory = make_mcp_http_client_factory(
+                _destination_in_allowlist(
+                    config.features.mcp.user_servers.allowed_urls
+                ),
+                on_blocked=_record_blocked,
+            )
+        else:
+            mcp_http_client_factory = make_mcp_http_client_factory(
+                _destination_on_origin(mcp_connection.url),
+                on_blocked=_record_blocked,
+            )
+
     async def _mcp_session_runner() -> None:
         exit_stack = AsyncExitStack()
         try:
             try:
                 if isinstance(mcp_connection, SseMcpConnection):
+                    assert mcp_http_client_factory is not None
                     transport = await exit_stack.enter_async_context(
                         sse_client(
                             url=mcp_connection.url,
                             headers=mcp_connection.headers,
+                            httpx_client_factory=mcp_http_client_factory,
                         )
                     )
                 elif isinstance(mcp_connection, StdioMcpConnection):
@@ -2727,8 +2823,9 @@ async def connect_mcp(
                         )
                     )
                 elif isinstance(mcp_connection, HttpMcpConnection):
+                    assert mcp_http_client_factory is not None
                     http_client = await exit_stack.enter_async_context(
-                        httpx2.AsyncClient(
+                        mcp_http_client_factory(
                             headers=mcp_connection.headers,
                             timeout=httpx2.Timeout(30, read=300),
                         )
@@ -2757,7 +2854,14 @@ async def connect_mcp(
                 result_holder["client"] = mcp_client
 
             except BaseException as exc:
-                result_holder["error"] = exc
+                # First error wins. The caller may already have recorded the
+                # causal failure — a blocked destination (_record_blocked) or
+                # the synthesized connect timeout — and then cancelled us to
+                # unstick ``initialize()``. The resulting CancelledError
+                # arrives here second and carries no message, so overwriting
+                # would replace the real reason with a blank one.
+                if "error" not in result_holder:
+                    result_holder["error"] = exc
                 return  # outer finally closes exit_stack
             finally:
                 # Always signal the caller so it doesn't wait forever.
@@ -2785,8 +2889,25 @@ async def connect_mcp(
         _mcp_session_runner(), name=f"mcp-session-{payload.name}"
     )
 
-    # Wait for the background task to finish initialisation.
-    await ready_event.wait()
+    # Wait for the background task to finish initialisation, bounded so a
+    # blocked destination (swallowed by the SDK — see _record_blocked above)
+    # or a slow/hanging transport can't hang the request (and its task)
+    # forever. Stdio gets a much longer budget: `npx -y ...` can cold-download
+    # a package on first run.
+    connect_timeout = (
+        _MCP_CONNECT_TIMEOUT_STDIO
+        if isinstance(mcp_connection, StdioMcpConnection)
+        else _MCP_CONNECT_TIMEOUT_HTTP
+    )
+    try:
+        await asyncio.wait_for(ready_event.wait(), timeout=connect_timeout)
+    except asyncio.TimeoutError:
+        pass
+    if "error" not in result_holder and "client" not in result_holder:
+        result_holder["error"] = asyncio.TimeoutError(
+            f"Timed out after {connect_timeout:.0f}s waiting for the MCP "
+            "connection to initialize."
+        )
 
     if "error" in result_holder:
         # The task already exited and cleaned up its exit stack, or is stuck
@@ -2800,9 +2921,18 @@ async def connect_mcp(
             error,
             exc_info=error,
         )
+        if is_user_provided:
+            # The client already supplied this URL, so echoing the failure
+            # detail back is useful and leaks nothing new.
+            detail = f"Could not connect to the MCP: {error!s}"
+        else:
+            # Named servers are developer config and may embed secrets in
+            # userinfo or query params; httpx2 errors routinely include the
+            # request URL in their string form, so never return it verbatim.
+            detail = MCP_CONNECT_FAILED_DETAIL
         return JSONResponse(
             status_code=400,
-            content={"detail": MCP_CONNECT_FAILED_DETAIL},
+            content={"detail": detail},
         )
 
     mcp_client_session = cast("ClientSession", result_holder["client"])
@@ -2817,9 +2947,14 @@ async def connect_mcp(
             logger.warning(
                 "on_mcp_connect callback for %r failed", payload.name, exc_info=e
             )
+            detail = (
+                f"Could not connect to the MCP: {e!s}"
+                if is_user_provided
+                else MCP_CONNECT_FAILED_DETAIL
+            )
             return JSONResponse(
                 status_code=400,
-                content={"detail": MCP_CONNECT_FAILED_DETAIL},
+                content={"detail": detail},
             )
 
     # Store the session. The pop+store is a single await-free step, so a
@@ -2854,18 +2989,25 @@ async def connect_mcp(
 
     tool_list = await mcp_client_session.list_tools()
 
-    # Named servers come from developer config and may embed secrets, so only
-    # name, type and tools are echoed back. User-provided connections are
-    # rejected in this release (KRE-61 re-enables them with an allowlist), so
-    # no client-supplied url/headers are ever returned.
+    # Echo url/headers only for user-provided servers — the client already
+    # sent those. Named servers come from developer config and may embed
+    # secrets, so they expose only their name, transport type and tools.
+    mcp_payload: Dict[str, object] = {
+        "name": mcp_connection.name,
+        "tools": [{"name": t.name} for t in tool_list.tools],
+        "isUserProvided": is_user_provided,
+    }
+    if is_user_provided:
+        mcp_payload["clientType"] = mcp_connection.clientType
+        mcp_payload["url"] = getattr(mcp_connection, "url", None)
+        mcp_payload["headers"] = getattr(mcp_connection, "headers", None)
+    else:
+        mcp_payload["type"] = mcp_connection.clientType
+
     return JSONResponse(
         content={
             "success": True,
-            "mcp": {
-                "name": mcp_connection.name,
-                "tools": [{"name": t.name} for t in tool_list.tools],
-                "type": mcp_connection.clientType,
-            },
+            "mcp": mcp_payload,
         }
     )
 

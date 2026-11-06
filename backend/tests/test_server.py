@@ -895,6 +895,7 @@ def test_project_settings_redacts_mcp_server_secrets(
 ):
     from chainlit.config import (
         McpFeature,
+        McpUserServersFeature,
         SseMcpServer,
         StdioMcpServer,
         StreamableHttpMcpServer,
@@ -902,6 +903,9 @@ def test_project_settings_redacts_mcp_server_secrets(
 
     test_config.features.mcp = McpFeature(
         enabled=True,
+        user_servers=McpUserServersFeature(
+            enabled=True, allowed_urls=["https://allowlisted.example.com/api"]
+        ),
         servers=[
             StdioMcpServer(
                 name="local",
@@ -933,12 +937,13 @@ def test_project_settings_redacts_mcp_server_secrets(
         {"name": "sse", "type": "sse"},
         {"name": "http", "type": "streamable-http"},
     ]
-    assert mcp["user_servers"] == {"enabled": False}
+    assert mcp["user_servers"] == {"enabled": True}
     for secret in (
         "secret-tool",
         "env-secret",
         "header-secret",
         "query-secret",
+        "allowlisted.example.com",
         "GITHUB_TOKEN",
         "Authorization",
         "X-Api-Key",

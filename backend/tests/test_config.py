@@ -180,7 +180,7 @@ class TestMcpConfig:
 
         mcp = tomli.loads(DEFAULT_CONFIG_STR)["features"]["mcp"]
         assert "servers" not in mcp or isinstance(mcp["servers"], list)
-        assert mcp["user_servers"] == {"enabled": False}
+        assert mcp["user_servers"] == {"enabled": False, "allowed_urls": []}
         for legacy in ("sse", "stdio", "streamable-http"):
             assert legacy not in mcp
         assert "[[features.mcp.servers]]" in DEFAULT_CONFIG_STR

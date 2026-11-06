@@ -198,6 +198,9 @@ reaction_on_message_received = false
         # Opt-in: allow end-users to connect their own SSE or streamable-http MCP servers.
         # stdio is never user-provided (server-side config only).
         enabled = false
+        # Allowlist of permitted URL prefixes. Empty list = deny all.
+        # Example: allowed_urls = ["https://mcp.example.com"]
+        allowed_urls = []
 
 [UI]
 # Name of the assistant.
@@ -383,6 +386,7 @@ McpServerConfig = Annotated[
 
 class McpUserServersFeature(BaseModel):
     enabled: bool = False
+    allowed_urls: list[str] = []
 
 
 class McpFeature(BaseModel):
