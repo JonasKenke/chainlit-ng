@@ -42,24 +42,18 @@ manual ports unless they only touch data-layer or auth code.
 | #3069    | Apply `feedback=0` filters in `SQLAlchemyDataLayer`                | `55c1d069` |
 | #3049    | Use `removeprefix` for DynamoDB thread/step keys                   | `55c1d069` |
 | #2943    | Guard config `[meta]` without `generated_by`                       | `55c1d069` |
+| #3066    | Read-only history when a thread's chat profile is unavailable      | `88d0b7cc` |
 
 Compatibility work also landed in `fbba1152` (data-layer extras, removed-API
 warnings, lazy-export `AttributeError`, legacy generation serialization).
 
-Verification: 866 backend tests passed after the third batch; lint, format,
-and mypy clean.
+Verification: 886 backend tests passed after this batch; lint, format, and
+mypy clean. See [thread resume](../thread-resume.md).
 
 All currently known critical auth fixes are ported; the Azure hybrid threat
 model is in [security hardening](security-hardening.md).
 
 ## Remaining: state and transport
-
-### #3066 — unavailable chat profile leaves history unusable
-
-- Restoring a thread whose chat profile was deleted/renamed calls resume hooks
-  with invalid configuration.
-- Fix validates the stored profile and falls back to the read-only history
-  view. Issue #2492.
 
 ### #3067 — deleting the active thread re-selects it
 
@@ -131,7 +125,7 @@ model is in [security hardening](security-hardening.md).
 | #2946 resumed blobs do not render | **Ported (#2950)** |
 | #2784 Base64 reload crash         | **Ported (#2799)** |
 | #2491 timestamp failures          | **Ported (#2798)** |
-| #2492 unavailable chat profile    | #3066              |
+| #2492 unavailable chat profile    | **Ported (#3066)** |
 | #3078 PDF preview with root path  | No PR yet          |
 
 ## Already addressed by this fork
@@ -144,7 +138,7 @@ model is in [security hardening](security-hardening.md).
 
 ## Suggested order
 
-1. **#3066 / #3067** — unavailable profile and active-thread deletion.
+1. **#3067** — active-thread deletion.
 2. **#3073 / #3064 / #3078** — root-path deployment fixes.
 3. Frontend batch (#3011, #3056) after the React 19/Zustand UI settles.
 4. Feature work (#3013, #2954, #3054).

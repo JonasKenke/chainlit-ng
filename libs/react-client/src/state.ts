@@ -35,6 +35,7 @@ export interface ISession {
 export interface ChainlitState {
   threadIdToResume: string | undefined;
   resumeThreadError: string | undefined;
+  unavailableThreadId: string | undefined;
   chatProfile: string | undefined;
   sessionId: string;
   session: ISession | undefined;
@@ -90,6 +91,7 @@ function initialState(): ChainlitState {
   return {
     threadIdToResume: undefined,
     resumeThreadError: undefined,
+    unavailableThreadId: undefined,
     chatProfile: undefined,
     sessionId: uuidv4(),
     session: undefined,

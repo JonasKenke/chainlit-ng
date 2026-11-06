@@ -10,6 +10,7 @@ See also:
 - [Scheduled prompts integration](scheduled-prompts.md)
 - [SDK-native LLM instrumentation](integrations/sdk-instrumentation.md)
 - [Controlling automatic side-panel opening](side-panel-auto-expand.md)
+- [Thread resume with unavailable chat profiles](thread-resume.md)
 
 ## Research
 
