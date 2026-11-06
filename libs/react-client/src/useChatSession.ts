@@ -118,23 +118,16 @@ const useChatSession = () => {
         socket.emit('fetch_favorites');
         setMcps((prev) =>
           prev.map((mcp) => {
-            let promise;
-            if (mcp.clientType === 'sse') {
-              promise = client.connectSseMCP(sessionId, mcp.name, mcp.url!);
-            } else if (mcp.clientType === 'streamable-http') {
-              promise = client.connectStreamableHttpMCP(
-                sessionId,
-                mcp.name,
-                mcp.url!,
-                mcp.headers || {}
-              );
-            } else {
-              promise = client.connectStdioMCP(
-                sessionId,
-                mcp.name,
-                mcp.command!
-              );
-            }
+            const promise =
+              mcp.isUserProvided && mcp.clientType && mcp.url
+                ? client.connectUserMcp(
+                    sessionId,
+                    mcp.name,
+                    mcp.clientType,
+                    mcp.url,
+                    mcp.headers
+                  )
+                : client.connectMcp(sessionId, mcp.name);
             promise
               .then(async ({ success, mcp }) => {
                 setMcps((prev) =>

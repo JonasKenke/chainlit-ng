@@ -130,6 +130,53 @@
       "empty": "Such empty...",
       "show": "Show history"
     },
+    "mcp": {
+      "title": "MCP Servers",
+      "tabs": {
+        "connect": "Connect an MCP",
+        "list": "My MCPs"
+      },
+      "configured": {
+        "title": "Configured servers"
+      },
+      "connect": "Connect",
+      "reconnect": "Reconnect",
+      "add": {
+        "title": "Add your own server"
+      },
+      "form": {
+        "name": "Name",
+        "namePlaceholder": "Example: Stripe",
+        "type": "Type",
+        "url": "Server URL",
+        "urlPlaceholder": "Example: http://localhost:8000/mcp",
+        "headers": "Headers (JSON, optional)",
+        "headersPlaceholder": "Example: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "Headers must be a JSON object of string values",
+        "add": "Add"
+      },
+      "list": {
+        "empty": "No MCP servers connected",
+        "addFirst": "Add your first MCP server",
+        "url": "URL",
+        "tools": "Tools",
+        "removeTitle": "Are you sure?",
+        "removeDescription": "This will disconnect the MCP server \"{{name}}\". This action cannot be undone."
+      },
+      "messages": {
+        "connecting": "Connecting MCP...",
+        "connected": "MCP connected!",
+        "adding": "Adding MCP...",
+        "added": "MCP added!",
+        "reconnecting": "Reconnecting MCP...",
+        "reconnected": "MCP reconnected!",
+        "removing": "Removing MCP...",
+        "removed": "MCP removed!"
+      },
+      "errors": {
+        "connect": "Could not connect to the MCP server"
+      }
+    },
     "settings": {
       "title": "Settings panel",
       "customize": "Customize your chat settings here"

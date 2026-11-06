@@ -9,6 +9,7 @@ import { IMode } from './types/mode';
 
 import type { ChainlitAPI } from './api';
 import { ChainlitContext } from './context';
+import { MCP_STORAGE_KEY, parseStoredMcps } from './mcpStorage';
 import {
   IAction,
   IAsk,
@@ -76,15 +77,8 @@ type ChainlitStore = StoreApi<ChainlitState>;
 
 const stores = new WeakMap<ChainlitAPI, ChainlitStore>();
 const initialStates = new WeakMap<ChainlitStore, ChainlitState>();
-const MCP_STORAGE_KEY = 'mcp_storage_key';
-
 function readStoredMcps(): IMcp[] {
-  try {
-    const stored = localStorage.getItem(MCP_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
+  return parseStoredMcps(localStorage.getItem(MCP_STORAGE_KEY));
 }
 
 function initialState(): ChainlitState {

@@ -1,10 +1,14 @@
 export interface IMcp {
   name: string;
-  tools: [{ name: string }];
+  tools: { name: string }[];
   status: 'connected' | 'connecting' | 'failed';
-  clientType: 'sse' | 'stdio' | 'streamable-http';
-  command?: string;
+  /** Transport of a server declared in `[[features.mcp.servers]]`. */
+  type?: 'sse' | 'stdio' | 'streamable-http';
+  /** True when the URL/headers were supplied by the user, not by config. */
+  isUserProvided?: boolean;
+  /** Transport of a user-provided server; SSE/HTTP only. */
+  clientType?: 'sse' | 'streamable-http';
   url?: string;
-  /** Optional HTTP headers used when connecting (SSE or streamable-http) */
+  /** Persisted only for user-provided servers so they can reconnect. */
   headers?: Record<string, string>;
 }

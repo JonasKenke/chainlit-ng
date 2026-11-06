@@ -85,13 +85,11 @@ export interface IChainlitConfig {
     prompt_gallery?: boolean;
     mcp?: {
       enabled?: boolean;
-      sse?: {
-        enabled?: boolean;
-      };
-      streamable_http?: {
-        enabled?: boolean;
-      };
-      stdio?: {
+      servers?: {
+        name: string;
+        type: 'sse' | 'stdio' | 'streamable-http';
+      }[];
+      user_servers?: {
         enabled?: boolean;
       };
     };

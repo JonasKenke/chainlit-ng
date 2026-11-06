@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { Link, RefreshCw, SquareTerminal, Trash2, Wrench } from 'lucide-react';
+import { Link, RefreshCw, Trash2, Wrench } from 'lucide-react';
 import { useContext, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -7,8 +7,7 @@ import {
   ChainlitContext,
   IMcp,
   useChainlitState,
-  useChainlitStore,
-  useSetChainlitState
+  useChainlitStore
 } from '@chainlit/react-client';
 
 import CopyButton from '@/components/CopyButton';
@@ -25,7 +24,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Translator } from 'components/i18n';
+import { useTranslation } from 'components/i18n/Translator';
 
 interface McpListProps {
   onAddNewClick: () => void;
@@ -36,6 +35,7 @@ export const McpList = ({ onAddNewClick }: McpListProps) => {
   const sessionId = useChainlitStore((state) => state.sessionId);
   const [mcps, setMcps] = useChainlitState('mcps');
   const [isLoading, setIsLoading] = useState(false);
+  const { t } = useTranslation();
 
   const deleteMcp = (mcp: IMcp) => {
     if (mcp.status === 'connected') {
@@ -47,8 +47,8 @@ export const McpList = ({ onAddNewClick }: McpListProps) => {
           .then(() => {})
           .finally(() => setIsLoading(false)),
         {
-          loading: 'Removing MCP...',
-          success: () => 'MCP removed!',
+          loading: t('chat.mcp.messages.removing'),
+          success: () => t('chat.mcp.messages.removed'),
           error: (err) => <span>{err.message}</span>
         }
       );
@@ -60,9 +60,9 @@ export const McpList = ({ onAddNewClick }: McpListProps) => {
   if (!mcps || mcps.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
-        <p>No MCP servers connected</p>
+        <p>{t('chat.mcp.list.empty')}</p>
         <Button variant="outline" className="mt-4" onClick={onAddNewClick}>
-          Add your first MCP server
+          {t('chat.mcp.list.addFirst')}
         </Button>
       </div>
     );
@@ -89,6 +89,9 @@ interface McpItemProps {
 }
 
 const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
+  const { t } = useTranslation();
+  const transport = mcp.type || mcp.clientType;
+
   return (
     <div className="border rounded-lg p-4 flex flex-col gap-3">
       <div className="flex justify-between items-center">
@@ -102,7 +105,7 @@ const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
             )}
           />
           <h3 className="font-medium">{mcp.name}</h3>
-          <Badge variant="outline">{mcp.clientType}</Badge>
+          <Badge variant="outline">{transport}</Badge>
         </div>
         <div className="flex items-center">
           <ReconnectMcpButton mcp={mcp} />
@@ -110,32 +113,24 @@ const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
         </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        <div className="font-medium text-sm text-muted-foreground flex items-center">
-          {mcp.clientType === 'stdio' ? (
-            <SquareTerminal className="h-4 w-4 mr-2" />
-          ) : mcp.clientType === 'streamable-http' ? (
-            <Link className="h-4 w-4 mr-2 text-blue-500" />
-          ) : (
+      {mcp.isUserProvided && mcp.url && (
+        <div className="flex gap-2 flex-wrap">
+          <div className="font-medium text-sm text-muted-foreground flex items-center">
             <Link className="h-4 w-4 mr-2" />
-          )}
-          {mcp.clientType === 'stdio'
-            ? 'Command'
-            : mcp.clientType === 'streamable-http'
-              ? 'HTTP URL'
-              : 'URL'}
+            {t('chat.mcp.list.url')}
+          </div>
+          <div className="flex items-center w-full bg-accent px-3 py-1 rounded gap-2">
+            <pre className="text-sm font-mono flex-grow truncate">
+              {mcp.url}
+            </pre>
+            <CopyButton content={mcp.url} />
+          </div>
         </div>
-        <div className="flex items-center w-full bg-accent px-3 py-1 rounded gap-2">
-          <pre className="text-sm font-mono flex-grow truncate">
-            {mcp.command || mcp.url || 'N/A'}
-          </pre>
-          <CopyButton content={mcp.command || mcp.url} />
-        </div>
-      </div>
+      )}
 
       <div className="font-medium text-sm text-muted-foreground flex items-center">
         <Wrench className="h-4 w-4 mr-2" />
-        Tools
+        {t('chat.mcp.list.tools')}
       </div>
       <div className="flex flex-wrap gap-2">
         {mcp.tools &&
@@ -156,6 +151,8 @@ interface DeleteMcpButtonProps {
 }
 
 const DeleteMcpButton = ({ mcp, onDelete, disabled }: DeleteMcpButtonProps) => {
+  const { t } = useTranslation();
+
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -170,21 +167,18 @@ const DeleteMcpButton = ({ mcp, onDelete, disabled }: DeleteMcpButtonProps) => {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+          <AlertDialogTitle>{t('chat.mcp.list.removeTitle')}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will disconnect the MCP server "{mcp.name}". This action cannot
-            be undone.
+            {t('chat.mcp.list.removeDescription', { name: mcp.name })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>
-            <Translator path="common.actions.cancel" />
-          </AlertDialogCancel>
+          <AlertDialogCancel>{t('common.actions.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={() => onDelete(mcp)}
           >
-            <Translator path="common.actions.confirm" />
+            {t('common.actions.confirm')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -194,9 +188,10 @@ const DeleteMcpButton = ({ mcp, onDelete, disabled }: DeleteMcpButtonProps) => {
 
 const ReconnectMcpButton = ({ mcp }: { mcp: IMcp }) => {
   const apiClient = useContext(ChainlitContext);
-  const setMcps = useSetChainlitState('mcps');
+  const [, setMcps] = useChainlitState('mcps');
   const sessionId = useChainlitStore((state) => state.sessionId);
   const [isLoading, setIsLoading] = useState(false);
+  const { t } = useTranslation();
 
   const reconnectMcp = () => {
     setIsLoading(true);
@@ -228,66 +223,33 @@ const ReconnectMcpButton = ({ mcp }: { mcp: IMcp }) => {
       );
     };
 
-    if (mcp.clientType === 'stdio') {
-      toast.promise(
-        apiClient
-          .connectStdioMCP(sessionId, mcp.name, mcp.command!)
-          .then(async (resp: any) => {
-            const { success, mcp: updatedMcp } = resp;
-            updateMcpStatus(success, updatedMcp);
-          })
-          .catch(() => {
-            updateMcpStatus(false);
-          })
-          .finally(() => setIsLoading(false)),
-        {
-          loading: 'Reconnecting MCP...',
-          success: () => 'MCP reconnected!',
-          error: (err) => <span>{err.message}</span>
-        }
-      );
-    } else if (mcp.clientType === 'streamable-http') {
-      toast.promise(
-        (apiClient as any)
-          .connectStreamableHttpMCP(
+    const promise =
+      mcp.isUserProvided && mcp.clientType && mcp.url
+        ? apiClient.connectUserMcp(
             sessionId,
             mcp.name,
-            mcp.url!,
-            (mcp as any).headers
+            mcp.clientType,
+            mcp.url,
+            mcp.headers
           )
-          .then(async (resp: any) => {
-            const { success, mcp: updatedMcp } = resp;
-            updateMcpStatus(success, updatedMcp);
-          })
-          .catch(() => {
-            updateMcpStatus(false);
-          })
-          .finally(() => setIsLoading(false)),
-        {
-          loading: 'Reconnecting MCP...',
-          success: () => 'MCP reconnected!',
-          error: (err) => <span>{err.message}</span>
-        }
-      );
-    } else {
-      toast.promise(
-        (apiClient as any)
-          .connectSseMCP(sessionId, mcp.name, mcp.url!, (mcp as any).headers)
-          .then(async (resp: any) => {
-            const { success, mcp: updatedMcp } = resp;
-            updateMcpStatus(success, updatedMcp);
-          })
-          .catch(() => {
-            updateMcpStatus(false);
-          })
-          .finally(() => setIsLoading(false)),
-        {
-          loading: 'Reconnecting MCP...',
-          success: () => 'MCP reconnected!',
-          error: (err) => <span>{err.message}</span>
-        }
-      );
-    }
+        : apiClient.connectMcp(sessionId, mcp.name);
+
+    toast.promise(
+      promise
+        .then((resp: any) => {
+          const { success, mcp: updatedMcp } = resp;
+          updateMcpStatus(success, updatedMcp);
+        })
+        .catch(() => {
+          updateMcpStatus(false);
+        })
+        .finally(() => setIsLoading(false)),
+      {
+        loading: t('chat.mcp.messages.reconnecting'),
+        success: () => t('chat.mcp.messages.reconnected'),
+        error: (err) => <span>{err.message}</span>
+      }
+    );
   };
 
   return (
