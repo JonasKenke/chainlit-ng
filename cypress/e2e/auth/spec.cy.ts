@@ -134,4 +134,54 @@ describe('Copilot Token', { includeShadowDom: true }, () => {
 
     shouldSendMessageAndRecieveAnswer();
   });
+
+  describe('when the auth cookie is blocked', () => {
+    it('should show the blocked third-party cookie message', () => {
+      // Cypress re-adds Set-Cookie from the browser network layer after response
+      // modifiers, so return the same 200 body the real endpoint sends without
+      // the header. That is what the browser sees when it drops the cookie.
+      cy.intercept('POST', '/auth/jwt', {
+        statusCode: 200,
+        body: { success: true },
+        headers: { 'content-type': 'application/json' }
+      }).as('jwt');
+
+      getToken().then((response) => {
+        expect(response.status).to.equal(200);
+
+        mountCopilotWidget({ accessToken: response.body });
+      });
+
+      cy.wait('@jwt');
+      openCopilot();
+
+      cy.get('#chainlit-copilot-chat').should(
+        'contain',
+        'blocking third-party cookies'
+      );
+      cy.get('#chainlit-copilot-chat').should(
+        'contain',
+        'same site as this page'
+      );
+    });
+
+    it('should keep the generic error for a transient network failure', () => {
+      cy.intercept('POST', '/auth/jwt', { forceNetworkError: true }).as('jwt');
+
+      getToken().then((response) => {
+        expect(response.status).to.equal(200);
+
+        mountCopilotWidget({ accessToken: response.body });
+      });
+
+      cy.wait('@jwt');
+      openCopilot();
+
+      cy.get('#chainlit-copilot-chat .alert').should('exist');
+      cy.get('#chainlit-copilot-chat').should(
+        'not.contain',
+        'blocking third-party cookies'
+      );
+    });
+  });
 });
