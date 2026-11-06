@@ -24,6 +24,7 @@ from chainlit.mcp_oauth import (
     McpAuthorizationError,
     McpAuthorizationTimeout,
     McpOAuthOriginError,
+    McpOAuthRateLimiter,
     McpOAuthTokenStore,
     McpTooManyFlows,
     Origin,
@@ -1438,3 +1439,64 @@ class TestGuardOnTheWire:
 
         assert response.status_code == 200
         assert [str(request.url) for request in sent] == [SERVER_KEY, prm, f"{prm}/"]
+
+
+class TestRateLimiter:
+    def test_it_allows_the_limit_then_refuses_in_the_same_window(self):
+        limiter = McpOAuthRateLimiter(window_seconds=60)
+
+        for index in range(3):
+            assert limiter.allow("alice", 3, now=float(index))
+        assert not limiter.allow("alice", 3, now=3.0)
+        # Another user has their own window.
+        assert limiter.allow("bob", 3, now=3.0)
+
+    def test_starts_leave_the_window(self):
+        limiter = McpOAuthRateLimiter(window_seconds=60)
+
+        assert limiter.allow("alice", 1, now=0.0)
+        assert not limiter.allow("alice", 1, now=59.0)
+        assert limiter.allow("alice", 1, now=61.0)
+
+    def test_a_non_positive_limit_refuses_everything(self):
+        limiter = McpOAuthRateLimiter()
+
+        assert not limiter.allow("alice", 0)
+        assert not limiter.allow("alice", -1)
+
+
+class TestAuthorizationUrlValidation:
+    @pytest.mark.parametrize(
+        "authorization_url",
+        [
+            "javascript:alert(document.cookie)",
+            "data:text/html,<script>alert(1)</script>",
+            "https://alice:super-secret@auth.example.com/authorize?state=s",
+            "http://10.0.0.5/authorize?state=s",
+            "https://auth.example.com:bad/authorize?state=s",
+        ],
+    )
+    async def test_a_rejected_url_neither_registers_nor_publishes(
+        self, store, pending, failures, caplog, authorization_url
+    ):
+        flow = build_oauth_provider(
+            storage=store.scoped("alice", SERVER_KEY),
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+            on_failure=failures.append,
+        )
+
+        with caplog.at_level("WARNING", logger="chainlit.mcp_oauth"):
+            with pytest.raises(McpAuthorizationError):
+                await flow.provider.context.redirect_handler(authorization_url)
+
+        assert not flow._authorization_url_ready.is_set()
+        assert len(pending) == 0
+        assert len(failures) == 1
+        assert "super-secret" not in caplog.text
+        assert "authorize" not in caplog.text
+        assert "document.cookie" not in caplog.text

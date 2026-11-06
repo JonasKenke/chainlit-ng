@@ -251,6 +251,8 @@ class ConnectStdioMCPRequest(BaseModel):
     clientType: Literal["stdio"]
     name: str
     fullCommand: str
+    # OAuth only applies to streamable HTTP; stdio rejects this at runtime.
+    useOAuth: bool = False
 
 
 class ConnectSseMCPRequest(BaseModel):
@@ -260,6 +262,8 @@ class ConnectSseMCPRequest(BaseModel):
     url: str
     # Optional HTTP headers to forward to the MCP transport (e.g. Authorization)
     headers: Optional[Dict[str, str]] = None
+    # OAuth is not supported for SSE; the route rejects this at runtime.
+    useOAuth: bool = False
 
 
 class ConnectStreamableHttpMCPRequest(BaseModel):
@@ -269,6 +273,8 @@ class ConnectStreamableHttpMCPRequest(BaseModel):
     url: str
     # Optional HTTP headers to forward to the MCP transport (e.g. Authorization)
     headers: Dict[str, str] | None = None
+    # Opt in to the per-user OAuth flow for this connection.
+    useOAuth: bool = False
 
 
 ConnectMCPRequest = Union[

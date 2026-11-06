@@ -43,6 +43,9 @@ class McpSession:
     client: "ClientSession"
     task: asyncio.Task
     stop_event: asyncio.Event = field(default_factory=asyncio.Event)
+    # Canonical key of the server this session authenticated against, if any.
+    # DELETE /mcp uses it to forget the per-user credential.
+    oauth_server_key: Optional[str] = None
 
     async def close(self) -> None:
         """Signal the background task to shut down and wait for it."""
@@ -293,6 +296,9 @@ class WebsocketSession(BaseSession):
     unavailable_chat_profile: str | None = None
 
     mcp_sessions: dict[str, McpSession]
+    # In-flight OAuth connects, keyed by connection name. They are cancelled
+    # before a new attempt for the same name and when the session ends.
+    mcp_oauth_tasks: dict[str, asyncio.Task]
 
     def __init__(
         self,
@@ -339,6 +345,7 @@ class WebsocketSession(BaseSession):
 
         self.thread_queues: Dict[str, ThreadQueue] = {}
         self.mcp_sessions = {}
+        self.mcp_oauth_tasks = {}
 
         match = (
             re.match(
@@ -400,6 +407,29 @@ class WebsocketSession(BaseSession):
             shutil.rmtree(self.files_dir)
         ws_sessions_sid.pop(self.socket_id, None)
         ws_sessions_id.pop(self.id, None)
+
+        from chainlit.mcp_oauth import get_pending_authorizations
+
+        get_pending_authorizations().cancel_session(self.id)
+        oauth_tasks = [
+            task
+            for task in self.mcp_oauth_tasks.values()
+            if task is not asyncio.current_task()
+        ]
+        self.mcp_oauth_tasks.clear()
+        for task in oauth_tasks:
+            task.cancel()
+        if oauth_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*oauth_tasks, return_exceptions=True),
+                    timeout=_CLOSE_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "MCP OAuth tasks did not stop within %.1fs — cancelling",
+                    _CLOSE_TIMEOUT,
+                )
 
         for mcp_session in list(self.mcp_sessions.values()):
             try:

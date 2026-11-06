@@ -17,7 +17,7 @@ from typing import (
 )
 
 import tomli
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 from starlette.datastructures import Headers
 
@@ -153,6 +153,21 @@ reaction_on_message_received = false
 [features.mcp]
     # Enable Model Context Protocol (MCP) features
     enabled = false
+    # Origins of authorization servers users may be sent to for MCP OAuth.
+    # HARD GATE: empty disables OAuth entirely (400 for any useOAuth request).
+    # The MCP server's own origin is NOT an entry here: it is allowed only for the
+    # MCP transport request and exact protected-resource discovery. An authorization
+    # server on the MCP server's origin must be listed explicitly.
+    # Each entry must be a bare origin (no path/query/fragment/userinfo).
+    oauth_authorization_origins = []
+
+[features.mcp.user_oauth]
+    # Second, independent opt-in for OAuth against user-supplied MCP servers.
+    # POST /mcp accepts arbitrary URLs, so an authenticated user chooses the
+    # server and therefore the authorization server.
+    enabled = false
+    max_starts_per_user_per_minute = 5
+    max_pending_per_user = 3
 
 [features.mcp.sse]
     enabled = true
@@ -323,13 +338,29 @@ class SlackFeature(BaseModel):
     reaction_on_message_received: bool = False
 
 
+class McpUserOAuthFeature(BaseModel):
+    enabled: bool = False
+    max_starts_per_user_per_minute: int = 5
+    max_pending_per_user: int = 3
+
+
 class McpFeature(BaseModel):
     enabled: bool = False
+    oauth_authorization_origins: List[str] = Field(default_factory=list)
+    user_oauth: McpUserOAuthFeature = Field(default_factory=McpUserOAuthFeature)
     sse: McpSseFeature = Field(default_factory=McpSseFeature)
     streamable_http: McpStreamableHttpFeature = Field(
         default_factory=McpStreamableHttpFeature
     )
     stdio: McpStdioFeature = Field(default_factory=McpStdioFeature)
+
+    @field_validator("oauth_authorization_origins")
+    @classmethod
+    def _validate_oauth_origins(cls, entries: List[str]) -> List[str]:
+        from chainlit.mcp_oauth import OriginAllowlist
+
+        OriginAllowlist(entries)
+        return entries
 
 
 class FeaturesSettings(BaseModel):

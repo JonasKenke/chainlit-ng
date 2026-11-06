@@ -1,14 +1,17 @@
 import asyncio
+import contextlib
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import urlsplit
 
 import httpx
+import httpx2
 import jwt
 import pytest
-from mcp.shared.auth import OAuthToken
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import ValidationError
 from starlette.requests import Request
 
@@ -22,12 +25,26 @@ from chainlit.mcp import (
 )
 from chainlit.mcp_oauth import (
     MCP_OAUTH_DETAILS,
+    MCP_OAUTH_FAILED_DETAIL,
+    MCP_OAUTH_TIMEOUT_DETAIL,
+    MCP_OAUTH_TOO_MANY_DETAIL,
+    McpAuthorizationTimeout,
+    McpOAuthRateLimiter,
     McpOAuthTokenStore,
     PendingAuthorizations,
+    canonical_server_key,
 )
 from chainlit.server import (
     MCP_CONNECT_FAILED_DETAIL,
     MCP_OAUTH_CALLBACK_PATH,
+    MCP_OAUTH_CHAINLIT_URL_DETAIL,
+    MCP_OAUTH_HEADERS_DETAIL,
+    MCP_OAUTH_NO_ORIGINS_DETAIL,
+    MCP_OAUTH_RATE_DETAIL,
+    MCP_OAUTH_SSE_UNSUPPORTED_DETAIL,
+    MCP_OAUTH_STDIO_UNSUPPORTED_DETAIL,
+    MCP_OAUTH_URL_DETAIL,
+    MCP_OAUTH_WELL_KNOWN_DETAIL,
     app,
     get_mcp_oauth_callback_url,
     get_user_facing_url,
@@ -808,3 +825,923 @@ class TestMcpConnectErrorBody:
         assert response.json() == {"detail": MCP_CONNECT_FAILED_DETAIL}
         assert hostile not in response.text
         assert "hostile-value" in caplog.text
+
+
+OAUTH_SERVER = "https://as.example"
+OAUTH_MCP_URL = "https://mcp.example.com/mcp"
+
+
+def make_client_info(client_id: str = "client-id"):
+    return OAuthClientInformationFull(
+        client_id=client_id, client_secret="client-secret"
+    )
+
+
+async def wait_until(predicate, timeout: float = 2.0) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() >= deadline:
+            raise AssertionError("condition was not met in time")
+        await asyncio.sleep(0.01)
+
+
+class FakeAsyncClient:
+    instances: list["FakeAsyncClient"] = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.auth = kwargs.get("auth")
+        self.event_hooks = kwargs.get("event_hooks")
+        type(self).instances.append(self)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+class FakeClientSession:
+    initialize_behavior = None
+    tools = [SimpleNamespace(name="echo")]
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    async def initialize(self):
+        if type(self).initialize_behavior is not None:
+            await type(self).initialize_behavior(self)
+
+    async def list_tools(self):
+        return SimpleNamespace(tools=type(self).tools)
+
+
+class FakeOAuthFlow:
+    next_state = 0
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.provider = httpx2.Auth()
+        self.handle = None
+        self._authorization = None
+        self._fail: Exception | None = None
+
+    async def wait_for_authorization_url(self, timeout: float | None = None) -> str:
+        if self._fail is not None:
+            raise self._fail
+        state = f"fake-state-{FakeOAuthFlow.next_state}"
+        FakeOAuthFlow.next_state += 1
+        self.handle = self.kwargs["pending"].register(
+            state,
+            self.kwargs["user_identifier"],
+            canonical_server_key(self.kwargs["server_url"]),
+            session_id=self.kwargs["session_id"],
+            name=self.kwargs["name"],
+            max_per_user=self.kwargs.get("max_pending"),
+        )
+        self._authorization = self.handle
+        url = f"{OAUTH_SERVER}/authorize?state={state}"
+        if self.kwargs.get("on_redirect") is not None:
+            await self.kwargs["on_redirect"](url)
+        return url
+
+
+@pytest.fixture
+def oauth_config(test_config, monkeypatch):
+    test_config.features.mcp.enabled = True
+    test_config.features.mcp.sse.enabled = True
+    test_config.features.mcp.streamable_http.enabled = True
+    test_config.features.mcp.oauth_authorization_origins = [OAUTH_SERVER]
+    test_config.features.mcp.user_oauth.enabled = True
+    test_config.features.mcp.user_oauth.max_starts_per_user_per_minute = 5
+    test_config.features.mcp.user_oauth.max_pending_per_user = 3
+    monkeypatch.setenv("CHAINLIT_URL", "https://app.example.com")
+    return test_config
+
+
+@pytest.fixture
+def mcp_rate_limiter(monkeypatch):
+    limiter = McpOAuthRateLimiter()
+    monkeypatch.setattr("chainlit.mcp_oauth.get_rate_limiter", lambda: limiter)
+    return limiter
+
+
+@pytest.fixture
+def fake_flows(monkeypatch):
+    flows: list[FakeOAuthFlow] = []
+    monkeypatch.setattr(FakeOAuthFlow, "next_state", 0)
+
+    def build(**kwargs):
+        flow = FakeOAuthFlow(**kwargs)
+        flows.append(flow)
+        return flow
+
+    monkeypatch.setattr("chainlit.mcp_oauth.build_oauth_provider", build)
+    return flows
+
+
+@pytest.fixture
+def fake_sdk(monkeypatch):
+    clients: list[FakeAsyncClient] = []
+    FakeAsyncClient.instances = clients
+    FakeClientSession.initialize_behavior = None
+    FakeClientSession.tools = [SimpleNamespace(name="echo")]
+
+    transport_calls = []
+
+    @contextlib.asynccontextmanager
+    async def fake_streamable(url, http_client):
+        transport_calls.append((url, http_client))
+        yield (AsyncMock(), AsyncMock())
+
+    monkeypatch.setattr("httpx2.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mcp.ClientSession", FakeClientSession)
+    monkeypatch.setattr(
+        "mcp.client.streamable_http.streamable_http_client", fake_streamable
+    )
+    return SimpleNamespace(
+        clients=clients, transport=transport_calls, session_cls=FakeClientSession
+    )
+
+
+def oauth_body(ws_session, **overrides) -> dict:
+    body = {
+        "sessionId": ws_session.id,
+        "clientType": "streamable-http",
+        "name": "weather",
+        "url": OAUTH_MCP_URL,
+        "useOAuth": True,
+    }
+    body.update(overrides)
+    return body
+
+
+def resolve_pending_on_initialize(flows):
+    async def behavior(_session):
+        flow = flows[-1]
+        flow.kwargs["pending"].resolve(
+            flow.handle.state, flow.kwargs["user_identifier"], "the-code"
+        )
+
+    return behavior
+
+
+async def park_on_initialize(_session):
+    await asyncio.Event().wait()
+
+
+class TestMcpOAuthGates:
+    async def test_empty_origins_is_refused_before_any_request(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        oauth_config.features.mcp.oauth_authorization_origins = []
+        login_as(ALICE)
+
+        for url in (OAUTH_MCP_URL, f"{OAUTH_SERVER}/mcp"):
+            response = await client.post("/mcp", json=oauth_body(ws_session, url=url))
+            assert response.status_code == 400
+            assert response.json()["detail"] == MCP_OAUTH_NO_ORIGINS_DETAIL
+
+        assert fake_sdk.transport == []
+        assert fake_flows == []
+
+    async def test_the_second_opt_in_is_required(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        oauth_config.features.mcp.user_oauth.enabled = False
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 400
+        assert "features.mcp.user_oauth.enabled" in response.json()["detail"]
+        assert fake_sdk.transport == []
+
+    async def test_oauth_without_authentication_is_refused(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 401
+        assert fake_sdk.transport == []
+
+    async def test_sse_oauth_is_refused_without_calling_sse_client(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        sse_calls = []
+        monkeypatch.setattr(
+            "mcp.client.sse.sse_client", lambda *a, **k: sse_calls.append((a, k))
+        )
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json=oauth_body(ws_session, clientType="sse", url=OAUTH_MCP_URL),
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_SSE_UNSUPPORTED_DETAIL
+        assert sse_calls == []
+        assert fake_sdk.transport == []
+
+    async def test_stdio_oauth_is_refused_without_calling_stdio_client(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        stdio_calls = []
+        monkeypatch.setattr(
+            "mcp.client.stdio.stdio_client", lambda *a, **k: stdio_calls.append((a, k))
+        )
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json=oauth_body(
+                ws_session,
+                clientType="stdio",
+                fullCommand="npx -y example",
+                url=None,
+            ),
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_STDIO_UNSUPPORTED_DETAIL
+        assert stdio_calls == []
+        assert fake_sdk.transport == []
+
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            {"Authorization": "Bearer token"},
+            {"authorization": "Bearer token"},
+            {"Proxy-Authorization": "Basic token"},
+            {"Cookie": "session=1"},
+            {"X-Api-Key": "static-key"},
+            {"X-Custom": "value", "Content-Type": "application/json"},
+        ],
+    )
+    async def test_any_headers_are_refused_with_oauth(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        headers,
+    ):
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp", json=oauth_body(ws_session, headers=headers)
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_HEADERS_DETAIL
+        assert fake_sdk.transport == []
+
+    async def test_a_plain_connection_keeps_its_headers(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        login_as(ALICE)
+        headers = {"X-Api-Key": "static-key"}
+
+        response = await client.post(
+            "/mcp", json=oauth_body(ws_session, useOAuth=False, headers=headers)
+        )
+
+        assert response.status_code == 200
+        assert fake_sdk.clients[0].kwargs["headers"] == headers
+        assert fake_sdk.clients[0].kwargs.get("event_hooks") is None
+
+    async def test_chainlit_url_is_required(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        monkeypatch.delenv("CHAINLIT_URL", raising=False)
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_CHAINLIT_URL_DETAIL
+        assert fake_sdk.transport == []
+
+    async def test_plain_http_chainlit_url_is_refused(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("CHAINLIT_URL", "http://10.0.0.5:8000")
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_CHAINLIT_URL_DETAIL
+        assert fake_sdk.transport == []
+
+    async def test_a_loopback_chainlit_url_is_allowed(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("CHAINLIT_URL", "http://localhost:8000")
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 202
+        assert response.json()["status"] == "authorization_required"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://10.0.0.5/mcp",
+            "ftp://mcp.example.com/mcp",
+            "https://alice:secret@mcp.example.com/mcp",
+        ],
+    )
+    async def test_an_invalid_oauth_mcp_url_is_refused(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        url,
+    ):
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session, url=url))
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_URL_DETAIL
+        assert fake_sdk.transport == []
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/.well-known/oauth-authorization-server",
+            "/.WELL-KNOWN/openid-configuration",
+            "/%2Ewell-known/oauth-authorization-server",
+            "/nested/.Well-Known/tenant",
+        ],
+    )
+    async def test_a_well_known_mcp_path_is_refused(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        path,
+    ):
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json=oauth_body(ws_session, url=f"https://mcp.example.com{path}"),
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_WELL_KNOWN_DETAIL
+        assert fake_sdk.transport == []
+
+    async def test_the_sixth_start_in_a_minute_is_refused(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        oauth_config.features.mcp.user_oauth.max_pending_per_user = 10
+        login_as(ALICE)
+
+        for index in range(5):
+            response = await client.post(
+                "/mcp", json=oauth_body(ws_session, name=f"weather-{index}")
+            )
+            assert response.status_code == 202
+
+        refused = await client.post(
+            "/mcp", json=oauth_body(ws_session, name="weather-5")
+        )
+        assert refused.status_code == 429
+        assert refused.json()["detail"] == MCP_OAUTH_RATE_DETAIL
+
+        plain = await client.post(
+            "/mcp", json=oauth_body(ws_session, name="plain", useOAuth=False)
+        )
+        assert plain.status_code == 200
+
+    async def test_the_fourth_pending_flow_is_refused(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        oauth_config.features.mcp.user_oauth.max_starts_per_user_per_minute = 100
+        oauth_config.features.mcp.user_oauth.max_pending_per_user = 3
+        login_as(ALICE)
+
+        for index in range(3):
+            response = await client.post(
+                "/mcp", json=oauth_body(ws_session, name=f"weather-{index}")
+            )
+            assert response.status_code == 202
+
+        refused = await client.post(
+            "/mcp", json=oauth_body(ws_session, name="weather-4")
+        )
+        assert refused.status_code == 429
+        assert refused.json()["detail"] == MCP_OAUTH_TOO_MANY_DETAIL
+
+        plain = await client.post(
+            "/mcp", json=oauth_body(ws_session, name="plain", useOAuth=False)
+        )
+        assert plain.status_code == 200
+
+
+class TestMcpOAuthConnect:
+    async def test_success_returns_202_then_emits_connected(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = resolve_pending_on_initialize(
+            fake_flows
+        )
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 202
+        body = response.json()
+        assert body["status"] == "authorization_required"
+        assert body["url"].startswith(f"{OAUTH_SERVER}/authorize?")
+        assert body["mcp"]["name"] == "weather"
+        assert body["mcp"]["tools"] == []
+
+        await wait_until(lambda: "weather" in ws_session.mcp_sessions)
+        events = [call.args for call in ws_session.emit.call_args_list]
+        names = [event[0] for event in events]
+        assert names[0] == "mcp_authorization_required"
+        assert names.count("mcp_connected") == 1
+        assert "mcp_connection_failed" not in names
+        assert mcp_pending.get_for_session(ws_session.id, "weather") is None
+        assert ws_session.mcp_oauth_tasks == {}
+        assert ws_session.mcp_sessions[
+            "weather"
+        ].oauth_server_key == canonical_server_key(OAUTH_MCP_URL)
+
+    async def test_a_failure_emits_one_fixed_detail(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        async def explode(_session):
+            raise RuntimeError("hostile https://evil.example/token?secret=value")
+
+        fake_sdk.session_cls.initialize_behavior = explode
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        assert response.status_code == 202
+
+        await wait_until(
+            lambda: any(
+                call.args[0] == "mcp_connection_failed"
+                for call in ws_session.emit.call_args_list
+            )
+        )
+        events = [call.args for call in ws_session.emit.call_args_list]
+        failures = [event for event in events if event[0] == "mcp_connection_failed"]
+        assert len(failures) == 1
+        assert failures[0][1] == {
+            "name": "weather",
+            "detail": MCP_OAUTH_FAILED_DETAIL,
+        }
+        assert "hostile" not in repr(events)
+        assert mcp_pending.get_for_session(ws_session.id, "weather") is None
+        assert ws_session.mcp_sessions == {}
+        assert ws_session.mcp_oauth_tasks == {}
+
+    async def test_a_timeout_uses_the_fixed_timeout_detail(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        async def expire(_session):
+            raise McpAuthorizationTimeout("internal detail")
+
+        fake_sdk.session_cls.initialize_behavior = expire
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        assert response.status_code == 202
+
+        await wait_until(
+            lambda: any(
+                call.args[0] == "mcp_connection_failed"
+                for call in ws_session.emit.call_args_list
+            )
+        )
+        events = [call.args for call in ws_session.emit.call_args_list]
+        failure = next(event for event in events if event[0] == "mcp_connection_failed")
+        assert failure[1]["detail"] == MCP_OAUTH_TIMEOUT_DETAIL
+        assert "internal detail" not in repr(events)
+
+    async def test_cancelling_before_a_token_discards_client_info(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = park_on_initialize
+        login_as(ALICE)
+        server_key = canonical_server_key(OAUTH_MCP_URL)
+        storage = mcp_store.scoped("alice", server_key)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        assert response.status_code == 202
+        await wait_until(lambda: bool(fake_sdk.clients))
+        await storage.set_client_info(make_client_info())
+
+        task = ws_session.mcp_oauth_tasks["weather"]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert await storage.get_tokens() is None
+        assert await storage.get_client_info() is None
+        assert mcp_pending.get_for_session(ws_session.id, "weather") is None
+        assert ws_session.mcp_sessions == {}
+
+    async def test_cancelling_does_not_delete_a_concurrent_token(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = park_on_initialize
+        login_as(ALICE)
+        server_key = canonical_server_key(OAUTH_MCP_URL)
+        storage = mcp_store.scoped("alice", server_key)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        assert response.status_code == 202
+        await wait_until(lambda: bool(fake_sdk.clients))
+        await storage.set_client_info(make_client_info())
+        await storage.set_tokens(
+            OAuthToken(access_token="concurrent-at", refresh_token="concurrent-rt")
+        )
+
+        task = ws_session.mcp_oauth_tasks["weather"]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        tokens = await storage.get_tokens()
+        assert tokens is not None
+        assert tokens.access_token == "concurrent-at"
+        assert await storage.get_client_info() is not None
+
+    async def test_delete_during_sign_in_cancels_the_flow_and_forgets_the_key(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = park_on_initialize
+        login_as(ALICE)
+        server_key = canonical_server_key(OAUTH_MCP_URL)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        assert response.status_code == 202
+        state = fake_flows[0].handle.state
+        await mcp_store.scoped("alice", server_key).set_client_info(make_client_info())
+
+        deleted = await client.request(
+            "DELETE",
+            "/mcp",
+            json={"sessionId": ws_session.id, "name": "weather"},
+        )
+
+        assert deleted.status_code == 200
+        assert mcp_pending.get_for_session(ws_session.id, "weather") is None
+        assert ws_session.mcp_oauth_tasks == {}
+        assert ws_session.mcp_sessions == {}
+        assert await mcp_store.scoped("alice", server_key).get_client_info() is None
+
+        callback = await client.get(
+            MCP_OAUTH_CALLBACK_PATH, params={"code": "late", "state": state}
+        )
+        assert callback.status_code == 400
+        assert callback.json()["detail"] in MCP_OAUTH_DETAILS
+
+    async def test_delete_after_connect_uses_the_session_key(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = resolve_pending_on_initialize(
+            fake_flows
+        )
+        login_as(ALICE)
+        server_key = canonical_server_key(OAUTH_MCP_URL)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        assert response.status_code == 202
+        await wait_until(lambda: "weather" in ws_session.mcp_sessions)
+
+        storage = mcp_store.scoped("alice", server_key)
+        await storage.set_tokens(
+            OAuthToken(access_token="access-token", refresh_token="refresh-token")
+        )
+        await storage.set_client_info(make_client_info())
+
+        deleted = await client.request(
+            "DELETE",
+            "/mcp",
+            json={"sessionId": ws_session.id, "name": "weather"},
+        )
+
+        assert deleted.status_code == 200
+        assert "weather" not in ws_session.mcp_sessions
+        assert await storage.get_tokens() is None
+        assert await storage.get_client_info() is None
+
+    async def test_a_second_connect_supersedes_the_first(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = park_on_initialize
+        login_as(ALICE)
+
+        first = await client.post("/mcp", json=oauth_body(ws_session))
+        assert first.status_code == 202
+        first_task = ws_session.mcp_oauth_tasks["weather"]
+        first_state = fake_flows[0].handle.state
+
+        second = await client.post("/mcp", json=oauth_body(ws_session))
+        assert second.status_code == 202
+
+        await wait_until(lambda: first_task.done())
+        pending = mcp_pending.get_for_session(ws_session.id, "weather")
+        assert pending is not None
+        assert pending.state != first_state
+        assert len(mcp_pending) == 1
+        assert len(ws_session.mcp_oauth_tasks) == 1
+        assert ws_session.mcp_sessions == {}
+
+    async def test_session_close_cancels_the_flow(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = park_on_initialize
+        login_as(ALICE)
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        assert response.status_code == 202
+        task = ws_session.mcp_oauth_tasks["weather"]
+
+        await ws_session.delete()
+
+        assert task.done()
+        assert mcp_pending.get_for_session(ws_session.id, "weather") is None
+        assert ws_session.mcp_oauth_tasks == {}
+        assert ws_session.mcp_sessions == {}
+
+    async def test_the_guard_is_attached_only_to_the_oauth_client(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        fake_sdk.session_cls.initialize_behavior = resolve_pending_on_initialize(
+            fake_flows
+        )
+        login_as(ALICE)
+
+        oauth = await client.post("/mcp", json=oauth_body(ws_session))
+        assert oauth.status_code == 202
+        await wait_until(lambda: bool(fake_sdk.clients))
+        oauth_client = fake_sdk.clients[0]
+        assert oauth_client.auth is not None
+        assert oauth_client.event_hooks is not None
+        assert len(oauth_client.event_hooks["request"]) == 1
+        await wait_until(lambda: "weather" in ws_session.mcp_sessions)
+        fake_sdk.session_cls.initialize_behavior = None
+
+        plain = await client.post(
+            "/mcp", json=oauth_body(ws_session, name="plain", useOAuth=False)
+        )
+        assert plain.status_code == 200
+        plain_client = fake_sdk.clients[-1]
+        assert plain_client.auth is None
+        assert plain_client.kwargs.get("event_hooks") is None
+
+
+class TestMcpPlainRegression:
+    async def test_the_success_body_is_unchanged(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+    ):
+        login_as(ALICE)
+        headers = {"X-Api-Key": "static-key"}
+
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "clientType": "streamable-http",
+                "name": "weather",
+                "url": OAUTH_MCP_URL,
+                "headers": headers,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.text == (
+            '{"success":true,"mcp":{"name":"weather","tools":[{"name":"echo"}],'
+            '"clientType":"streamable-http","command":null,'
+            f'"url":"{OAUTH_MCP_URL}","headers":{{"X-Api-Key":"static-key"}}}}}}'
+        )
+
+
+def test_oauth_origins_are_validated_at_config_load():
+    from chainlit.config import McpFeature
+
+    for entry in (
+        "https://as.example/path",
+        "https://as.example?tenant=a",
+        "https://as.example#fragment",
+        "https://alice:secret@as.example",
+        "http://10.0.0.5",
+    ):
+        with pytest.raises(ValidationError):
+            McpFeature(oauth_authorization_origins=[entry])
+
+    configured = McpFeature(oauth_authorization_origins=["https://as.example"])
+    assert configured.oauth_authorization_origins == ["https://as.example"]

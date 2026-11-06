@@ -107,9 +107,11 @@ _CLIENT_INFO_TTL = 3600.0
 AUTHORIZATION_TIMEOUT = 300.0
 # How long the SDK gets to produce an authorization URL (discovery and dynamic
 # client registration included) before the caller reports the failure.
-AUTHORIZATION_URL_TIMEOUT = 30.0
+AUTHORIZATION_URL_TIMEOUT = 10.0
 # In-flight flows one user may have at once.
 MAX_PENDING_PER_USER = 3
+# Flow starts per user in one sliding window (overridden by config).
+STARTS_WINDOW_SECONDS = 60.0
 
 
 class McpOAuthError(Exception):
@@ -295,6 +297,56 @@ def _require_bare_origin(entry: str) -> str:
             "(no path, query or fragment)"
         )
     return entry
+
+
+def _safe_url_origin(url: str) -> str:
+    """Best-effort ``scheme://host:port`` for a URL that failed validation.
+
+    The result deliberately drops userinfo, path, query and fragment so a
+    rejected authorization URL cannot leak a token or a state into the log.
+    """
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    suffix = f":{port}" if port is not None else ""
+    return f"{parsed.scheme.lower()}://{host}{suffix}"
+
+
+class McpOAuthRateLimiter:
+    """Sliding-window cap on flow starts, per user identifier.
+
+    A request that is refused does not consume a slot; an admitted one is
+    recorded even if its flow later fails. That bounds how often one user can
+    make Chainlit perform discovery and dynamic client registration against a
+    listed authorization server.
+    """
+
+    def __init__(self, window_seconds: float = STARTS_WINDOW_SECONDS) -> None:
+        self._window_seconds = window_seconds
+        self._starts: dict[str, list[float]] = {}
+
+    def allow(
+        self, user_identifier: str, limit: int, now: Optional[float] = None
+    ) -> bool:
+        _validate_user(user_identifier)
+        if limit <= 0:
+            return False
+        current = time.monotonic() if now is None else now
+        cutoff = current - self._window_seconds
+        starts = [
+            start for start in self._starts.get(user_identifier, []) if start > cutoff
+        ]
+        if len(starts) >= limit:
+            self._starts[user_identifier] = starts
+            return False
+        starts.append(current)
+        self._starts[user_identifier] = starts
+        return True
 
 
 class OriginAllowlist:
@@ -815,6 +867,7 @@ class PendingAuthorizations:
         *,
         session_id: Optional[str] = None,
         name: Optional[str] = None,
+        max_per_user: Optional[int] = None,
     ) -> PendingAuthorization:
         """Record the owner of an in-flight authorization and start its timer.
 
@@ -822,6 +875,8 @@ class PendingAuthorizations:
         authorization URL, so it is passed in rather than minted here: the SDK
         compares the returned state against its own and would reject anything
         else. Await the returned handle to get the authorization code.
+        ``max_per_user`` lets the caller apply the configured cap instead of the
+        module default.
         """
         if not state:
             raise ValueError("an authorization state must be a non-empty string")
@@ -830,9 +885,10 @@ class PendingAuthorizations:
         self._sweep()
         if state in self._pending:
             raise ValueError("authorization state is already pending")
-        if self._flow_count(user_identifier) >= self._max_per_user:
+        limit = self._max_per_user if max_per_user is None else max_per_user
+        if self.flow_count(user_identifier) >= limit:
             raise McpTooManyFlows(
-                f"MCP OAuth already has {self._max_per_user} flows in flight "
+                f"MCP OAuth already has {limit} flows in flight "
                 "for this user; finish or cancel one first."
             )
 
@@ -930,7 +986,18 @@ class PendingAuthorizations:
         self._sweep()
         return len(self._pending)
 
-    def _flow_count(self, user_identifier: str) -> int:
+    def get_for_session(
+        self, session_id: str, name: str
+    ) -> Optional[PendingAuthorization]:
+        """Return the pending flow for one connection name, without consuming it."""
+        self._sweep()
+        for handle in self._pending.values():
+            if handle.session_id == session_id and handle.name == name:
+                return handle
+        return None
+
+    def flow_count(self, user_identifier: str) -> int:
+        """Return how many flows the user has in flight."""
         return sum(
             1
             for handle in self._pending.values()
@@ -1015,6 +1082,7 @@ class McpOAuthFlow:
         name: str,
         redirect_uri: str,
         client_name: str = "Chainlit",
+        max_pending: Optional[int] = None,
         on_redirect: Optional[Callable[[str], Awaitable[None]]] = None,
         on_failure: Optional[Callable[[McpOAuthError], None]] = None,
     ) -> None:
@@ -1023,6 +1091,7 @@ class McpOAuthFlow:
         self._server_key = canonical_server_key(server_url)
         self._session_id = session_id
         self._name = name
+        self._max_pending = max_pending
         self._on_redirect = on_redirect
         self._on_failure = on_failure
         self._authorization_url: Optional[str] = None
@@ -1044,6 +1113,18 @@ class McpOAuthFlow:
         )
 
     async def _redirect(self, authorization_url: str) -> None:
+        try:
+            normalize_origin(authorization_url)
+        except ValueError:
+            logger.warning(
+                "MCP OAuth authorization URL refused: %s",
+                _safe_url_origin(authorization_url),
+            )
+            exc = McpAuthorizationError(
+                "The MCP authorization URL is not a permitted origin."
+            )
+            self._report_failure(exc)
+            raise exc from None
         state = extract_state(authorization_url)
         if state is None:
             exc = McpAuthorizationError(
@@ -1065,6 +1146,7 @@ class McpOAuthFlow:
                 self._server_key,
                 session_id=self._session_id,
                 name=self._name,
+                max_per_user=self._max_pending,
             )
         except McpOAuthError as exc:
             self._report_failure(exc)
@@ -1132,6 +1214,7 @@ def build_oauth_provider(
     name: str,
     redirect_uri: str,
     client_name: str = "Chainlit",
+    max_pending: Optional[int] = None,
     on_redirect: Optional[Callable[[str], Awaitable[None]]] = None,
     on_failure: Optional[Callable[[McpOAuthError], None]] = None,
 ) -> McpOAuthFlow:
@@ -1162,6 +1245,7 @@ def build_oauth_provider(
         name=name,
         redirect_uri=redirect_uri,
         client_name=client_name,
+        max_pending=max_pending,
         on_redirect=on_redirect,
         on_failure=on_failure,
     )
@@ -1172,6 +1256,7 @@ def build_oauth_provider(
 # callback, logout and the /mcp wiring cannot drift onto different instances.
 _token_store = McpOAuthTokenStore()
 _pending_authorizations = PendingAuthorizations()
+_rate_limiter = McpOAuthRateLimiter()
 
 
 def get_token_store() -> McpOAuthTokenStore:
@@ -1180,3 +1265,7 @@ def get_token_store() -> McpOAuthTokenStore:
 
 def get_pending_authorizations() -> PendingAuthorizations:
     return _pending_authorizations
+
+
+def get_rate_limiter() -> McpOAuthRateLimiter:
+    return _rate_limiter
