@@ -89,6 +89,7 @@ from mcp.shared.auth import (
     AuthorizationCodeResult,
     OAuthClientInformationFull,
     OAuthClientMetadata,
+    OAuthMetadata,
     OAuthToken,
 )
 from pydantic import AnyUrl
@@ -481,9 +482,11 @@ def oauth_request_guard(
 class _Entry:
     tokens: Optional[OAuthToken] = None
     client_info: Optional[OAuthClientInformationFull] = None
+    oauth_metadata: Optional[OAuthMetadata] = None
     generation: int = 0
     last_used: int = 0
     client_info_at: Optional[float] = None
+    tokens_at: Optional[float] = None
 
     def __repr__(self) -> str:
         # Never let a default dataclass repr leak a token or a client secret.
@@ -561,6 +564,7 @@ class McpOAuthTokenStore:
         if entry is None or entry.tokens is None or entry.generation != generation:
             return False
         entry.tokens = None
+        entry.tokens_at = None
         entry.generation = 0
         if entry.client_info is None:
             del self._entries[(user_identifier, server_key)]
@@ -670,8 +674,40 @@ class McpOAuthTokenStore:
         entry = self._set_entry(user_identifier, server_key)
         self._generations += 1
         entry.tokens = tokens
+        entry.tokens_at = time.time()
         entry.generation = self._generations
         return entry.generation
+
+    def _read_token_expiry(
+        self, user_identifier: str, server_key: str
+    ) -> Optional[float]:
+        """The stored token's absolute expiry, or ``None`` when it has none.
+
+        ``expires_in`` is relative to the response that carried the token, so
+        the write time is the only way to know when that was.
+        """
+        entry = self._get_entry(user_identifier, server_key)
+        if entry is None or entry.tokens is None or entry.tokens_at is None:
+            return None
+        expires_in = entry.tokens.expires_in
+        if expires_in is None:
+            return None
+        return entry.tokens_at + int(expires_in)
+
+    def _read_oauth_metadata(
+        self, user_identifier: str, server_key: str
+    ) -> Optional[OAuthMetadata]:
+        entry = self._get_entry(user_identifier, server_key)
+        return entry.oauth_metadata if entry is not None else None
+
+    def _write_oauth_metadata(
+        self,
+        user_identifier: str,
+        server_key: str,
+        metadata: OAuthMetadata,
+    ) -> None:
+        entry = self._set_entry(user_identifier, server_key)
+        entry.oauth_metadata = metadata
 
     def _read_client_info(
         self, user_identifier: str, server_key: str
@@ -728,6 +764,23 @@ class ScopedTokenStorage:
             self._user_identifier, self._server_key, tokens
         )
 
+    def token_expiry_time(self) -> Optional[float]:
+        """The stored token's absolute expiry, restored from its write time."""
+        return self._store._read_token_expiry(self._user_identifier, self._server_key)
+
+    def get_oauth_metadata(self) -> Optional[OAuthMetadata]:
+        """The authorization-server metadata the stored token was issued under.
+
+        A new provider has no discovered metadata, and the SDK builds a refresh
+        request from the resource-server origin without it.
+        """
+        return self._store._read_oauth_metadata(self._user_identifier, self._server_key)
+
+    def set_oauth_metadata(self, metadata: OAuthMetadata) -> None:
+        self._store._write_oauth_metadata(
+            self._user_identifier, self._server_key, metadata
+        )
+
     async def get_client_info(self) -> Optional[OAuthClientInformationFull]:
         return self._store._read_client_info(self._user_identifier, self._server_key)
 
@@ -757,11 +810,44 @@ class ChainlitOAuthProvider(OAuthClientProvider):
         self._scoped_storage = storage
         super().__init__(storage=storage, **kwargs)
 
+    async def _handle_token_response(self, response: httpx2.Response) -> None:
+        await super()._handle_token_response(response)
+        self._remember_oauth_metadata()
+
     async def _handle_refresh_response(self, response) -> bool:
         refreshed = await super()._handle_refresh_response(response)
-        if not refreshed:
+        if refreshed:
+            self._remember_oauth_metadata()
+        else:
             self._scoped_storage.delete_failed_token()
+            # The cached metadata is only good for the token it was discovered
+            # with; a fresh authorization must rediscover the server.
+            self.context.oauth_metadata = None
         return refreshed
+
+    async def _refresh_token(self) -> httpx2.Request:
+        # A provider created after a restart has no cached metadata, and the
+        # SDK would send the refresh to the resource-server origin. Restore the
+        # authorization-server metadata that was discovered for the token.
+        if self.context.oauth_metadata is None:
+            metadata = self._scoped_storage.get_oauth_metadata()
+            if metadata is not None:
+                self.context.oauth_metadata = metadata
+        return await super()._refresh_token()
+
+    async def _initialize(self) -> None:
+        # The SDK loads the stored token without the time it was issued, so an
+        # expired token would look valid forever and never be refreshed. The
+        # store kept the write time; restore the absolute expiry before the
+        # SDK decides whether to refresh.
+        await super()._initialize()
+        expires_at = self._scoped_storage.token_expiry_time()
+        if expires_at is not None:
+            self.context.token_expiry_time = expires_at
+
+    def _remember_oauth_metadata(self) -> None:
+        if self.context.oauth_metadata is not None:
+            self._scoped_storage.set_oauth_metadata(self.context.oauth_metadata)
 
 
 class PendingAuthorization:

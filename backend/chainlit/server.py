@@ -2146,6 +2146,7 @@ async def connect_mcp(
             MCP_OAUTH_TOO_MANY_DETAIL,
             MarkedOAuthAuth,
             McpAuthorizationTimeout,
+            McpOAuthError,
             McpTooManyFlows,
             OriginAllowlist,
             build_oauth_provider,
@@ -2331,9 +2332,6 @@ async def connect_mcp(
     # whatever the new transport is.
     previous_oauth_task = session.mcp_oauth_tasks.pop(payload.name, None)
     if previous_oauth_task is not None:
-        from chainlit.mcp_oauth import get_pending_authorizations
-
-        get_pending_authorizations().cancel_name(session.id, payload.name)
         previous_oauth_task.cancel()
         try:
             await previous_oauth_task
@@ -2367,6 +2365,11 @@ async def connect_mcp(
                 {"name": payload.name, "url": authorization_url},
             )
 
+        oauth_flow_failure: dict[str, McpOAuthError] = {}
+
+        def _record_oauth_failure(exc: McpOAuthError) -> None:
+            oauth_flow_failure["error"] = exc
+
         oauth_flow = build_oauth_provider(
             storage=oauth_storage,
             pending=oauth_pending,
@@ -2376,6 +2379,7 @@ async def connect_mcp(
             name=payload.name,
             redirect_uri=get_mcp_oauth_callback_url(request),
             on_redirect=_on_oauth_redirect,
+            on_failure=_record_oauth_failure,
             max_pending=config.features.mcp.user_oauth.max_pending_per_user,
         )
         oauth_guard = oauth_request_guard(oauth_url, oauth_allowed_origins)
@@ -2383,12 +2387,30 @@ async def connect_mcp(
             url=oauth_url, name=payload.name, headers=None
         )
         oauth_stop_event = asyncio.Event()
+        oauth_connected = asyncio.Event()
+        oauth_publish_lock = asyncio.Lock()
+        oauth_result: dict[str, object] = {}
 
         def _oauth_failure_detail(exc: BaseException) -> str:
-            if isinstance(exc, McpTooManyFlows):
-                return MCP_OAUTH_TOO_MANY_DETAIL
-            if isinstance(exc, McpAuthorizationTimeout):
-                return MCP_OAUTH_TIMEOUT_DETAIL
+            # The SDK may wrap the flow's own exception, so walk the chain.
+            pending: list[BaseException] = [exc]
+            seen: set[int] = set()
+            while pending:
+                current = pending.pop()
+                if id(current) in seen:
+                    continue
+                seen.add(id(current))
+                if isinstance(current, McpTooManyFlows):
+                    return MCP_OAUTH_TOO_MANY_DETAIL
+                if isinstance(current, McpAuthorizationTimeout):
+                    return MCP_OAUTH_TIMEOUT_DETAIL
+                if current.__cause__ is not None:
+                    pending.append(current.__cause__)
+                if current.__context__ is not None:
+                    pending.append(current.__context__)
+                nested = getattr(current, "exceptions", None)
+                if isinstance(nested, tuple):
+                    pending.extend(nested)
             return MCP_OAUTH_FAILED_DETAIL
 
         async def _discard_oauth_client_info() -> None:
@@ -2437,33 +2459,35 @@ async def connect_mcp(
                         await config.code.on_mcp_connect(oauth_connection, mcp_client)
 
                     tool_list = await mcp_client.list_tools()
-                    mcp_session_obj = McpSession(
-                        name=payload.name,
-                        client=mcp_client,
-                        task=task,
-                        stop_event=oauth_stop_event,
-                        oauth_server_key=oauth_server_key,
-                    )
-                    session.mcp_sessions[payload.name] = mcp_session_obj
-                    if session.mcp_oauth_tasks.get(payload.name) is task:
-                        del session.mcp_oauth_tasks[payload.name]
+                    mcp_data = {
+                        "name": payload.name,
+                        "tools": [{"name": tool.name} for tool in tool_list.tools],
+                        "clientType": payload.clientType,
+                        "command": None,
+                        "url": oauth_url,
+                        "headers": None,
+                    }
+                    # Publishing the connection and cancelling the task from the
+                    # endpoint must not interleave. The event is set inside the
+                    # lock so a waiter that holds it never cancels a task whose
+                    # session is already attached.
+                    async with oauth_publish_lock:
+                        mcp_session_obj = McpSession(
+                            name=payload.name,
+                            client=mcp_client,
+                            task=task,
+                            stop_event=oauth_stop_event,
+                            oauth_server_key=oauth_server_key,
+                        )
+                        session.mcp_sessions[payload.name] = mcp_session_obj
+                        if session.mcp_oauth_tasks.get(payload.name) is task:
+                            del session.mcp_oauth_tasks[payload.name]
 
-                    connected = True
-                    await _emit_oauth_event(
-                        "mcp_connected",
-                        {
-                            "mcp": {
-                                "name": payload.name,
-                                "tools": [
-                                    {"name": tool.name} for tool in tool_list.tools
-                                ],
-                                "clientType": payload.clientType,
-                                "command": None,
-                                "url": oauth_url,
-                                "headers": None,
-                            }
-                        },
-                    )
+                        connected = True
+                        oauth_result["mcp"] = mcp_data
+                        oauth_connected.set()
+
+                    await _emit_oauth_event("mcp_connected", {"mcp": mcp_data})
                     await oauth_stop_event.wait()
                 finally:
                     try:
@@ -2475,10 +2499,18 @@ async def connect_mcp(
                             exc_info=True,
                         )
             except asyncio.CancelledError:
-                detail = MCP_OAUTH_FAILED_DETAIL
+                # The SDK transport can turn an auth-flow error into a task
+                # cancellation, dropping the exception. on_failure kept it.
+                reported = oauth_flow_failure.get("error")
+                detail = (
+                    _oauth_failure_detail(reported)
+                    if reported is not None
+                    else MCP_OAUTH_FAILED_DETAIL
+                )
                 raise
             except BaseException as exc:
                 detail = _oauth_failure_detail(exc)
+                oauth_result["error"] = exc
                 logger.warning(
                     "MCP OAuth connection %r failed (%s)",
                     payload.name,
@@ -2506,47 +2538,107 @@ async def connect_mcp(
                         "mcp_connection_failed",
                         {"name": payload.name, "detail": detail},
                     )
+                    oauth_result["detail"] = detail
 
         oauth_task = asyncio.create_task(
             _run_oauth_session(), name=f"mcp-oauth-{payload.name}"
         )
         session.mcp_oauth_tasks[payload.name] = oauth_task
 
+        def _oauth_success_response() -> JSONResponse:
+            return JSONResponse(content={"success": True, "mcp": oauth_result["mcp"]})
+
+        # A stored token can connect without ever calling the redirect handler,
+        # so wait for the first of: the sign-in URL, the connection, or the
+        # task ending with a failure.
+        url_waiter = asyncio.create_task(
+            oauth_flow.wait_for_authorization_url(),
+            name=f"mcp-oauth-url-{payload.name}",
+        )
+        connected_waiter = asyncio.create_task(oauth_connected.wait())
         try:
-            authorization_url = await oauth_flow.wait_for_authorization_url()
-        except Exception as exc:
-            oauth_pending.cancel_name(session.id, payload.name)
-            oauth_task.cancel()
-            try:
-                await oauth_task
-            except BaseException:
-                pass
-            detail = _oauth_failure_detail(exc)
-            if isinstance(exc, McpTooManyFlows):
-                raise HTTPException(
-                    status_code=429,
-                    detail=detail,
-                ) from None
+            await asyncio.wait(
+                {url_waiter, connected_waiter, oauth_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            if not connected_waiter.done():
+                connected_waiter.cancel()
+            await asyncio.gather(connected_waiter, return_exceptions=True)
+
+        # A produced URL means the SDK is waiting for the browser callback,
+        # even if a test or a pre-resolved callback already let it connect.
+        if (
+            url_waiter.done()
+            and not url_waiter.cancelled()
+            and url_waiter.exception() is None
+        ):
+            authorization_url = url_waiter.result()
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "authorization_required",
+                    "url": authorization_url,
+                    "mcp": {
+                        "name": payload.name,
+                        "tools": [],
+                        "clientType": payload.clientType,
+                        "command": None,
+                        "url": oauth_url,
+                        "headers": None,
+                    },
+                },
+            )
+
+        if oauth_connected.is_set():
+            if not url_waiter.done():
+                url_waiter.cancel()
+            await asyncio.gather(url_waiter, return_exceptions=True)
+            return _oauth_success_response()
+
+        error: Optional[BaseException] = None
+        if url_waiter.done() and not url_waiter.cancelled():
+            error = url_waiter.exception()
+        if error is None:
+            stored_error = oauth_result.get("error")
+            if isinstance(stored_error, BaseException):
+                error = stored_error
+
+        # No URL and no connection: fail the connect. Cancel the task, unless
+        # it published a connection while this handler was deciding.
+        async with oauth_publish_lock:
+            if oauth_connected.is_set():
+                if not url_waiter.done():
+                    url_waiter.cancel()
+                await asyncio.gather(url_waiter, return_exceptions=True)
+                return _oauth_success_response()
+            if not oauth_task.done():
+                oauth_task.cancel()
+        if not url_waiter.done():
+            url_waiter.cancel()
+        await asyncio.gather(url_waiter, return_exceptions=True)
+        try:
+            await oauth_task
+        except BaseException:
+            pass
+
+        detail = MCP_OAUTH_FAILED_DETAIL
+        for candidate in (
+            oauth_result.get("detail"),
+            _oauth_failure_detail(error) if error is not None else None,
+        ):
+            if isinstance(candidate, str) and candidate != MCP_OAUTH_FAILED_DETAIL:
+                detail = candidate
+                break
+        if detail == MCP_OAUTH_TOO_MANY_DETAIL:
             raise HTTPException(
-                status_code=400,
+                status_code=429,
                 detail=detail,
             ) from None
-
-        return JSONResponse(
-            status_code=202,
-            content={
-                "status": "authorization_required",
-                "url": authorization_url,
-                "mcp": {
-                    "name": payload.name,
-                    "tools": [],
-                    "clientType": payload.clientType,
-                    "command": None,
-                    "url": oauth_url,
-                    "headers": None,
-                },
-            },
-        )
+        raise HTTPException(
+            status_code=400,
+            detail=detail,
+        ) from None
 
     # ── Launch the MCP connection in its own background task ──
     #

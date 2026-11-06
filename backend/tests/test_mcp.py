@@ -889,28 +889,27 @@ class FakeOAuthFlow:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.provider = httpx2.Auth()
-        self.handle = None
-        self._authorization = None
-        self._fail: Exception | None = None
-
-    async def wait_for_authorization_url(self, timeout: float | None = None) -> str:
-        if self._fail is not None:
-            raise self._fail
         state = f"fake-state-{FakeOAuthFlow.next_state}"
         FakeOAuthFlow.next_state += 1
-        self.handle = self.kwargs["pending"].register(
+        # The real provider registers the flow from its redirect handler; the
+        # pending entry must exist for the whole browser sign-in.
+        self.handle = kwargs["pending"].register(
             state,
-            self.kwargs["user_identifier"],
-            canonical_server_key(self.kwargs["server_url"]),
-            session_id=self.kwargs["session_id"],
-            name=self.kwargs["name"],
-            max_per_user=self.kwargs.get("max_pending"),
+            kwargs["user_identifier"],
+            canonical_server_key(kwargs["server_url"]),
+            session_id=kwargs["session_id"],
+            name=kwargs["name"],
+            max_per_user=kwargs.get("max_pending"),
         )
         self._authorization = self.handle
-        url = f"{OAUTH_SERVER}/authorize?state={state}"
+        self.url = f"{OAUTH_SERVER}/authorize?state={state}"
+        self.url_published = asyncio.Event()
+
+    async def wait_for_authorization_url(self, timeout: float | None = None) -> str:
         if self.kwargs.get("on_redirect") is not None:
-            await self.kwargs["on_redirect"](url)
-        return url
+            await self.kwargs["on_redirect"](self.url)
+        self.url_published.set()
+        return self.url
 
 
 @pytest.fixture
@@ -986,6 +985,9 @@ def oauth_body(ws_session, **overrides) -> dict:
 def resolve_pending_on_initialize(flows):
     async def behavior(_session):
         flow = flows[-1]
+        # A browser cannot answer before the URL is shown; keep the socket
+        # event order (authorization_required, then connected).
+        await flow.url_published.wait()
         flow.kwargs["pending"].resolve(
             flow.handle.state, flow.kwargs["user_identifier"], "the-code"
         )
@@ -1395,6 +1397,98 @@ class TestMcpOAuthConnect:
         assert ws_session.mcp_sessions[
             "weather"
         ].oauth_server_key == canonical_server_key(OAUTH_MCP_URL)
+
+    async def test_a_stored_token_connects_without_a_redirect(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        async def never(_self, timeout: float | None = None) -> None:
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(
+            FakeOAuthFlow, "wait_for_authorization_url", never, raising=True
+        )
+        fake_sdk.session_cls.initialize_behavior = None
+        login_as(ALICE)
+        storage = mcp_store.scoped("alice", canonical_server_key(OAUTH_MCP_URL))
+        await storage.set_tokens(
+            OAuthToken(access_token="stored-at", refresh_token="stored-rt")
+        )
+
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["mcp"]["name"] == "weather"
+        assert body["mcp"]["tools"] == [{"name": "echo"}]
+        await wait_until(
+            lambda: any(
+                call.args[0] == "mcp_connected"
+                for call in ws_session.emit.call_args_list
+            )
+        )
+        names = [call.args[0] for call in ws_session.emit.call_args_list]
+        assert names.count("mcp_connected") == 1
+        assert "mcp_authorization_required" not in names
+        assert "mcp_connection_failed" not in names
+        assert "weather" in ws_session.mcp_sessions
+        assert ws_session.mcp_oauth_tasks == {}
+        assert not ws_session.mcp_sessions["weather"].task.done()
+        assert (await storage.get_tokens()).access_token == "stored-at"
+
+    async def test_a_failure_before_the_url_returns_the_fixed_detail(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        async def never(_self, timeout: float | None = None) -> None:
+            await asyncio.Event().wait()
+
+        async def explode(_session):
+            raise RuntimeError("internal detail")
+
+        monkeypatch.setattr(
+            FakeOAuthFlow, "wait_for_authorization_url", never, raising=True
+        )
+        fake_sdk.session_cls.initialize_behavior = explode
+        login_as(ALICE)
+
+        started = asyncio.get_running_loop().time()
+        response = await client.post("/mcp", json=oauth_body(ws_session))
+        elapsed = asyncio.get_running_loop().time() - started
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_OAUTH_FAILED_DETAIL
+        assert elapsed < 5.0
+        events = [call.args for call in ws_session.emit.call_args_list]
+        names = [event[0] for event in events]
+        failures = [event for event in events if event[0] == "mcp_connection_failed"]
+        assert names.count("mcp_connection_failed") == 1
+        assert failures[0][1] == {
+            "name": "weather",
+            "detail": MCP_OAUTH_FAILED_DETAIL,
+        }
+        assert "mcp_authorization_required" not in names
+        assert "mcp_connected" not in names
+        assert ws_session.mcp_sessions == {}
+        assert ws_session.mcp_oauth_tasks == {}
+        assert mcp_pending.get_for_session(ws_session.id, "weather") is None
 
     async def test_a_failure_emits_one_fixed_detail(
         self,

@@ -11,9 +11,11 @@ from mcp.shared._httpx_utils import RedirectAwareAuth
 from mcp.shared.auth import (
     AuthorizationCodeResult,
     OAuthClientInformationFull,
+    OAuthMetadata,
     OAuthToken,
 )
 from mcp.shared.auth_utils import resource_url_from_server_url
+from pydantic import AnyHttpUrl
 
 from chainlit import mcp_oauth
 from chainlit.mcp_oauth import (
@@ -952,6 +954,92 @@ class TestRefreshFailure:
         surviving = await store.scoped("alice", SERVER_KEY).get_tokens()
         assert surviving is not None
         assert surviving.access_token == "access-2"
+
+
+class TestStoredTokenExpiry:
+    async def test_an_unexpired_stored_token_keeps_its_expiry(self, flow):
+        await flow.provider.context.storage.set_tokens(
+            OAuthToken(access_token="stored", expires_in=60)
+        )
+
+        await flow.provider._initialize()
+
+        assert flow.provider.context.token_expiry_time is not None
+        assert flow.provider.context.is_token_valid() is True
+
+    async def test_an_expired_stored_token_is_not_valid(self, flow):
+        storage = flow.provider.context.storage
+        await storage.set_tokens(
+            OAuthToken(access_token="stored", refresh_token="rt", expires_in=-1)
+        )
+        await storage.set_client_info(make_client_info())
+
+        await flow.provider._initialize()
+
+        assert flow.provider.context.token_expiry_time is not None
+        assert flow.provider.context.is_token_valid() is False
+        assert flow.provider.context.can_refresh_token() is True
+
+    async def test_a_stored_token_without_expiry_is_valid(self, flow):
+        await flow.provider.context.storage.set_tokens(
+            OAuthToken(access_token="stored")
+        )
+
+        await flow.provider._initialize()
+
+        assert flow.provider.context.token_expiry_time is None
+        assert flow.provider.context.is_token_valid() is True
+
+
+class TestRefreshMetadata:
+    @staticmethod
+    def metadata() -> OAuthMetadata:
+        return OAuthMetadata(
+            issuer=AnyHttpUrl("https://auth.example.com"),
+            authorization_endpoint=AnyHttpUrl("https://auth.example.com/authorize"),
+            token_endpoint=AnyHttpUrl("https://auth.example.com/token"),
+            response_types_supported=["code"],
+        )
+
+    async def test_a_refresh_uses_the_stored_authorization_server(self, flow):
+        storage = flow.provider.context.storage
+        await storage.set_tokens(
+            OAuthToken(access_token="stored", refresh_token="rt", expires_in=-1)
+        )
+        await storage.set_client_info(make_client_info())
+        storage.set_oauth_metadata(self.metadata())
+
+        await flow.provider._initialize()
+        request = await flow.provider._refresh_token()
+
+        assert str(request.url) == "https://auth.example.com/token"
+        assert b"grant_type=refresh_token" in request.content
+
+    async def test_a_token_exchange_keeps_the_metadata_for_a_refresh(self, flow):
+        flow.provider.context.oauth_metadata = self.metadata()
+        response = httpx2.Response(
+            200,
+            json={
+                "access_token": "at",
+                "token_type": "Bearer",
+                "refresh_token": "rt",
+            },
+        )
+
+        await flow.provider._handle_token_response(response)
+
+        stored = flow.provider.context.storage.get_oauth_metadata()
+        assert stored is not None
+        assert str(stored.token_endpoint) == "https://auth.example.com/token"
+
+    async def test_a_failed_refresh_drops_the_cached_metadata(self, flow):
+        flow.provider.context.oauth_metadata = self.metadata()
+        await flow.provider.context.storage.set_tokens(make_tokens("stored"))
+
+        refreshed = await flow.provider._handle_refresh_response(httpx2.Response(400))
+
+        assert refreshed is False
+        assert flow.provider.context.oauth_metadata is None
 
 
 # Origin normalization and the request-role guard (S4a).
