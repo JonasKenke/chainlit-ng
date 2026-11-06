@@ -1,3 +1,4 @@
+import { getAppUrl } from '@/lib/router';
 import { useCallback, useContext, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -47,7 +48,7 @@ export function ShareDialog({
 
   const shareLink = useMemo(() => {
     const id = sharedThreadId || threadId || '';
-    return `${window.location.origin}/share/${id}`;
+    return getAppUrl(`/share/${id}`);
   }, [sharedThreadId, threadId]);
 
   const handleCopy = async () => {
