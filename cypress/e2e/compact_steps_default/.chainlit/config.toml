@@ -1,0 +1,13 @@
+[project]
+allow_origins = ["*"]
+
+[UI]
+name = "Assistant"
+
+# Show every step of the chain of thought.
+cot = "full"
+
+# cot_display is intentionally omitted to prove list mode is the default.
+
+[meta]
+generated_by = "2.12.0"

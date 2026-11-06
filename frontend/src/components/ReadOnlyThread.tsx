@@ -162,6 +162,7 @@ const ReadOnlyThread = ({ id }: Props) => {
       showFeedbackButtons: !!config?.dataPersistence,
       uiName: config?.ui?.name || '',
       cot: config?.ui?.cot || 'hidden',
+      cotDisplay: config?.ui?.cot_display || 'list',
       onElementRefClick,
       onError,
       onFeedbackUpdated,
@@ -170,6 +171,7 @@ const ReadOnlyThread = ({ id }: Props) => {
   }, [
     config?.ui?.name,
     config?.ui?.cot,
+    config?.ui?.cot_display,
     config?.features?.unsafe_allow_html,
     config?.features?.user_message_markdown,
     onElementRefClick,
