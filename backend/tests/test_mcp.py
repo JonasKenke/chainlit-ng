@@ -370,6 +370,11 @@ class TestMcpConnectionEdgeCases:
         ("https://allowed.com/api/x;%00/admin", ["https://allowed.com/api"], True),
         ("https://allowed.com/api/x;%25admin", ["https://allowed.com/api"], True),
         ("https://allowed.com/api/x;../../admin", ["https://allowed.com/api"], True),
+        # ';' in the final segment is the form urlparse hides; keep one case
+        # per class so the parse cannot silently regress.
+        ("https://allowed.com/api/x;%2e%2e", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/x;%00", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/x;..", ["https://allowed.com/api"], True),
         # A legitimate percent-encoded path segment must still pass.
         ("https://allowed.com/api/name%20x", ["https://allowed.com/api"], False),
     ],
