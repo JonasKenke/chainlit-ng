@@ -12,7 +12,7 @@ import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
 
 import socketio
 from fastapi import (
@@ -529,12 +529,19 @@ MCP_OAUTH_CALLBACK_PAGE = """<!doctype html>
 # error can quote a URL, a PRM document or a token from the OAuth flow.
 MCP_CONNECT_FAILED_DETAIL = "Could not connect to the MCP server."
 
+# P1 (CVE-2026-45018) closes the client-supplied connection path entirely.
+# KRE-61 re-enables user-provided SSE/HTTP connections behind an allowlist.
+MCP_USER_SERVERS_DISABLED_DETAIL = (
+    "User-provided MCP servers are not enabled. "
+    "Connect a server configured in features.mcp.servers instead."
+)
+
 # Fixed details for the OAuth gates. They are configuration advice, not error
 # text: no user input, URL or exception is echoed.
-MCP_OAUTH_STDIO_UNSUPPORTED_DETAIL = "OAuth is not supported for stdio MCP connections."
 MCP_OAUTH_SSE_UNSUPPORTED_DETAIL = (
     "OAuth is not supported for SSE MCP connections; use streamable HTTP."
 )
+MCP_OAUTH_URL_REQUIRED_DETAIL = "OAuth requires a user-provided MCP URL."
 MCP_OAUTH_DISABLED_DETAIL = (
     "MCP OAuth is disabled. Set features.mcp.user_oauth.enabled = true."
 )
@@ -1182,10 +1189,27 @@ async def project_settings(
             )
         )
 
+    features_dict = cfg.features.model_dump()
+    # Strip sensitive details from MCP server configs — only expose name and
+    # type to clients. Read from the *effective* (profile-overridden) cfg:
+    # a chat profile can set features.mcp.servers itself, and redacting the
+    # base config would serve that profile's command/env/headers verbatim.
+    if "mcp" in features_dict and isinstance(features_dict["mcp"].get("servers"), list):
+        features_dict["mcp"]["servers"] = [
+            {"name": s.name, "type": s.type} for s in cfg.features.mcp.servers
+        ]
+    # Clients only need to know whether user-provided servers are enabled.
+    if "mcp" in features_dict and isinstance(
+        features_dict["mcp"].get("user_servers"), dict
+    ):
+        features_dict["mcp"]["user_servers"] = {
+            "enabled": features_dict["mcp"]["user_servers"].get("enabled", False)
+        }
+
     return JSONResponse(
         content={
             "ui": cfg.ui.model_dump(),
-            "features": cfg.features.model_dump(),
+            "features": features_dict,
             "userEnv": cfg.project.user_env,
             "maskUserEnv": cfg.project.mask_user_env,
             "dataPersistence": data_layer is not None,
@@ -2088,6 +2112,7 @@ async def connect_mcp(
     current_user: UserParam,
 ):
     import asyncio
+    import shlex
 
     import httpx2
     from mcp import ClientSession
@@ -2099,15 +2124,15 @@ async def connect_mcp(
     )
     from mcp.client.streamable_http import streamable_http_client
 
+    from chainlit.config import SseMcpServer, StdioMcpServer, StreamableHttpMcpServer
     from chainlit.context import init_ws_context
     from chainlit.mcp import (
         HttpMcpConnection,
         McpConnection,
         SseMcpConnection,
         StdioMcpConnection,
-        validate_mcp_command,
     )
-    from chainlit.session import McpSession, WebsocketSession
+    from chainlit.session import McpSession, WebsocketSession, stop_mcp_task
 
     session = WebsocketSession.get_by_id(payload.sessionId)
     context = init_ws_context(session)
@@ -2164,10 +2189,10 @@ async def connect_mcp(
                 detail="Invalid authentication token",
             )
 
-        if payload.clientType == "stdio":
+        if payload.url is None:
             raise HTTPException(
                 status_code=400,
-                detail=MCP_OAUTH_STDIO_UNSUPPORTED_DETAIL,
+                detail=MCP_OAUTH_URL_REQUIRED_DETAIL,
             )
 
         if payload.clientType == "sse":
@@ -2268,8 +2293,11 @@ async def connect_mcp(
         )
         oauth_client_info = await oauth_storage.get_client_info()
 
-    # Disconnect previous session for this name (reconnection)
-    if payload.name in session.mcp_sessions:
+    # Disconnect previous session for this name (reconnection) before a new
+    # OAuth flow starts. The plain connect path evicts only after the new
+    # session is known to work (swap_mcp_session below), so a failed reconnect
+    # doesn't kill the session it was trying to replace.
+    if use_oauth and payload.name in session.mcp_sessions:
         old_mcp = session.mcp_sessions.pop(payload.name)
         if on_mcp_disconnect := config.code.on_mcp_disconnect:
             try:
@@ -2286,47 +2314,6 @@ async def connect_mcp(
             logger.debug(
                 "Error closing old MCP session %s", payload.name, exc_info=True
             )
-
-    # ── Validate config before launching the background task ──
-    mcp_connection: McpConnection
-
-    if payload.clientType == "sse":
-        if not config.features.mcp.sse.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="SSE MCP is not enabled",
-            )
-        mcp_connection = SseMcpConnection(
-            url=payload.url,
-            name=payload.name,
-            headers=getattr(payload, "headers", None),
-        )
-    elif payload.clientType == "stdio":
-        if not config.features.mcp.stdio.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="Stdio MCP is not enabled",
-            )
-        env_from_cmd, command, args = validate_mcp_command(payload.fullCommand)
-        mcp_connection = StdioMcpConnection(
-            command=command, args=args, name=payload.name
-        )
-    elif payload.clientType == "streamable-http":
-        if not config.features.mcp.streamable_http.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="HTTP MCP is not enabled",
-            )
-        mcp_connection = HttpMcpConnection(
-            url=payload.url,
-            name=payload.name,
-            headers=getattr(payload, "headers", None),
-        )
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown MCP client type: {payload.clientType}",
-        )
 
     # A new connect for this name supersedes any OAuth attempt still signing in,
     # whatever the new transport is.
@@ -2640,6 +2627,67 @@ async def connect_mcp(
             detail=detail,
         ) from None
 
+    # ── Validate config before launching the background task ──
+    mcp_connection: McpConnection
+    # Only set for stdio named servers; merged into the spawn environment in
+    # the background runner.
+    stdio_env: Optional[Dict[str, str]] = None
+
+    try:
+        if payload.url is None:
+            # Named server: look it up in developer-configured servers. No
+            # request field can describe a command, so the only stdio process
+            # that can start is one the app operator configured.
+            server_cfg = next(
+                (s for s in config.features.mcp.servers if s.name == payload.name),
+                None,
+            )
+            if server_cfg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"MCP server {payload.name!r} is not configured. "
+                        "Add it to [[features.mcp.servers]] in your .chainlit/config.toml."
+                    ),
+                )
+            if isinstance(server_cfg, StdioMcpServer):
+                parts = shlex.split(server_cfg.command, posix=True)
+                if not parts:
+                    raise ValueError(f"Empty command for MCP server {payload.name!r}")
+                mcp_connection = StdioMcpConnection(
+                    command=parts[0], args=parts[1:], name=payload.name
+                )
+                stdio_env = server_cfg.env
+            elif isinstance(server_cfg, SseMcpServer):
+                mcp_connection = SseMcpConnection(
+                    url=server_cfg.url,
+                    name=payload.name,
+                    headers=server_cfg.headers,
+                )
+            elif isinstance(server_cfg, StreamableHttpMcpServer):
+                mcp_connection = HttpMcpConnection(
+                    url=server_cfg.url,
+                    name=payload.name,
+                    headers=server_cfg.headers,
+                )
+            else:
+                raise HTTPException(
+                    status_code=500, detail="Unknown server config type"
+                )
+        else:
+            # User-provided SSE/HTTP connections are closed in this release.
+            # The allowlist + destination checks that make them safe land in
+            # KRE-61 (CVE-2026-45019); until then nothing a client sends can
+            # cause an outbound request.
+            raise HTTPException(
+                status_code=400,
+                detail=MCP_USER_SERVERS_DISABLED_DETAIL,
+            )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     # ── Launch the MCP connection in its own background task ──
     #
     # The background task owns the AsyncExitStack: it enters all context
@@ -2666,13 +2714,17 @@ async def connect_mcp(
                         )
                     )
                 elif isinstance(mcp_connection, StdioMcpConnection):
-                    env = get_default_environment()
-                    env.update(env_from_cmd)
-                    server_params = StdioServerParameters(
-                        command=command, args=args, env=env
-                    )
+                    spawn_env = get_default_environment()
+                    if stdio_env:
+                        spawn_env.update(stdio_env)
                     transport = await exit_stack.enter_async_context(
-                        stdio_client(server_params)
+                        stdio_client(
+                            StdioServerParameters(
+                                command=mcp_connection.command,
+                                args=mcp_connection.args,
+                                env=spawn_env,
+                            )
+                        )
                     )
                 elif isinstance(mcp_connection, HttpMcpConnection):
                     http_client = await exit_stack.enter_async_context(
@@ -2687,7 +2739,9 @@ async def connect_mcp(
                         )
                     )
                 else:
-                    raise ValueError(f"Unknown client type: {payload.clientType}")
+                    raise ValueError(
+                        f"Unknown client type: {mcp_connection.clientType}"
+                    )
 
                 read, write = transport[:2]
 
@@ -2735,12 +2789,10 @@ async def connect_mcp(
     await ready_event.wait()
 
     if "error" in result_holder:
-        # The task already exited and cleaned up its exit stack.
-        # Make sure the task itself is fully done.
-        try:
-            await task
-        except BaseException:
-            pass
+        # The task already exited and cleaned up its exit stack, or is stuck
+        # in initialize(); stop_mcp_task's bounded wait-then-cancel handles
+        # both.
+        await stop_mcp_task(task, stop_event, payload.name)
         error = cast(BaseException, result_holder["error"])
         logger.warning(
             "MCP connection %r failed: %s",
@@ -2761,11 +2813,7 @@ async def connect_mcp(
             await config.code.on_mcp_connect(mcp_connection, mcp_client_session)
         except Exception as e:
             # Callback failed — tear down the connection.
-            stop_event.set()
-            try:
-                await task
-            except BaseException:
-                pass
+            await stop_mcp_task(task, stop_event, payload.name)
             logger.warning(
                 "on_mcp_connect callback for %r failed", payload.name, exc_info=e
             )
@@ -2774,34 +2822,49 @@ async def connect_mcp(
                 content={"detail": MCP_CONNECT_FAILED_DETAIL},
             )
 
-    # Store the session
+    # Store the session. The pop+store is a single await-free step, so a
+    # concurrent reconnect for the same name can never observe a state where
+    # the name is briefly absent and then have its own session overwritten.
+    # Eviction happens only now that the replacement is known to work: a
+    # reconnect that fails (bad config, server down, rejecting callback)
+    # leaves the existing session intact instead of killing it up front.
     mcp_session_obj = McpSession(
         name=mcp_connection.name,
         client=mcp_client_session,
         task=task,
         stop_event=stop_event,
     )
-    session.mcp_sessions[mcp_connection.name] = mcp_session_obj
+    old_mcp = session.swap_mcp_session(mcp_connection.name, mcp_session_obj)
+    if old_mcp is not None:
+        if on_mcp_disconnect := config.code.on_mcp_disconnect:
+            try:
+                await on_mcp_disconnect(payload.name, old_mcp.client)
+            except Exception:
+                logger.debug(
+                    "Error in on_mcp_disconnect callback for %s",
+                    payload.name,
+                    exc_info=True,
+                )
+        try:
+            await old_mcp.close()
+        except Exception:
+            logger.debug(
+                "Error closing old MCP session %s", payload.name, exc_info=True
+            )
 
     tool_list = await mcp_client_session.list_tools()
 
+    # Named servers come from developer config and may embed secrets, so only
+    # name, type and tools are echoed back. User-provided connections are
+    # rejected in this release (KRE-61 re-enables them with an allowlist), so
+    # no client-supplied url/headers are ever returned.
     return JSONResponse(
         content={
             "success": True,
             "mcp": {
-                "name": payload.name,
+                "name": mcp_connection.name,
                 "tools": [{"name": t.name} for t in tool_list.tools],
-                "clientType": payload.clientType,
-                "command": payload.fullCommand
-                if payload.clientType == "stdio"
-                else None,
-                "url": getattr(payload, "url", None)
-                if payload.clientType in ["sse", "streamable-http"]
-                else None,
-                # Include optional headers for SSE and streamable-http connections
-                "headers": getattr(payload, "headers", None)
-                if payload.clientType in ["sse", "streamable-http"]
-                else None,
+                "type": mcp_connection.clientType,
             },
         }
     )

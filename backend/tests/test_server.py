@@ -889,6 +889,110 @@ def test_project_settings_with_chat_profile_config_overrides(
     assert config_data["features"]["mcp"]["enabled"] == test_config.features.mcp.enabled
 
 
+def test_project_settings_redacts_mcp_server_secrets(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+):
+    from chainlit.config import (
+        McpFeature,
+        SseMcpServer,
+        StdioMcpServer,
+        StreamableHttpMcpServer,
+    )
+
+    test_config.features.mcp = McpFeature(
+        enabled=True,
+        servers=[
+            StdioMcpServer(
+                name="local",
+                type="stdio",
+                command="npx -y secret-tool",
+                env={"GITHUB_TOKEN": "env-secret"},
+            ),
+            SseMcpServer(
+                name="sse",
+                type="sse",
+                url="https://mcp.example.com/sse",
+                headers={"Authorization": "Bearer header-secret"},
+            ),
+            StreamableHttpMcpServer(
+                name="http",
+                type="streamable-http",
+                url="https://mcp.example.com/mcp?token=query-secret",
+                headers={"X-Api-Key": "header-secret-2"},
+            ),
+        ],
+    )
+
+    response = test_client.get("/project/settings")
+
+    assert response.status_code == 200
+    mcp = response.json()["features"]["mcp"]
+    assert mcp["servers"] == [
+        {"name": "local", "type": "stdio"},
+        {"name": "sse", "type": "sse"},
+        {"name": "http", "type": "streamable-http"},
+    ]
+    assert mcp["user_servers"] == {"enabled": False}
+    for secret in (
+        "secret-tool",
+        "env-secret",
+        "header-secret",
+        "query-secret",
+        "GITHUB_TOKEN",
+        "Authorization",
+        "X-Api-Key",
+    ):
+        assert secret not in response.text
+
+
+def test_project_settings_redacts_chat_profile_overridden_mcp_servers(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from chainlit.config import (
+        ChainlitConfigOverrides,
+        FeaturesSettings,
+        McpFeature,
+        StdioMcpServer,
+    )
+    from chainlit.types import ChatProfile
+
+    async def mock_get_chat_profiles(user, language):
+        return [
+            ChatProfile(
+                name="vendored",
+                markdown_description="Profile with its own MCP servers",
+                config_overrides=ChainlitConfigOverrides(
+                    features=FeaturesSettings(
+                        mcp=McpFeature(
+                            enabled=True,
+                            servers=[
+                                StdioMcpServer(
+                                    name="profile-server",
+                                    type="stdio",
+                                    command="profile-secret-command",
+                                    env={"PROFILE_TOKEN": "profile-env-secret"},
+                                )
+                            ],
+                        )
+                    )
+                ),
+            )
+        ]
+
+    test_config.code.set_chat_profiles = mock_get_chat_profiles
+
+    response = test_client.get("/project/settings", params={"chat_profile": "vendored"})
+
+    assert response.status_code == 200
+    mcp = response.json()["features"]["mcp"]
+    assert mcp["servers"] == [{"name": "profile-server", "type": "stdio"}]
+    for secret in ("profile-secret-command", "profile-env-secret", "PROFILE_TOKEN"):
+        assert secret not in response.text
+
+
 def test_project_settings_config_overrides_serialization(
     test_client: TestClient,
     test_config: ChainlitConfig,

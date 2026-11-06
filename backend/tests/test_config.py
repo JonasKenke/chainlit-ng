@@ -2,9 +2,18 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from chainlit import config as chainlit_config
-from chainlit.config import DEFAULT_CONFIG_STR, ChainlitConfig, UISettings
+from chainlit.config import (
+    DEFAULT_CONFIG_STR,
+    ChainlitConfig,
+    McpFeature,
+    SseMcpServer,
+    StdioMcpServer,
+    UISettings,
+    _check_legacy_mcp_config,
+)
 
 
 class TestLoadSettingsMetaGuard:
@@ -163,3 +172,88 @@ class TestCompactStepsTranslations:
             ]
             assert "{{count}}" in status["usedSteps"], file.name
             assert "{{count}}" in status["usedTools"], file.name
+
+
+class TestMcpConfig:
+    def test_template_uses_servers_and_user_servers(self):
+        import tomli
+
+        mcp = tomli.loads(DEFAULT_CONFIG_STR)["features"]["mcp"]
+        assert "servers" not in mcp or isinstance(mcp["servers"], list)
+        assert mcp["user_servers"] == {"enabled": False}
+        for legacy in ("sse", "stdio", "streamable-http"):
+            assert legacy not in mcp
+        assert "[[features.mcp.servers]]" in DEFAULT_CONFIG_STR
+
+    def test_duplicate_server_names_are_rejected(self):
+        with pytest.raises(ValidationError, match="Duplicate MCP server name"):
+            McpFeature(
+                servers=[
+                    StdioMcpServer(name="github", type="stdio", command="npx"),
+                    StdioMcpServer(name="github", type="stdio", command="npx"),
+                ]
+            )
+
+    @pytest.mark.parametrize("second", ["  github  ", "GITHUB"])
+    def test_case_and_whitespace_collisions_are_rejected(self, second):
+        with pytest.raises(ValidationError, match="Duplicate MCP server name"):
+            McpFeature(
+                servers=[
+                    StdioMcpServer(name="github", type="stdio", command="npx"),
+                    SseMcpServer(name=second, type="sse", url="https://x.example"),
+                ]
+            )
+
+    @pytest.mark.parametrize("name", ["", "   "])
+    def test_empty_server_names_are_rejected(self, name):
+        with pytest.raises(ValidationError, match="must not be empty"):
+            McpFeature(servers=[StdioMcpServer(name=name, type="stdio", command="x")])
+
+    def test_legacy_keys_abort_when_mcp_is_enabled(self):
+        with pytest.raises(ValueError, match="legacy format"):
+            _check_legacy_mcp_config(
+                {"mcp": {"enabled": True, "stdio": {"allowed_executables": ["npx"]}}}
+            )
+
+    def test_legacy_keys_only_warn_when_mcp_is_off(self, caplog):
+        _check_legacy_mcp_config({"mcp": {"enabled": False, "sse": {"enabled": True}}})
+        assert "Ignoring pre-2.12.0 MCP config sections" in caplog.text
+
+    def test_load_settings_rejects_legacy_keys_when_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        cfg_file = tmp_path / "config.toml"
+        cfg_file.write_text(
+            _template_with_mcp(enabled=True)
+            + "\n[features.mcp.stdio]\nenabled = true\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(chainlit_config, "config_file", str(cfg_file))
+        monkeypatch.setattr(chainlit_config, "config_dir", str(tmp_path))
+
+        with pytest.raises(ValueError, match="legacy format"):
+            chainlit_config.load_settings()
+
+    def test_load_settings_accepts_legacy_keys_when_disabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        cfg_file = tmp_path / "config.toml"
+        cfg_file.write_text(
+            _template_with_mcp(enabled=False)
+            + "\n[features.mcp.stdio]\nenabled = true\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(chainlit_config, "config_file", str(cfg_file))
+        monkeypatch.setattr(chainlit_config, "config_dir", str(tmp_path))
+
+        settings = chainlit_config.load_settings()
+
+        assert settings["features"].mcp.servers == []
+
+
+def _template_with_mcp(enabled: bool) -> str:
+    return DEFAULT_CONFIG_STR.replace(
+        "    enabled = false\n    # Origins of authorization servers",
+        f"    enabled = {'true' if enabled else 'false'}\n    # Origins of authorization servers",
+        1,
+    )
