@@ -1,6 +1,6 @@
 import os
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from chainlit.config import config
 from chainlit.data import get_data_layer
@@ -90,11 +90,32 @@ async def get_current_user(token: str = Depends(reuseable_oauth)):
     return await authenticate_user(token)
 
 
+async def resolve_current_user_optional(request: Request):
+    """Return the user the request is authenticated as, or ``None``.
+
+    Logout uses this instead of ``get_current_user``: a required dependency
+    answers 401 for an absent, expired or invalid token before the cookie is
+    cleared, which would leave both the cookie and the user's MCP credentials
+    in place. Every failure is reported as ``None``.
+    """
+    if not require_login():
+        return None
+
+    try:
+        token = await reuseable_oauth(request)
+        if not token:
+            return None
+        return decode_jwt(token)
+    except Exception:
+        return None
+
+
 __all__ = [
     "clear_auth_cookie",
     "create_jwt",
     "get_configuration",
     "get_current_user",
     "get_token_from_cookies",
+    "resolve_current_user_optional",
     "set_auth_cookie",
 ]

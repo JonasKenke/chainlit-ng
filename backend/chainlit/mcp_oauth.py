@@ -2,9 +2,9 @@
 
 This module holds the in-memory token store, the pending-authorization map that
 correlates an OAuth redirect back to the user who started it, and the factory
-that adapts the MCP SDK's ``OAuthClientProvider`` to both. The OAuth flow wiring
-(callback route, ``/mcp`` integration) lands on top of it; nothing here is
-reachable from the rest of Chainlit yet.
+that adapts the MCP SDK's ``OAuthClientProvider`` to both. The callback route
+and logout use the process-wide instances below; the ``/mcp`` wiring will use
+the same ones.
 
 Tokens and dynamic-client-registration data live in one process-wide
 ``McpOAuthTokenStore`` keyed by ``(user identifier, canonical server key)``.
@@ -45,23 +45,56 @@ and can only be completed or abandoned by the user it was registered for. One
 timer task per entry wakes a parked waiter at the deadline; every terminal
 outcome removes the entry, cancels the timer and settles the waiter exactly
 once. A user may have at most ``MAX_PENDING_PER_USER`` flows in flight.
+
+The OAuth request boundary
+--------------------------
+``oauth_request_guard`` is a request-role allowlist for the OAuth flow, not a
+network sandbox. It bounds the requests that flow makes on behalf of a
+user-supplied MCP server: the marked MCP transport request may reach the server
+origin at any path, and every other request of the flow (protected-resource
+metadata, authorization-server metadata, dynamic client registration, token
+exchange and refresh) may reach only an operator-listed authorization-server
+origin, or the server origin for one of the two exact protected-resource
+metadata URLs on ``GET``. The server origin is therefore not an
+authorization-server entry: an authorization server that lives on the MCP
+server's origin must be listed explicitly.
+
+It is not a defence against plain-path SSRF (the non-OAuth MCP transport keeps
+its pre-existing surface), DNS rebinding of a listed origin (origins are matched
+by name, not by resolved address), or a server that publishes its protected
+resource metadata at a custom ``resource_metadata`` URL on its own origin (the
+flow refuses that URL and does not fall back).
 """
 
 import asyncio
 import ipaddress
+import logging
 import time
 from dataclasses import dataclass
-from typing import Awaitable, Callable, NamedTuple, Optional
+from typing import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    NamedTuple,
+    Optional,
+)
 from urllib.parse import parse_qs, urlsplit
 
-from mcp.client.auth import OAuthClientProvider, TokenStorage
+import httpx2
+from mcp.client.auth import OAuthClientProvider
+from mcp.client.auth.utils import build_protected_resource_metadata_discovery_urls
 from mcp.shared.auth import (
     AuthorizationCodeResult,
     OAuthClientInformationFull,
     OAuthClientMetadata,
+    OAuthMetadata,
     OAuthToken,
 )
 from pydantic import AnyUrl
+
+logger = logging.getLogger(__name__)
 
 # Per-user entry cap. Enforced when a new flow starts (and on a new-entry write
 # as a backstop), evicting that user's least recently used entry.
@@ -75,9 +108,11 @@ _CLIENT_INFO_TTL = 3600.0
 AUTHORIZATION_TIMEOUT = 300.0
 # How long the SDK gets to produce an authorization URL (discovery and dynamic
 # client registration included) before the caller reports the failure.
-AUTHORIZATION_URL_TIMEOUT = 30.0
+AUTHORIZATION_URL_TIMEOUT = 10.0
 # In-flight flows one user may have at once.
 MAX_PENDING_PER_USER = 3
+# Flow starts per user in one sliding window (overridden by config).
+STARTS_WINDOW_SECONDS = 60.0
 
 
 class McpOAuthError(Exception):
@@ -94,6 +129,33 @@ class McpAuthorizationTimeout(McpAuthorizationError):
 
 class McpTooManyFlows(McpOAuthError):
     """A user already has the maximum number of flows in flight."""
+
+
+class McpOAuthOriginError(McpOAuthError):
+    """A request of the OAuth flow was aimed outside the permitted origin."""
+
+
+# Client-visible failure details: the whole set a browser or a socket payload
+# may ever see. Exception text can carry a state, a URL or a token, and a state
+# mismatch names both states, so every failure maps to one of these strings.
+MCP_OAUTH_UNKNOWN_STATE_DETAIL = (
+    "This MCP authorization link is unknown or has expired."
+)
+MCP_OAUTH_OTHER_USER_DETAIL = "This MCP authorization belongs to a different user."
+MCP_OAUTH_FAILED_DETAIL = "The MCP authorization failed."
+MCP_OAUTH_TIMEOUT_DETAIL = "The MCP authorization was not completed in time."
+MCP_OAUTH_TOO_MANY_DETAIL = (
+    "Too many MCP authorizations are in progress; finish one first."
+)
+MCP_OAUTH_DETAILS = frozenset(
+    {
+        MCP_OAUTH_UNKNOWN_STATE_DETAIL,
+        MCP_OAUTH_OTHER_USER_DETAIL,
+        MCP_OAUTH_FAILED_DETAIL,
+        MCP_OAUTH_TIMEOUT_DETAIL,
+        MCP_OAUTH_TOO_MANY_DETAIL,
+    }
+)
 
 
 class Origin(NamedTuple):
@@ -192,13 +254,239 @@ def extract_state(authorization_url: str) -> Optional[str]:
     return values[0] if values else None
 
 
+# The request extension ``MarkedOAuthAuth`` writes and the guard reads. Its value
+# comes from the object identity of the request the SDK was handed, so a request
+# built by the SDK cannot carry the ``transport`` role.
+OAUTH_ROLE_EXTENSION = "chainlit.mcp_oauth.role"
+TRANSPORT_ROLE = "transport"
+OAUTH_ROLE = "oauth"
+
+
+def _render_origin(origin: Origin) -> str:
+    """``scheme://host:port``, the only form of a rejected origin that is logged."""
+    return f"{origin.scheme}://{_format_origin(origin)}"
+
+
+def _canonical_url(url: str) -> str:
+    """The normalized origin plus the path as parsed, query and fragment removed."""
+    origin = normalize_origin(url)
+    path = urlsplit(url).path or "/"
+    return f"{_render_origin(origin)}{path}"
+
+
+def prm_urls(server_url: str) -> frozenset[str]:
+    """The exact protected-resource metadata URLs allowed on the server origin.
+
+    These are the SDK's own discovery URLs for ``server_url``
+    (``build_protected_resource_metadata_discovery_urls`` without a
+    ``resource_metadata`` hint), each with a single trailing-slash variant for
+    the SDK's same-origin redirect following. Every other path on the server
+    origin is refused for a request of the OAuth flow.
+    """
+    urls = build_protected_resource_metadata_discovery_urls(
+        None, _canonical_url(server_url)
+    )
+    return frozenset(url for base in urls for url in (base, f"{base}/"))
+
+
+def _require_bare_origin(entry: str) -> str:
+    """Reject an allowlist entry that is not a bare origin. Never echoes it."""
+    parsed = urlsplit(entry)
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError(
+            "an MCP OAuth authorization origin must be a bare origin "
+            "(no path, query or fragment)"
+        )
+    return entry
+
+
+def _safe_url_origin(url: str) -> str:
+    """Best-effort ``scheme://host:port`` for a URL that failed validation.
+
+    The result deliberately drops userinfo, path, query and fragment so a
+    rejected authorization URL cannot leak a token or a state into the log.
+    """
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    suffix = f":{port}" if port is not None else ""
+    return f"{parsed.scheme.lower()}://{host}{suffix}"
+
+
+class McpOAuthRateLimiter:
+    """Sliding-window cap on flow starts, per user identifier.
+
+    A request that is refused does not consume a slot; an admitted one is
+    recorded even if its flow later fails. That bounds how often one user can
+    make Chainlit perform discovery and dynamic client registration against a
+    listed authorization server.
+    """
+
+    def __init__(self, window_seconds: float = STARTS_WINDOW_SECONDS) -> None:
+        self._window_seconds = window_seconds
+        self._starts: dict[str, list[float]] = {}
+
+    def allow(
+        self, user_identifier: str, limit: int, now: Optional[float] = None
+    ) -> bool:
+        _validate_user(user_identifier)
+        if limit <= 0:
+            return False
+        current = time.monotonic() if now is None else now
+        cutoff = current - self._window_seconds
+        starts = [
+            start for start in self._starts.get(user_identifier, []) if start > cutoff
+        ]
+        if len(starts) >= limit:
+            self._starts[user_identifier] = starts
+            return False
+        starts.append(current)
+        self._starts[user_identifier] = starts
+        return True
+
+
+class OriginAllowlist:
+    """The authorization-server origins an operator permits, compared exactly.
+
+    Entries are bare origins of ``http(s)`` URLs; ``normalize_origin`` decides
+    what counts as one. An entry carrying a path, query, fragment or userinfo is
+    rejected when the allowlist is built rather than silently reduced to its
+    origin, so a configuration mistake cannot widen the intent.
+    """
+
+    def __init__(self, entries: Iterable[str] = ()) -> None:
+        self._origins = frozenset(
+            normalize_origin(_require_bare_origin(entry)) for entry in entries
+        )
+
+    def __contains__(self, origin: object) -> bool:
+        return origin in self._origins
+
+    def __iter__(self) -> Iterator[Origin]:
+        return iter(self._origins)
+
+    def __len__(self) -> int:
+        return len(self._origins)
+
+    def __bool__(self) -> bool:
+        return bool(self._origins)
+
+    def __repr__(self) -> str:
+        rendered = ", ".join(sorted(_render_origin(origin) for origin in self))
+        return f"OriginAllowlist([{rendered}])"
+
+
+class MarkedOAuthAuth(httpx2.Auth):
+    """Write the request's role into the flow's requests for the guard to read.
+
+    The guard has to tell the MCP transport request (which may reach the server
+    origin at any path) from the requests the OAuth flow makes (which may reach
+    only a listed authorization server or an exact discovery URL). The SDK
+    yields the original transport request object itself and constructs a new
+    object for every OAuth request, so object identity is a marker the flow
+    cannot forge: the request passed into ``async_auth_flow`` is marked
+    ``transport`` and every other object the wrapped provider yields is marked
+    ``oauth``.
+    """
+
+    # The provider's value: the SDK reads PRM, registration and token bodies.
+    requires_response_body = True
+
+    def __init__(self, provider: httpx2.Auth) -> None:
+        self._provider = provider
+
+    async def async_auth_flow(
+        self, request: httpx2.Request
+    ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+        request.extensions[OAUTH_ROLE_EXTENSION] = TRANSPORT_ROLE
+        flow = self._provider.async_auth_flow(request)
+        try:
+            outgoing = await flow.__anext__()
+            while True:
+                if outgoing is not request:
+                    outgoing.extensions[OAUTH_ROLE_EXTENSION] = OAUTH_ROLE
+                response = yield outgoing
+                outgoing = await flow.asend(response)
+        except StopAsyncIteration:
+            return
+        finally:
+            await flow.aclose()
+
+
+def oauth_request_guard(
+    server_url: str, allowed_origins: OriginAllowlist
+) -> Callable[[httpx2.Request], Awaitable[None]]:
+    """Build an ``httpx2.AsyncClient`` request hook that enforces the boundary.
+
+    The hook fails closed: only a ``transport``-marked request on the server
+    origin, an ``oauth``-marked request on a listed authorization-server
+    origin, or an ``oauth``-marked ``GET`` without a query on one of
+    ``prm_urls`` passes. Anything else raises ``McpOAuthOriginError`` before the
+    request is sent. Rejections are logged with the normalized origin only,
+    never the path or query.
+
+    This is a request-role allowlist for the OAuth flow, not a network sandbox:
+    it does not close SSRF through the plain (non-OAuth) MCP transport, cannot
+    see through DNS rebinding of a listed origin, and refuses a server that
+    publishes its protected resource metadata at a custom ``resource_metadata``
+    URL on its own origin.
+
+    A hook is awaited by ``httpx2.AsyncClient``; a synchronous client would call
+    it without awaiting, so it must only be attached to an async client.
+    """
+    server_origin = normalize_origin(server_url)
+    discovery_urls = prm_urls(server_url)
+
+    async def guard(request: httpx2.Request) -> None:
+        try:
+            origin = normalize_origin(str(request.url))
+        except ValueError as exc:
+            logger.warning("MCP OAuth request refused: %s", exc)
+            raise McpOAuthOriginError(
+                "MCP OAuth request refused: the URL is not a usable origin."
+            ) from exc
+
+        role = request.extensions.get(OAUTH_ROLE_EXTENSION)
+        if role == TRANSPORT_ROLE:
+            if origin == server_origin:
+                return
+            reason = "a transport request left the server origin"
+        elif role == OAUTH_ROLE:
+            if origin in allowed_origins:
+                return
+            if (
+                origin == server_origin
+                and request.method == "GET"
+                and not request.url.query
+                and _canonical_url(str(request.url)) in discovery_urls
+            ):
+                return
+            reason = "an OAuth request left the permitted origins"
+        else:
+            reason = "a request carried no OAuth role marker"
+
+        logger.warning(
+            "MCP OAuth request refused (%s): %s", reason, _render_origin(origin)
+        )
+        raise McpOAuthOriginError(f"MCP OAuth request refused: {reason}.")
+
+    return guard
+
+
 @dataclass(repr=False)
 class _Entry:
     tokens: Optional[OAuthToken] = None
     client_info: Optional[OAuthClientInformationFull] = None
+    oauth_metadata: Optional[OAuthMetadata] = None
     generation: int = 0
     last_used: int = 0
     client_info_at: Optional[float] = None
+    tokens_at: Optional[float] = None
 
     def __repr__(self) -> str:
         # Never let a default dataclass repr leak a token or a client secret.
@@ -276,6 +564,7 @@ class McpOAuthTokenStore:
         if entry is None or entry.tokens is None or entry.generation != generation:
             return False
         entry.tokens = None
+        entry.tokens_at = None
         entry.generation = 0
         if entry.client_info is None:
             del self._entries[(user_identifier, server_key)]
@@ -385,8 +674,40 @@ class McpOAuthTokenStore:
         entry = self._set_entry(user_identifier, server_key)
         self._generations += 1
         entry.tokens = tokens
+        entry.tokens_at = time.time()
         entry.generation = self._generations
         return entry.generation
+
+    def _read_token_expiry(
+        self, user_identifier: str, server_key: str
+    ) -> Optional[float]:
+        """The stored token's absolute expiry, or ``None`` when it has none.
+
+        ``expires_in`` is relative to the response that carried the token, so
+        the write time is the only way to know when that was.
+        """
+        entry = self._get_entry(user_identifier, server_key)
+        if entry is None or entry.tokens is None or entry.tokens_at is None:
+            return None
+        expires_in = entry.tokens.expires_in
+        if expires_in is None:
+            return None
+        return entry.tokens_at + int(expires_in)
+
+    def _read_oauth_metadata(
+        self, user_identifier: str, server_key: str
+    ) -> Optional[OAuthMetadata]:
+        entry = self._get_entry(user_identifier, server_key)
+        return entry.oauth_metadata if entry is not None else None
+
+    def _write_oauth_metadata(
+        self,
+        user_identifier: str,
+        server_key: str,
+        metadata: OAuthMetadata,
+    ) -> None:
+        entry = self._set_entry(user_identifier, server_key)
+        entry.oauth_metadata = metadata
 
     def _read_client_info(
         self, user_identifier: str, server_key: str
@@ -443,6 +764,23 @@ class ScopedTokenStorage:
             self._user_identifier, self._server_key, tokens
         )
 
+    def token_expiry_time(self) -> Optional[float]:
+        """The stored token's absolute expiry, restored from its write time."""
+        return self._store._read_token_expiry(self._user_identifier, self._server_key)
+
+    def get_oauth_metadata(self) -> Optional[OAuthMetadata]:
+        """The authorization-server metadata the stored token was issued under.
+
+        A new provider has no discovered metadata, and the SDK builds a refresh
+        request from the resource-server origin without it.
+        """
+        return self._store._read_oauth_metadata(self._user_identifier, self._server_key)
+
+    def set_oauth_metadata(self, metadata: OAuthMetadata) -> None:
+        self._store._write_oauth_metadata(
+            self._user_identifier, self._server_key, metadata
+        )
+
     async def get_client_info(self) -> Optional[OAuthClientInformationFull]:
         return self._store._read_client_info(self._user_identifier, self._server_key)
 
@@ -456,6 +794,60 @@ class ScopedTokenStorage:
         return self._store.delete_if_unchanged(
             self._user_identifier, self._server_key, self._generation
         )
+
+
+class ChainlitOAuthProvider(OAuthClientProvider):
+    """The SDK provider, plus cleanup of the token whose refresh just failed.
+
+    ``OAuthClientProvider._handle_refresh_response`` clears only the provider's
+    in-memory token and never calls ``storage``, so a rejected refresh token
+    would stay in the store and every later connect would retry it. The
+    override drops the stored token, but only if it is still the one this
+    provider read: a token written by a concurrent successful refresh survives.
+    """
+
+    def __init__(self, *, storage: ScopedTokenStorage, **kwargs) -> None:
+        self._scoped_storage = storage
+        super().__init__(storage=storage, **kwargs)
+
+    async def _handle_token_response(self, response: httpx2.Response) -> None:
+        await super()._handle_token_response(response)
+        self._remember_oauth_metadata()
+
+    async def _handle_refresh_response(self, response) -> bool:
+        refreshed = await super()._handle_refresh_response(response)
+        if refreshed:
+            self._remember_oauth_metadata()
+        else:
+            self._scoped_storage.delete_failed_token()
+            # The cached metadata is only good for the token it was discovered
+            # with; a fresh authorization must rediscover the server.
+            self.context.oauth_metadata = None
+        return refreshed
+
+    async def _refresh_token(self) -> httpx2.Request:
+        # A provider created after a restart has no cached metadata, and the
+        # SDK would send the refresh to the resource-server origin. Restore the
+        # authorization-server metadata that was discovered for the token.
+        if self.context.oauth_metadata is None:
+            metadata = self._scoped_storage.get_oauth_metadata()
+            if metadata is not None:
+                self.context.oauth_metadata = metadata
+        return await super()._refresh_token()
+
+    async def _initialize(self) -> None:
+        # The SDK loads the stored token without the time it was issued, so an
+        # expired token would look valid forever and never be refreshed. The
+        # store kept the write time; restore the absolute expiry before the
+        # SDK decides whether to refresh.
+        await super()._initialize()
+        expires_at = self._scoped_storage.token_expiry_time()
+        if expires_at is not None:
+            self.context.token_expiry_time = expires_at
+
+    def _remember_oauth_metadata(self) -> None:
+        if self.context.oauth_metadata is not None:
+            self._scoped_storage.set_oauth_metadata(self.context.oauth_metadata)
 
 
 class PendingAuthorization:
@@ -561,6 +953,7 @@ class PendingAuthorizations:
         *,
         session_id: Optional[str] = None,
         name: Optional[str] = None,
+        max_per_user: Optional[int] = None,
     ) -> PendingAuthorization:
         """Record the owner of an in-flight authorization and start its timer.
 
@@ -568,6 +961,8 @@ class PendingAuthorizations:
         authorization URL, so it is passed in rather than minted here: the SDK
         compares the returned state against its own and would reject anything
         else. Await the returned handle to get the authorization code.
+        ``max_per_user`` lets the caller apply the configured cap instead of the
+        module default.
         """
         if not state:
             raise ValueError("an authorization state must be a non-empty string")
@@ -576,9 +971,10 @@ class PendingAuthorizations:
         self._sweep()
         if state in self._pending:
             raise ValueError("authorization state is already pending")
-        if self._flow_count(user_identifier) >= self._max_per_user:
+        limit = self._max_per_user if max_per_user is None else max_per_user
+        if self.flow_count(user_identifier) >= limit:
             raise McpTooManyFlows(
-                f"MCP OAuth already has {self._max_per_user} flows in flight "
+                f"MCP OAuth already has {limit} flows in flight "
                 "for this user; finish or cancel one first."
             )
 
@@ -676,7 +1072,18 @@ class PendingAuthorizations:
         self._sweep()
         return len(self._pending)
 
-    def _flow_count(self, user_identifier: str) -> int:
+    def get_for_session(
+        self, session_id: str, name: str
+    ) -> Optional[PendingAuthorization]:
+        """Return the pending flow for one connection name, without consuming it."""
+        self._sweep()
+        for handle in self._pending.values():
+            if handle.session_id == session_id and handle.name == name:
+                return handle
+        return None
+
+    def flow_count(self, user_identifier: str) -> int:
+        """Return how many flows the user has in flight."""
         return sum(
             1
             for handle in self._pending.values()
@@ -753,7 +1160,7 @@ class McpOAuthFlow:
     def __init__(
         self,
         *,
-        storage: TokenStorage,
+        storage: ScopedTokenStorage,
         pending: PendingAuthorizations,
         user_identifier: str,
         server_url: str,
@@ -761,6 +1168,7 @@ class McpOAuthFlow:
         name: str,
         redirect_uri: str,
         client_name: str = "Chainlit",
+        max_pending: Optional[int] = None,
         on_redirect: Optional[Callable[[str], Awaitable[None]]] = None,
         on_failure: Optional[Callable[[McpOAuthError], None]] = None,
     ) -> None:
@@ -769,13 +1177,14 @@ class McpOAuthFlow:
         self._server_key = canonical_server_key(server_url)
         self._session_id = session_id
         self._name = name
+        self._max_pending = max_pending
         self._on_redirect = on_redirect
         self._on_failure = on_failure
         self._authorization_url: Optional[str] = None
         self._authorization_url_ready = asyncio.Event()
         self._authorization: Optional[PendingAuthorization] = None
 
-        self.provider = OAuthClientProvider(
+        self.provider = ChainlitOAuthProvider(
             server_url=server_url,
             client_metadata=OAuthClientMetadata(
                 client_name=client_name,
@@ -790,6 +1199,18 @@ class McpOAuthFlow:
         )
 
     async def _redirect(self, authorization_url: str) -> None:
+        try:
+            normalize_origin(authorization_url)
+        except ValueError:
+            logger.warning(
+                "MCP OAuth authorization URL refused: %s",
+                _safe_url_origin(authorization_url),
+            )
+            exc = McpAuthorizationError(
+                "The MCP authorization URL is not a permitted origin."
+            )
+            self._report_failure(exc)
+            raise exc from None
         state = extract_state(authorization_url)
         if state is None:
             exc = McpAuthorizationError(
@@ -811,6 +1232,7 @@ class McpOAuthFlow:
                 self._server_key,
                 session_id=self._session_id,
                 name=self._name,
+                max_per_user=self._max_pending,
             )
         except McpOAuthError as exc:
             self._report_failure(exc)
@@ -870,7 +1292,7 @@ class McpOAuthFlow:
 
 def build_oauth_provider(
     *,
-    storage: TokenStorage,
+    storage: ScopedTokenStorage,
     pending: PendingAuthorizations,
     user_identifier: str,
     server_url: str,
@@ -878,6 +1300,7 @@ def build_oauth_provider(
     name: str,
     redirect_uri: str,
     client_name: str = "Chainlit",
+    max_pending: Optional[int] = None,
     on_redirect: Optional[Callable[[str], Awaitable[None]]] = None,
     on_failure: Optional[Callable[[McpOAuthError], None]] = None,
 ) -> McpOAuthFlow:
@@ -908,6 +1331,27 @@ def build_oauth_provider(
         name=name,
         redirect_uri=redirect_uri,
         client_name=client_name,
+        max_pending=max_pending,
         on_redirect=on_redirect,
         on_failure=on_failure,
     )
+
+
+# One store and one pending map per process: nothing is persisted, so a restart
+# forces re-authorization. The routes reach them through these getters so the
+# callback, logout and the /mcp wiring cannot drift onto different instances.
+_token_store = McpOAuthTokenStore()
+_pending_authorizations = PendingAuthorizations()
+_rate_limiter = McpOAuthRateLimiter()
+
+
+def get_token_store() -> McpOAuthTokenStore:
+    return _token_store
+
+
+def get_pending_authorizations() -> PendingAuthorizations:
+    return _pending_authorizations
+
+
+def get_rate_limiter() -> McpOAuthRateLimiter:
+    return _rate_limiter

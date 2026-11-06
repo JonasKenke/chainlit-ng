@@ -1,27 +1,44 @@
 import asyncio
+from collections.abc import Sequence
 
+import httpx2
 import pytest
 from mcp.client.auth import OAuthClientProvider
+from mcp.client.auth.utils import (
+    build_oauth_authorization_server_metadata_discovery_urls,
+)
+from mcp.shared._httpx_utils import RedirectAwareAuth
 from mcp.shared.auth import (
     AuthorizationCodeResult,
     OAuthClientInformationFull,
+    OAuthMetadata,
     OAuthToken,
 )
 from mcp.shared.auth_utils import resource_url_from_server_url
+from pydantic import AnyHttpUrl
 
 from chainlit import mcp_oauth
 from chainlit.mcp_oauth import (
+    OAUTH_ROLE,
+    OAUTH_ROLE_EXTENSION,
+    TRANSPORT_ROLE,
+    MarkedOAuthAuth,
     McpAuthorizationError,
     McpAuthorizationTimeout,
+    McpOAuthOriginError,
+    McpOAuthRateLimiter,
     McpOAuthTokenStore,
     McpTooManyFlows,
     Origin,
+    OriginAllowlist,
     PendingAuthorizations,
     ScopedTokenStorage,
     build_oauth_provider,
     canonical_server_key,
     extract_state,
     normalize_origin,
+    oauth_request_guard,
+    prm_urls,
 )
 
 SERVER_KEY = "https://mcp.example.com/mcp"
@@ -889,3 +906,685 @@ class TestBuildOAuthProvider:
     async def test_authorization_url_wait_is_bounded(self, flow):
         with pytest.raises(McpAuthorizationError):
             await flow.wait_for_authorization_url(timeout=0.01)
+
+
+class TestRefreshFailure:
+    async def test_a_failed_refresh_deletes_the_token_it_read(self, store, pending):
+        storage = store.scoped("alice", SERVER_KEY)
+        await storage.set_tokens(make_tokens("access-1", "refresh-1"))
+        # The provider reads the token, and its generation, before refreshing.
+        await storage.get_tokens()
+        flow = build_oauth_provider(
+            storage=storage,
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+        )
+
+        failed = await flow.provider._handle_refresh_response(httpx2.Response(400))
+
+        assert failed is False
+        assert await storage.get_tokens() is None
+
+    async def test_a_concurrent_successful_refresh_survives(self, store, pending):
+        storage = store.scoped("alice", SERVER_KEY)
+        await storage.set_tokens(make_tokens("access-1", "refresh-1"))
+        await storage.get_tokens()
+        flow = build_oauth_provider(
+            storage=storage,
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+        )
+        # Another tab rotates the token between this provider's read and its
+        # failed refresh; the loser must not delete the winner's token.
+        await store.scoped("alice", SERVER_KEY).set_tokens(
+            make_tokens("access-2", "refresh-2")
+        )
+
+        failed = await flow.provider._handle_refresh_response(httpx2.Response(400))
+
+        assert failed is False
+        surviving = await store.scoped("alice", SERVER_KEY).get_tokens()
+        assert surviving is not None
+        assert surviving.access_token == "access-2"
+
+
+class TestStoredTokenExpiry:
+    async def test_an_unexpired_stored_token_keeps_its_expiry(self, flow):
+        await flow.provider.context.storage.set_tokens(
+            OAuthToken(access_token="stored", expires_in=60)
+        )
+
+        await flow.provider._initialize()
+
+        assert flow.provider.context.token_expiry_time is not None
+        assert flow.provider.context.is_token_valid() is True
+
+    async def test_an_expired_stored_token_is_not_valid(self, flow):
+        storage = flow.provider.context.storage
+        await storage.set_tokens(
+            OAuthToken(access_token="stored", refresh_token="rt", expires_in=-1)
+        )
+        await storage.set_client_info(make_client_info())
+
+        await flow.provider._initialize()
+
+        assert flow.provider.context.token_expiry_time is not None
+        assert flow.provider.context.is_token_valid() is False
+        assert flow.provider.context.can_refresh_token() is True
+
+    async def test_a_stored_token_without_expiry_is_valid(self, flow):
+        await flow.provider.context.storage.set_tokens(
+            OAuthToken(access_token="stored")
+        )
+
+        await flow.provider._initialize()
+
+        assert flow.provider.context.token_expiry_time is None
+        assert flow.provider.context.is_token_valid() is True
+
+
+class TestRefreshMetadata:
+    @staticmethod
+    def metadata() -> OAuthMetadata:
+        return OAuthMetadata(
+            issuer=AnyHttpUrl("https://auth.example.com"),
+            authorization_endpoint=AnyHttpUrl("https://auth.example.com/authorize"),
+            token_endpoint=AnyHttpUrl("https://auth.example.com/token"),
+            response_types_supported=["code"],
+        )
+
+    async def test_a_refresh_uses_the_stored_authorization_server(self, flow):
+        storage = flow.provider.context.storage
+        await storage.set_tokens(
+            OAuthToken(access_token="stored", refresh_token="rt", expires_in=-1)
+        )
+        await storage.set_client_info(make_client_info())
+        storage.set_oauth_metadata(self.metadata())
+
+        await flow.provider._initialize()
+        request = await flow.provider._refresh_token()
+
+        assert str(request.url) == "https://auth.example.com/token"
+        assert b"grant_type=refresh_token" in request.content
+
+    async def test_a_token_exchange_keeps_the_metadata_for_a_refresh(self, flow):
+        flow.provider.context.oauth_metadata = self.metadata()
+        response = httpx2.Response(
+            200,
+            json={
+                "access_token": "at",
+                "token_type": "Bearer",
+                "refresh_token": "rt",
+            },
+        )
+
+        await flow.provider._handle_token_response(response)
+
+        stored = flow.provider.context.storage.get_oauth_metadata()
+        assert stored is not None
+        assert str(stored.token_endpoint) == "https://auth.example.com/token"
+
+    async def test_a_failed_refresh_drops_the_cached_metadata(self, flow):
+        flow.provider.context.oauth_metadata = self.metadata()
+        await flow.provider.context.storage.set_tokens(make_tokens("stored"))
+
+        refreshed = await flow.provider._handle_refresh_response(httpx2.Response(400))
+
+        assert refreshed is False
+        assert flow.provider.context.oauth_metadata is None
+
+
+# Origin normalization and the request-role guard (S4a).
+SERVER_ORIGIN = "https://mcp.example.com"
+ALLOWED_ORIGIN = "https://allowed.example"
+PRM_PATH = "/.well-known/oauth-protected-resource"
+
+
+class ScriptedOAuth(RedirectAwareAuth):
+    """A stand-in for the SDK provider that plays a fixed list of requests.
+
+    The SDK's own ``RedirectAwareAuth`` drives it, so redirect handling matches
+    the real flow: only a redirect within the origin of the request just sent is
+    followed.
+    """
+
+    def __init__(self, script: Sequence[httpx2.Request] = ()) -> None:
+        self.script = list(script)
+
+    async def _auth_flow(self, request):
+        yield request
+        for scripted in self.script:
+            yield scripted
+
+
+def mark(request: httpx2.Request, role: str) -> httpx2.Request:
+    request.extensions[OAUTH_ROLE_EXTENSION] = role
+    return request
+
+
+def build_guard(entries=(ALLOWED_ORIGIN,), server_url: str = SERVER_KEY):
+    return oauth_request_guard(server_url, OriginAllowlist(entries))
+
+
+async def assert_refused(guard, request: httpx2.Request) -> None:
+    with pytest.raises(McpOAuthOriginError):
+        await guard(request)
+
+
+def mock_handler(sent: list[httpx2.Request], routes: dict | None = None):
+    """A ``MockTransport`` handler that records every request it receives."""
+
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(request)
+        response = (routes or {}).get((request.method, str(request.url)))
+        if response is None:
+            return httpx2.Response(404, request=request)
+        if callable(response):
+            return response(request)
+        return response
+
+    return handler
+
+
+class TestOriginAllowlist:
+    def test_equivalent_spellings_compare_equal(self):
+        allowed = OriginAllowlist(["https://Allowed.Example:443"])
+        for url in (
+            "https://allowed.example/",
+            "HTTPS://ALLOWED.EXAMPLE",
+            "https://allowed.example.:443/mcp",
+            "https://allowed.example",
+        ):
+            assert normalize_origin(url) in allowed
+
+    def test_an_idna_spelling_matches_its_punycode_form(self):
+        allowed = OriginAllowlist(["https://bücher.example"])
+        assert normalize_origin("https://xn--bcher-kva.example/") in allowed
+
+    def test_a_different_scheme_or_port_is_a_different_origin(self):
+        allowed = OriginAllowlist([ALLOWED_ORIGIN])
+        assert normalize_origin(ALLOWED_ORIGIN) in allowed
+        assert normalize_origin("https://allowed.example:8443") not in allowed
+        assert normalize_origin("https://allowed.example:444") not in allowed
+        assert normalize_origin("https://allowed.example.evil.example") not in allowed
+
+    def test_entries_must_be_bare_origins(self):
+        for entry in (
+            "https://allowed.example/mcp",
+            "https://allowed.example?tenant=a",
+            "https://allowed.example/mcp?tenant=a",
+            "https://allowed.example#fragment",
+        ):
+            with pytest.raises(ValueError, match="bare origin") as caught:
+                OriginAllowlist([entry])
+            assert "allowed.example" not in str(caught.value)
+
+    def test_a_userinfo_entry_is_rejected_instead_of_reduced(self):
+        with pytest.raises(ValueError, match="userinfo") as caught:
+            OriginAllowlist(["https://alice:super-secret@allowed.example"])
+        assert "super-secret" not in str(caught.value)
+
+    def test_a_non_http_entry_is_rejected(self):
+        with pytest.raises(ValueError, match="only http and https"):
+            OriginAllowlist(["ftp://allowed.example"])
+
+    def test_plain_http_is_loopback_only(self):
+        with pytest.raises(ValueError, match="plain http"):
+            OriginAllowlist(["http://10.0.0.5"])
+        with pytest.raises(ValueError, match="plain http"):
+            OriginAllowlist(["https://allowed.example".replace("https", "http")])
+        for entry in (
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://[::1]:8000",
+        ):
+            assert normalize_origin(entry) in OriginAllowlist([entry])
+
+    def test_an_empty_allowlist_is_falsy(self):
+        allowed = OriginAllowlist()
+        assert not allowed
+        assert len(allowed) == 0
+        assert list(allowed) == []
+
+
+class TestPrmUrls:
+    def test_it_is_the_sdk_discovery_urls_plus_a_trailing_slash(self):
+        assert prm_urls(SERVER_KEY) == {
+            f"{SERVER_ORIGIN}{PRM_PATH}/mcp",
+            f"{SERVER_ORIGIN}{PRM_PATH}/mcp/",
+            f"{SERVER_ORIGIN}{PRM_PATH}",
+            f"{SERVER_ORIGIN}{PRM_PATH}/",
+        }
+
+    def test_it_canonicalizes_the_server_url(self):
+        assert prm_urls("https://MCP.Example.COM:443/mcp") == prm_urls(SERVER_KEY)
+        assert prm_urls("https://mcp.example.com/mcp?tenant=b") == prm_urls(SERVER_KEY)
+
+    def test_a_root_server_url_has_only_the_root_urls(self):
+        assert prm_urls(SERVER_ORIGIN) == {
+            f"{SERVER_ORIGIN}{PRM_PATH}",
+            f"{SERVER_ORIGIN}{PRM_PATH}/",
+        }
+
+
+class TestOAuthRequestGuard:
+    async def test_the_transport_request_may_use_any_path_on_the_server_origin(self):
+        guard = build_guard()
+        for method, url in (
+            ("POST", SERVER_KEY),
+            ("GET", f"{SERVER_ORIGIN}/other/path"),
+            ("QUERY", SERVER_ORIGIN),
+        ):
+            await guard(mark(httpx2.Request(method, url), TRANSPORT_ROLE))
+
+    async def test_a_transport_request_cannot_leave_the_server_origin(self):
+        guard = build_guard()
+        for url in (f"{ALLOWED_ORIGIN}/mcp", "https://evil.example/mcp"):
+            await assert_refused(
+                guard, mark(httpx2.Request("GET", url), TRANSPORT_ROLE)
+            )
+
+    async def test_an_oauth_request_may_reach_a_listed_origin(self):
+        guard = build_guard()
+        for method, url in (
+            ("GET", f"{ALLOWED_ORIGIN}/.well-known/oauth-authorization-server"),
+            ("POST", f"{ALLOWED_ORIGIN}/register"),
+            ("POST", f"{ALLOWED_ORIGIN}/token"),
+        ):
+            await guard(mark(httpx2.Request(method, url), OAUTH_ROLE))
+
+    async def test_an_oauth_request_cannot_reach_an_unlisted_origin(self):
+        guard = build_guard()
+        await assert_refused(
+            guard, mark(httpx2.Request("GET", "https://evil.example/token"), OAUTH_ROLE)
+        )
+
+    async def test_the_exact_prm_urls_pass_on_the_server_origin(self):
+        guard = build_guard()
+        for url in sorted(prm_urls(SERVER_KEY)):
+            await guard(mark(httpx2.Request("GET", url), OAUTH_ROLE))
+
+    async def test_a_prm_request_must_be_a_get_without_a_query(self):
+        guard = build_guard()
+        prm = f"{SERVER_ORIGIN}{PRM_PATH}"
+        await assert_refused(guard, mark(httpx2.Request("POST", prm), OAUTH_ROLE))
+        await assert_refused(
+            guard, mark(httpx2.Request("GET", f"{prm}?scope=a"), OAUTH_ROLE)
+        )
+
+    async def test_no_other_prm_path_passes_on_the_server_origin(self):
+        guard = build_guard()
+        for url in (
+            f"{SERVER_ORIGIN}{PRM_PATH}/foo",
+            f"{SERVER_ORIGIN}{PRM_PATH}/mcp/extra",
+            f"{SERVER_ORIGIN}{PRM_PATH}/mcp//extra",
+        ):
+            await assert_refused(guard, mark(httpx2.Request("GET", url), OAUTH_ROLE))
+
+    async def test_a_request_without_a_role_is_refused(self):
+        guard = build_guard()
+        for url in (
+            SERVER_KEY,
+            f"{ALLOWED_ORIGIN}/token",
+            f"{SERVER_ORIGIN}{PRM_PATH}",
+        ):
+            await assert_refused(guard, httpx2.Request("GET", url))
+
+    async def test_the_server_origin_is_not_an_authorization_server(self):
+        guard = build_guard()
+        for method, url in (
+            ("GET", f"{SERVER_ORIGIN}/.well-known/oauth-authorization-server"),
+            ("GET", f"{SERVER_ORIGIN}/.well-known/openid-configuration"),
+            ("POST", f"{SERVER_ORIGIN}/register"),
+            ("POST", f"{SERVER_ORIGIN}/token"),
+            ("POST", SERVER_KEY),
+            ("GET", SERVER_KEY),
+        ):
+            await assert_refused(guard, mark(httpx2.Request(method, url), OAUTH_ROLE))
+
+        listed = build_guard(entries=(SERVER_ORIGIN,))
+        await listed(mark(httpx2.Request("POST", f"{SERVER_ORIGIN}/token"), OAUTH_ROLE))
+
+    async def test_the_adversarial_matrix_is_refused(self):
+        guard = build_guard()
+        for url in (
+            "https://allowed.example@evil.example/token",
+            "https://allowed.example.evil.example/token",
+            "https://evil.example/token",
+            "http://169.254.169.254/latest/meta-data",
+            "file:///etc/passwd",
+            "https://allowed.example:444/token",
+        ):
+            for role in (OAUTH_ROLE, TRANSPORT_ROLE):
+                await assert_refused(guard, mark(httpx2.Request("GET", url), role))
+
+    async def test_no_discovery_candidate_can_be_an_exact_prm_url(self):
+        guard = build_guard()
+        candidates = build_oauth_authorization_server_metadata_discovery_urls(
+            f"{SERVER_ORIGIN}{PRM_PATH}/foo", SERVER_KEY
+        )
+        assert len(candidates) == 3
+        for url in candidates:
+            await assert_refused(guard, mark(httpx2.Request("GET", url), OAUTH_ROLE))
+
+    async def test_a_rejection_logs_the_origin_only(self, caplog):
+        guard = build_guard()
+        with caplog.at_level("WARNING", logger="chainlit.mcp_oauth"):
+            await assert_refused(
+                guard,
+                mark(
+                    httpx2.Request(
+                        "GET", "https://evil.example:8443/steal?token=secret"
+                    ),
+                    OAUTH_ROLE,
+                ),
+            )
+        assert "https://evil.example:8443" in caplog.text
+        assert "/steal" not in caplog.text
+        assert "secret" not in caplog.text
+
+    async def test_an_unusable_url_is_refused_without_echoing_it(self, caplog):
+        guard = build_guard()
+        with caplog.at_level("WARNING", logger="chainlit.mcp_oauth"):
+            await assert_refused(
+                guard,
+                mark(
+                    httpx2.Request("GET", "https://alice:pw@evil.example/token"),
+                    OAUTH_ROLE,
+                ),
+            )
+        assert "pw" not in caplog.text
+
+
+class TestMarkedOAuthAuth:
+    def test_it_keeps_the_sdk_need_for_response_bodies(self):
+        assert MarkedOAuthAuth(ScriptedOAuth()).requires_response_body is True
+
+    async def test_the_transport_request_is_marked_and_sdk_requests_are_not(self):
+        request = httpx2.Request("POST", SERVER_KEY)
+        prm = httpx2.Request("GET", f"{SERVER_ORIGIN}{PRM_PATH}")
+        flow = MarkedOAuthAuth(ScriptedOAuth([prm]))
+        outgoing = flow.async_auth_flow(request)
+
+        first = await outgoing.__anext__()
+        assert first is request
+        assert request.extensions[OAUTH_ROLE_EXTENSION] == TRANSPORT_ROLE
+
+        second = await outgoing.asend(httpx2.Response(401, request=first))
+        assert second is prm
+        assert prm.extensions[OAUTH_ROLE_EXTENSION] == OAUTH_ROLE
+
+        with pytest.raises(StopAsyncIteration):
+            await outgoing.asend(httpx2.Response(200, request=second))
+        await outgoing.aclose()
+
+    async def test_a_retried_transport_request_keeps_its_role(self):
+        request = httpx2.Request("POST", SERVER_KEY)
+        flow = MarkedOAuthAuth(ScriptedOAuth([request]))
+        outgoing = flow.async_auth_flow(request)
+        await outgoing.__anext__()
+
+        retried = await outgoing.asend(httpx2.Response(401, request=request))
+
+        assert retried is request
+        assert request.extensions[OAUTH_ROLE_EXTENSION] == TRANSPORT_ROLE
+        with pytest.raises(StopAsyncIteration):
+            await outgoing.asend(httpx2.Response(200, request=retried))
+        await outgoing.aclose()
+
+
+class TestGuardOnTheWire:
+    async def test_the_hook_sees_every_request_of_the_flow(self):
+        sent: list[httpx2.Request] = []
+        seen: list[tuple[str, object]] = []
+        prm = httpx2.Request("GET", f"{SERVER_ORIGIN}{PRM_PATH}")
+        as_metadata = httpx2.Request(
+            "GET", f"{ALLOWED_ORIGIN}/.well-known/oauth-authorization-server"
+        )
+        token = httpx2.Request(
+            "POST", f"{ALLOWED_ORIGIN}/token", data={"grant_type": "authorization_code"}
+        )
+        guard = build_guard()
+
+        async def spy(request: httpx2.Request) -> None:
+            seen.append(
+                (str(request.url), request.extensions.get(OAUTH_ROLE_EXTENSION))
+            )
+            await guard(request)
+
+        routes = {
+            ("POST", SERVER_KEY): httpx2.Response(401),
+            ("GET", str(prm.url)): httpx2.Response(200, json={}),
+            ("GET", str(as_metadata.url)): httpx2.Response(200, json={}),
+            ("POST", str(token.url)): httpx2.Response(200, json={}),
+        }
+        client = httpx2.AsyncClient(
+            auth=MarkedOAuthAuth(ScriptedOAuth([prm, as_metadata, token])),
+            event_hooks={"request": [spy]},
+            transport=httpx2.MockTransport(mock_handler(sent, routes)),
+        )
+        async with client:
+            await client.post(SERVER_KEY, json={"mcp": True})
+
+        assert [str(request.url) for request in sent] == [
+            SERVER_KEY,
+            str(prm.url),
+            str(as_metadata.url),
+            str(token.url),
+        ]
+        assert seen == [
+            (SERVER_KEY, TRANSPORT_ROLE),
+            (str(prm.url), OAUTH_ROLE),
+            (str(as_metadata.url), OAUTH_ROLE),
+            (str(token.url), OAUTH_ROLE),
+        ]
+
+    async def test_an_unmarked_request_is_refused_before_it_is_sent(self):
+        sent: list[httpx2.Request] = []
+        client = httpx2.AsyncClient(
+            event_hooks={"request": [build_guard()]},
+            transport=httpx2.MockTransport(mock_handler(sent)),
+        )
+        async with client:
+            with pytest.raises(McpOAuthOriginError):
+                await client.get(f"{ALLOWED_ORIGIN}/token")
+
+        assert sent == []
+
+    @pytest.mark.parametrize(
+        ("method", "url"),
+        [
+            ("GET", f"{SERVER_ORIGIN}/.well-known/oauth-authorization-server"),
+            ("GET", f"{SERVER_ORIGIN}/.well-known/openid-configuration"),
+            ("POST", f"{SERVER_ORIGIN}/register"),
+            ("POST", f"{SERVER_ORIGIN}/token"),
+            ("POST", SERVER_KEY),
+            ("GET", SERVER_KEY),
+            ("GET", f"{SERVER_ORIGIN}/.well-known/oauth-protected-resource/foo"),
+        ],
+    )
+    async def test_a_same_origin_authorization_request_is_refused(self, method, url):
+        sent: list[httpx2.Request] = []
+        refused_request = httpx2.Request(method, url)
+        routes = {("POST", SERVER_KEY): httpx2.Response(401)}
+        client = httpx2.AsyncClient(
+            auth=MarkedOAuthAuth(ScriptedOAuth([refused_request])),
+            event_hooks={"request": [build_guard()]},
+            transport=httpx2.MockTransport(mock_handler(sent, routes)),
+        )
+        async with client:
+            with pytest.raises(McpOAuthOriginError):
+                await client.post(SERVER_KEY, json={})
+
+        assert [str(request.url) for request in sent] == [SERVER_KEY]
+
+    async def test_a_path_bearing_authorization_server_is_refused(self, store, pending):
+        sent: list[httpx2.Request] = []
+        prm = f"{SERVER_ORIGIN}{PRM_PATH}"
+        payload = {
+            "resource": SERVER_KEY,
+            "authorization_servers": [f"{prm}/foo"],
+        }
+        routes = {
+            ("POST", SERVER_KEY): httpx2.Response(401),
+            ("GET", f"{prm}/mcp"): httpx2.Response(404),
+            ("GET", prm): httpx2.Response(200, json=payload),
+        }
+        flow = build_oauth_provider(
+            storage=store.scoped("alice", SERVER_KEY),
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+        )
+        client = httpx2.AsyncClient(
+            auth=MarkedOAuthAuth(flow.provider),
+            event_hooks={"request": [build_guard()]},
+            transport=httpx2.MockTransport(mock_handler(sent, routes)),
+        )
+        async with client:
+            with pytest.raises(McpOAuthOriginError):
+                await client.post(SERVER_KEY, json={})
+
+        assert [str(request.url) for request in sent] == [
+            SERVER_KEY,
+            f"{prm}/mcp",
+            prm,
+        ]
+        assert [request.method for request in sent] == ["POST", "GET", "GET"]
+
+    async def test_a_redirect_to_another_origin_is_refused(self):
+        sent: list[httpx2.Request] = []
+
+        async def handler(request: httpx2.Request) -> httpx2.Response:
+            sent.append(request)
+            return httpx2.Response(
+                307, headers={"Location": "https://evil.example/steal"}
+            )
+
+        client = httpx2.AsyncClient(
+            auth=MarkedOAuthAuth(ScriptedOAuth()),
+            event_hooks={"request": [build_guard()]},
+            transport=httpx2.MockTransport(handler),
+            follow_redirects=True,
+        )
+        async with client:
+            with pytest.raises(McpOAuthOriginError):
+                await client.get(SERVER_KEY)
+
+        assert [str(request.url) for request in sent] == [SERVER_KEY]
+
+    async def test_a_prm_redirect_to_another_origin_is_refused(self):
+        sent: list[httpx2.Request] = []
+        prm = f"{SERVER_ORIGIN}{PRM_PATH}"
+
+        async def handler(request: httpx2.Request) -> httpx2.Response:
+            sent.append(request)
+            if str(request.url) == SERVER_KEY:
+                return httpx2.Response(401, request=request)
+            return httpx2.Response(
+                307, headers={"Location": "https://evil.example/steal"}
+            )
+
+        client = httpx2.AsyncClient(
+            auth=MarkedOAuthAuth(ScriptedOAuth([httpx2.Request("GET", prm)])),
+            event_hooks={"request": [build_guard()]},
+            transport=httpx2.MockTransport(handler),
+            follow_redirects=True,
+        )
+        async with client:
+            with pytest.raises(McpOAuthOriginError):
+                await client.get(SERVER_KEY)
+
+        assert [str(request.url) for request in sent] == [SERVER_KEY, prm]
+
+    async def test_a_same_origin_prm_redirect_to_the_trailing_slash_passes(self):
+        sent: list[httpx2.Request] = []
+        prm = f"{SERVER_ORIGIN}{PRM_PATH}"
+        payload = {"resource": SERVER_KEY, "authorization_servers": [ALLOWED_ORIGIN]}
+        routes = {
+            ("GET", SERVER_KEY): httpx2.Response(401),
+            ("GET", prm): httpx2.Response(307, headers={"Location": f"{prm}/"}),
+            ("GET", f"{prm}/"): httpx2.Response(200, json=payload),
+        }
+        client = httpx2.AsyncClient(
+            auth=MarkedOAuthAuth(ScriptedOAuth([httpx2.Request("GET", prm)])),
+            event_hooks={"request": [build_guard()]},
+            transport=httpx2.MockTransport(mock_handler(sent, routes)),
+        )
+        async with client:
+            response = await client.get(SERVER_KEY)
+
+        assert response.status_code == 200
+        assert [str(request.url) for request in sent] == [SERVER_KEY, prm, f"{prm}/"]
+
+
+class TestRateLimiter:
+    def test_it_allows_the_limit_then_refuses_in_the_same_window(self):
+        limiter = McpOAuthRateLimiter(window_seconds=60)
+
+        for index in range(3):
+            assert limiter.allow("alice", 3, now=float(index))
+        assert not limiter.allow("alice", 3, now=3.0)
+        # Another user has their own window.
+        assert limiter.allow("bob", 3, now=3.0)
+
+    def test_starts_leave_the_window(self):
+        limiter = McpOAuthRateLimiter(window_seconds=60)
+
+        assert limiter.allow("alice", 1, now=0.0)
+        assert not limiter.allow("alice", 1, now=59.0)
+        assert limiter.allow("alice", 1, now=61.0)
+
+    def test_a_non_positive_limit_refuses_everything(self):
+        limiter = McpOAuthRateLimiter()
+
+        assert not limiter.allow("alice", 0)
+        assert not limiter.allow("alice", -1)
+
+
+class TestAuthorizationUrlValidation:
+    @pytest.mark.parametrize(
+        "authorization_url",
+        [
+            "javascript:alert(document.cookie)",
+            "data:text/html,<script>alert(1)</script>",
+            "https://alice:super-secret@auth.example.com/authorize?state=s",
+            "http://10.0.0.5/authorize?state=s",
+            "https://auth.example.com:bad/authorize?state=s",
+        ],
+    )
+    async def test_a_rejected_url_neither_registers_nor_publishes(
+        self, store, pending, failures, caplog, authorization_url
+    ):
+        flow = build_oauth_provider(
+            storage=store.scoped("alice", SERVER_KEY),
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+            on_failure=failures.append,
+        )
+
+        with caplog.at_level("WARNING", logger="chainlit.mcp_oauth"):
+            with pytest.raises(McpAuthorizationError):
+                await flow.provider.context.redirect_handler(authorization_url)
+
+        assert not flow._authorization_url_ready.is_set()
+        assert len(pending) == 0
+        assert len(failures) == 1
+        assert "super-secret" not in caplog.text
+        assert "authorize" not in caplog.text
+        assert "document.cookie" not in caplog.text
