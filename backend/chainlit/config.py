@@ -196,6 +196,9 @@ confirm_new_chat = true
 # Chain of Thought (CoT) display mode. Can be "hidden", "tool_call" or "full".
 cot = "full"
 
+# CoT display layout. "list" shows each step individually, "compact" collapses into one summary line.
+# cot_display = "list"
+
 # Specify a CSS file that can be used to customize the user interface.
 # The CSS file can be served from the public directory or via an external link.
 # custom_css = "/public/test.css"
@@ -359,6 +362,7 @@ class UISettings(BaseModel):
     name: str
     description: str = ""
     cot: Literal["hidden", "tool_call", "full"] = "full"
+    cot_display: Literal["list", "compact"] = "list"
     default_theme: Optional[Literal["light", "dark"]] = "dark"
     language: Optional[str] = None
     layout: Optional[Literal["default", "wide"]] = "default"

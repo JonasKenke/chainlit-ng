@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["jest", "testing-library__jest-dom"]
   },
-  "include": ["**/*.spec.tsx"]
+  "include": ["**/*.spec.ts", "**/*.spec.tsx"]
 }

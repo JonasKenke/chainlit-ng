@@ -46,6 +46,7 @@ export interface IChainlitConfig {
     default_chat_settings_open?: boolean;
     confirm_new_chat?: boolean;
     cot: 'hidden' | 'tool_call' | 'full';
+    cot_display?: 'list' | 'compact';
     github?: string;
     custom_css?: string;
     custom_js?: string;

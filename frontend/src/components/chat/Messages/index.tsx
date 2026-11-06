@@ -9,7 +9,9 @@ import {
 
 import BlinkingCursor from '@/components/BlinkingCursor';
 
+import { CompactSteps } from './CompactSteps';
 import { Message } from './Message';
+import { collectMessages, countVisibleSteps } from './compactSteps';
 
 interface Props {
   messages: IStep[];
@@ -76,17 +78,47 @@ const Messages = memo(
             // Ignore on_chat_start for scorable run
             const scorableRun =
               !isRunning && m.name !== 'on_chat_start' ? m : undefined;
+
+            const useCompact =
+              messageContext.cotDisplay === 'compact' &&
+              messageContext.cot !== 'hidden';
+            const showCompact =
+              useCompact &&
+              countVisibleSteps(m.steps || [], messageContext.cot) > 1;
+
             return (
               <React.Fragment key={m.id}>
                 {m.steps?.length ? (
-                  <Messages
-                    messages={m.steps}
-                    elements={elements}
-                    actions={actions}
-                    indent={indent}
-                    isRunning={isRunning}
-                    scorableRun={scorableRun}
-                  />
+                  showCompact ? (
+                    <>
+                      <CompactSteps
+                        steps={m.steps}
+                        elements={elements}
+                        actions={actions}
+                        indent={indent}
+                        isRunning={isRunning}
+                        scorableRun={scorableRun}
+                      />
+                      {/* Messages at any depth stay visible at the root. */}
+                      <Messages
+                        messages={collectMessages(m.steps)}
+                        elements={elements}
+                        actions={actions}
+                        indent={indent}
+                        isRunning={isRunning}
+                        scorableRun={scorableRun}
+                      />
+                    </>
+                  ) : (
+                    <Messages
+                      messages={m.steps}
+                      elements={elements}
+                      actions={actions}
+                      indent={indent}
+                      isRunning={isRunning}
+                      scorableRun={scorableRun}
+                    />
+                  )
                 ) : null}
                 {(showToolCoTLoader || showHiddenCoTLoader) &&
                 m.name !== 'on_chat_start' ? (
