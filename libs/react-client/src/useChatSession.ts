@@ -1,5 +1,5 @@
 import { debounce } from 'lodash';
-import { useCallback, useContext, useEffect } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
 import {
@@ -504,7 +504,21 @@ const useChatSession = () => {
     [setSession, sessionId, idToResume, chatProfile]
   );
 
-  const connect = useCallback(debounce(_connect, 200), [_connect]);
+  // Keep a single debounced connect for the lifetime of the session. A new
+  // debounce per _connect version left older pending connects alive, so a
+  // transient "/" connect could open after a thread resume and win the race.
+  const connectRef = useRef(_connect);
+  useEffect(() => {
+    connectRef.current = _connect;
+  }, [_connect]);
+  const connect = useMemo(
+    () =>
+      debounce(
+        (args: Parameters<typeof _connect>[0]) => connectRef.current(args),
+        200
+      ),
+    []
+  );
 
   const disconnect = useCallback(() => {
     if (session?.socket) {
