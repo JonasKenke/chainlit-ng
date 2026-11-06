@@ -321,6 +321,7 @@ class TestEmitterSetModes:
             ],
             mode_values={"model": "fast"},
             user=None,
+            unavailable_chat_profile=None,
         )
         emit = AsyncMock()
         context = SimpleNamespace(emitter=SimpleNamespace(emit=emit))

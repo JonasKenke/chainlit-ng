@@ -38,6 +38,8 @@ def mock_session_factory(persisted_test_user: PersistedUser) -> Callable[..., Mo
         mock.environ = kwargs.get("environ", None)
         mock.client_type = kwargs.get("client_type", "webapp")
         mock.thread_id = kwargs.get("thread_id", "test_thread_id")
+        mock.language = kwargs.get("language", "en-US")
+        mock.unavailable_chat_profile = kwargs.get("unavailable_chat_profile", None)
         mock.emit = AsyncMock()
         mock.has_first_interaction = kwargs.get("has_first_interaction", True)
         mock.files = kwargs.get("files", {})

@@ -78,6 +78,10 @@ async def persist_user_session(thread_id: str, metadata: Dict):
         await data_layer.update_thread(thread_id=thread_id, metadata=metadata)
 
 
+class ChatProfileUnavailableError(ValueError):
+    pass
+
+
 async def _persist_mode_selection(
     session: WebsocketSession, mode_id: str, option_id: str
 ) -> None:
@@ -128,6 +132,17 @@ async def resume_thread(session: WebsocketSession):
         metadata = thread.get("metadata") or {}
         if isinstance(metadata, str):
             metadata = json.loads(metadata)
+        if chat_profile := metadata.get("chat_profile"):
+            profiles = (
+                await config.code.set_chat_profiles(session.user, session.language)
+                if config.code.set_chat_profiles
+                else []
+            )
+            if not any(profile.name == chat_profile for profile in profiles or []):
+                raise ChatProfileUnavailableError(
+                    f"The chat profile '{chat_profile}' is no longer available. "
+                    "You can still view this conversation."
+                )
         user_sessions[session.id] = metadata.copy()
         if chat_profile := metadata.get("chat_profile"):
             session.chat_profile = chat_profile
@@ -255,6 +270,16 @@ async def connection_successful(sid):
     await context.emitter.clear("clear_call_fn")
 
     async with context.session._thread_resume_lock:
+        if context.session.unavailable_chat_profile:
+            await context.emitter.emit(
+                "resume_thread_unavailable",
+                {
+                    "thread_id": context.session.thread_id_to_resume,
+                    "message": context.session.unavailable_chat_profile,
+                },
+            )
+            return
+
         if context.session.restored and not context.session.thread_id_to_resume:
             if (
                 not context.session.has_first_interaction
@@ -272,6 +297,16 @@ async def connection_successful(sid):
             if thread is None:
                 try:
                     thread = await resume_thread(context.session)
+                except ChatProfileUnavailableError as e:
+                    context.session.unavailable_chat_profile = str(e)
+                    await context.emitter.emit(
+                        "resume_thread_unavailable",
+                        {
+                            "thread_id": context.session.thread_id_to_resume,
+                            "message": str(e),
+                        },
+                    )
+                    return
                 except Exception as e:
                     logger.error(f"Failed to resume thread: {e!s}")
                     await context.emitter.send_resume_thread_error(
@@ -361,10 +396,14 @@ async def disconnect(sid):
             await session.delete()
 
     try:
-        if config.code.on_chat_end:
+        if config.code.on_chat_end and not session.unavailable_chat_profile:
             await config.code.on_chat_end()
 
-        if session.thread_id and session.has_first_interaction:
+        if (
+            session.thread_id
+            and session.has_first_interaction
+            and not session.unavailable_chat_profile
+        ):
             await persist_user_session(session.thread_id, session.to_persistable())
     finally:
         if session.to_clear:
@@ -381,6 +420,8 @@ async def disconnect(sid):
 @sio.on("stop")  # pyright: ignore [reportOptionalCall]
 async def stop(sid):
     if session := WebsocketSession.get(sid):
+        if session.unavailable_chat_profile:
+            return
         init_ws_context(session)
         await Message(content="Task manually stopped.").send()
 
@@ -393,6 +434,8 @@ async def stop(sid):
 
 async def process_message(session: WebsocketSession, payload: MessagePayload):
     """Process a message from the user."""
+    if session.unavailable_chat_profile:
+        return
     try:
         context = init_ws_context(session)
         await context.emitter.task_start()
@@ -416,6 +459,8 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
 async def edit_message(sid, payload: MessagePayload):
     """Handle a message sent by the User."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
     context = init_ws_context(session)
 
     messages = chat_context.get()
@@ -447,6 +492,8 @@ async def edit_message(sid, payload: MessagePayload):
 async def message_favorite(sid, payload: MessagePayload):
     """Handle a message favorite toggle."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
     context = init_ws_context(session)
     data_layer = get_data_layer()
 
@@ -502,6 +549,8 @@ async def fetch_favorites(sid):
 async def message(sid, payload: MessagePayload):
     """Handle a message sent by the User."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
 
     task = asyncio.create_task(process_message(session, payload))
     session.current_task = task
@@ -511,6 +560,8 @@ async def message(sid, payload: MessagePayload):
 async def window_message(sid, data):
     """Handle a message send by the host window."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
     init_ws_context(session)
 
     if config.code.on_window_message:
@@ -524,6 +575,8 @@ async def window_message(sid, data):
 async def audio_start(sid):
     """Handle audio init."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
 
     context = init_ws_context(session)
     config: ChainlitConfig = session.get_config()  # type: ignore
@@ -538,6 +591,8 @@ async def audio_start(sid):
 async def audio_chunk(sid, payload: InputAudioChunkPayload):
     """Handle an audio chunk sent by the user."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
 
     init_ws_context(session)
 
@@ -555,6 +610,8 @@ async def audio_chunk(sid, payload: InputAudioChunkPayload):
 async def audio_end(sid):
     """Handle the end of the audio stream."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
 
     try:
         context = init_ws_context(session)
@@ -583,7 +640,10 @@ async def audio_end(sid):
 @sio.on("chat_settings_change")
 async def change_settings(sid, settings: Dict[str, Any]):
     """Handle change settings submit from the UI."""
-    context = init_ws_context(sid)
+    session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
+    context = init_ws_context(session)
 
     for key, value in settings.items():
         context.session.chat_settings[key] = value
@@ -595,7 +655,10 @@ async def change_settings(sid, settings: Dict[str, Any]):
 @sio.on("chat_settings_edit")
 async def edit_settings(sid, settings: Dict[str, Any]):
     """Handle change settings edit from the UI (on the fly)."""
-    init_ws_context(sid)
+    session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
+    init_ws_context(session)
 
     if config.code.on_settings_edit:
         await config.code.on_settings_edit(settings)
@@ -605,6 +668,8 @@ async def edit_settings(sid, settings: Dict[str, Any]):
 async def change_mode(sid, payload: Dict[str, Any]):
     """Validate and apply a mode selection made in the composer."""
     session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
     context = init_ws_context(session)
 
     mode_id = payload.get("modeId") if isinstance(payload, dict) else None

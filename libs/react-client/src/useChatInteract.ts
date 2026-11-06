@@ -17,10 +17,15 @@ const useChatInteract = () => {
   const session = useChainlitStore((state) => state.session);
   const askUser = useChainlitStore((state) => state.askUser);
   const sessionId = useChainlitStore((state) => state.sessionId);
+  const unavailableThreadId = useChainlitStore(
+    (state) => state.unavailableThreadId
+  );
+  const config = useChainlitStore((state) => state.config);
 
   const resetChatSettings = useResetChainlitState('chatSettingsInputs');
   const resetSessionId = useResetChainlitState('sessionId');
   const resetChatSettingsValue = useResetChainlitState('chatSettingsValue');
+  const resetUnavailableThread = useResetChainlitState('unavailableThreadId');
 
   const setFirstUserInteraction = useSetChainlitState('firstUserInteraction');
   const setLoading = useSetChainlitState('loading');
@@ -33,8 +38,17 @@ const useChatInteract = () => {
   const setSideView = useSetChainlitState('sideView');
   const setCurrentThreadId = useSetChainlitState('currentThreadId');
   const setFavoriteMessages = useSetChainlitState('favoriteMessages');
+  const setChatProfile = useSetChainlitState('chatProfile');
 
   const clear = useCallback(() => {
+    if (unavailableThreadId) {
+      setChatProfile((profile) => {
+        const profiles = config?.chatProfiles ?? [];
+        if (profiles.some((item) => item.name === profile)) return profile;
+        return (profiles.find((item) => item.default) ?? profiles[0])?.name;
+      });
+    }
+    resetUnavailableThread();
     session?.socket.emit('clear_session');
     session?.socket.disconnect();
     setIdToResume(undefined);
@@ -49,7 +63,7 @@ const useChatInteract = () => {
     resetChatSettingsValue();
     setSideView(undefined);
     setCurrentThreadId(undefined);
-  }, [session]);
+  }, [session, unavailableThreadId, config, setChatProfile]);
 
   const sendMessage = useCallback(
     (
