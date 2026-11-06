@@ -1,3 +1,4 @@
+import { prefixAssetUrl } from '@/lib/router';
 import {
   ChevronLeft,
   ChevronRight,
@@ -28,7 +29,7 @@ import { type IPdfElement } from 'client-types/';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+pdfjs.GlobalWorkerOptions.workerSrc = prefixAssetUrl(workerUrl);
 
 interface PDFViewerProps {
   url: string;
