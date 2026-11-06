@@ -45,16 +45,46 @@ and can only be completed or abandoned by the user it was registered for. One
 timer task per entry wakes a parked waiter at the deadline; every terminal
 outcome removes the entry, cancels the timer and settles the waiter exactly
 once. A user may have at most ``MAX_PENDING_PER_USER`` flows in flight.
+
+The OAuth request boundary
+--------------------------
+``oauth_request_guard`` is a request-role allowlist for the OAuth flow, not a
+network sandbox. It bounds the requests that flow makes on behalf of a
+user-supplied MCP server: the marked MCP transport request may reach the server
+origin at any path, and every other request of the flow (protected-resource
+metadata, authorization-server metadata, dynamic client registration, token
+exchange and refresh) may reach only an operator-listed authorization-server
+origin, or the server origin for one of the two exact protected-resource
+metadata URLs on ``GET``. The server origin is therefore not an
+authorization-server entry: an authorization server that lives on the MCP
+server's origin must be listed explicitly.
+
+It is not a defence against plain-path SSRF (the non-OAuth MCP transport keeps
+its pre-existing surface), DNS rebinding of a listed origin (origins are matched
+by name, not by resolved address), or a server that publishes its protected
+resource metadata at a custom ``resource_metadata`` URL on its own origin (the
+flow refuses that URL and does not fall back).
 """
 
 import asyncio
 import ipaddress
+import logging
 import time
 from dataclasses import dataclass
-from typing import Awaitable, Callable, NamedTuple, Optional
+from typing import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    NamedTuple,
+    Optional,
+)
 from urllib.parse import parse_qs, urlsplit
 
+import httpx2
 from mcp.client.auth import OAuthClientProvider
+from mcp.client.auth.utils import build_protected_resource_metadata_discovery_urls
 from mcp.shared.auth import (
     AuthorizationCodeResult,
     OAuthClientInformationFull,
@@ -62,6 +92,8 @@ from mcp.shared.auth import (
     OAuthToken,
 )
 from pydantic import AnyUrl
+
+logger = logging.getLogger(__name__)
 
 # Per-user entry cap. Enforced when a new flow starts (and on a new-entry write
 # as a backstop), evicting that user's least recently used entry.
@@ -94,6 +126,10 @@ class McpAuthorizationTimeout(McpAuthorizationError):
 
 class McpTooManyFlows(McpOAuthError):
     """A user already has the maximum number of flows in flight."""
+
+
+class McpOAuthOriginError(McpOAuthError):
+    """A request of the OAuth flow was aimed outside the permitted origin."""
 
 
 # Client-visible failure details: the whole set a browser or a socket payload
@@ -213,6 +249,180 @@ def extract_state(authorization_url: str) -> Optional[str]:
     """Return the ``state`` the SDK embedded in an authorization URL."""
     values = parse_qs(urlsplit(authorization_url).query).get("state")
     return values[0] if values else None
+
+
+# The request extension ``MarkedOAuthAuth`` writes and the guard reads. Its value
+# comes from the object identity of the request the SDK was handed, so a request
+# built by the SDK cannot carry the ``transport`` role.
+OAUTH_ROLE_EXTENSION = "chainlit.mcp_oauth.role"
+TRANSPORT_ROLE = "transport"
+OAUTH_ROLE = "oauth"
+
+
+def _render_origin(origin: Origin) -> str:
+    """``scheme://host:port``, the only form of a rejected origin that is logged."""
+    return f"{origin.scheme}://{_format_origin(origin)}"
+
+
+def _canonical_url(url: str) -> str:
+    """The normalized origin plus the path as parsed, query and fragment removed."""
+    origin = normalize_origin(url)
+    path = urlsplit(url).path or "/"
+    return f"{_render_origin(origin)}{path}"
+
+
+def prm_urls(server_url: str) -> frozenset[str]:
+    """The exact protected-resource metadata URLs allowed on the server origin.
+
+    These are the SDK's own discovery URLs for ``server_url``
+    (``build_protected_resource_metadata_discovery_urls`` without a
+    ``resource_metadata`` hint), each with a single trailing-slash variant for
+    the SDK's same-origin redirect following. Every other path on the server
+    origin is refused for a request of the OAuth flow.
+    """
+    urls = build_protected_resource_metadata_discovery_urls(
+        None, _canonical_url(server_url)
+    )
+    return frozenset(url for base in urls for url in (base, f"{base}/"))
+
+
+def _require_bare_origin(entry: str) -> str:
+    """Reject an allowlist entry that is not a bare origin. Never echoes it."""
+    parsed = urlsplit(entry)
+    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+        raise ValueError(
+            "an MCP OAuth authorization origin must be a bare origin "
+            "(no path, query or fragment)"
+        )
+    return entry
+
+
+class OriginAllowlist:
+    """The authorization-server origins an operator permits, compared exactly.
+
+    Entries are bare origins of ``http(s)`` URLs; ``normalize_origin`` decides
+    what counts as one. An entry carrying a path, query, fragment or userinfo is
+    rejected when the allowlist is built rather than silently reduced to its
+    origin, so a configuration mistake cannot widen the intent.
+    """
+
+    def __init__(self, entries: Iterable[str] = ()) -> None:
+        self._origins = frozenset(
+            normalize_origin(_require_bare_origin(entry)) for entry in entries
+        )
+
+    def __contains__(self, origin: object) -> bool:
+        return origin in self._origins
+
+    def __iter__(self) -> Iterator[Origin]:
+        return iter(self._origins)
+
+    def __len__(self) -> int:
+        return len(self._origins)
+
+    def __bool__(self) -> bool:
+        return bool(self._origins)
+
+    def __repr__(self) -> str:
+        rendered = ", ".join(sorted(_render_origin(origin) for origin in self))
+        return f"OriginAllowlist([{rendered}])"
+
+
+class MarkedOAuthAuth(httpx2.Auth):
+    """Write the request's role into the flow's requests for the guard to read.
+
+    The guard has to tell the MCP transport request (which may reach the server
+    origin at any path) from the requests the OAuth flow makes (which may reach
+    only a listed authorization server or an exact discovery URL). The SDK
+    yields the original transport request object itself and constructs a new
+    object for every OAuth request, so object identity is a marker the flow
+    cannot forge: the request passed into ``async_auth_flow`` is marked
+    ``transport`` and every other object the wrapped provider yields is marked
+    ``oauth``.
+    """
+
+    # The provider's value: the SDK reads PRM, registration and token bodies.
+    requires_response_body = True
+
+    def __init__(self, provider: httpx2.Auth) -> None:
+        self._provider = provider
+
+    async def async_auth_flow(
+        self, request: httpx2.Request
+    ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+        request.extensions[OAUTH_ROLE_EXTENSION] = TRANSPORT_ROLE
+        flow = self._provider.async_auth_flow(request)
+        try:
+            outgoing = await flow.__anext__()
+            while True:
+                if outgoing is not request:
+                    outgoing.extensions[OAUTH_ROLE_EXTENSION] = OAUTH_ROLE
+                response = yield outgoing
+                outgoing = await flow.asend(response)
+        except StopAsyncIteration:
+            return
+        finally:
+            await flow.aclose()
+
+
+def oauth_request_guard(
+    server_url: str, allowed_origins: OriginAllowlist
+) -> Callable[[httpx2.Request], Awaitable[None]]:
+    """Build an ``httpx2.AsyncClient`` request hook that enforces the boundary.
+
+    The hook fails closed: only a ``transport``-marked request on the server
+    origin, an ``oauth``-marked request on a listed authorization-server
+    origin, or an ``oauth``-marked ``GET`` without a query on one of
+    ``prm_urls`` passes. Anything else raises ``McpOAuthOriginError`` before the
+    request is sent. Rejections are logged with the normalized origin only,
+    never the path or query.
+
+    This is a request-role allowlist for the OAuth flow, not a network sandbox:
+    it does not close SSRF through the plain (non-OAuth) MCP transport, cannot
+    see through DNS rebinding of a listed origin, and refuses a server that
+    publishes its protected resource metadata at a custom ``resource_metadata``
+    URL on its own origin.
+
+    A hook is awaited by ``httpx2.AsyncClient``; a synchronous client would call
+    it without awaiting, so it must only be attached to an async client.
+    """
+    server_origin = normalize_origin(server_url)
+    discovery_urls = prm_urls(server_url)
+
+    async def guard(request: httpx2.Request) -> None:
+        try:
+            origin = normalize_origin(str(request.url))
+        except ValueError as exc:
+            logger.warning("MCP OAuth request refused: %s", exc)
+            raise McpOAuthOriginError(
+                "MCP OAuth request refused: the URL is not a usable origin."
+            ) from exc
+
+        role = request.extensions.get(OAUTH_ROLE_EXTENSION)
+        if role == TRANSPORT_ROLE:
+            if origin == server_origin:
+                return
+            reason = "a transport request left the server origin"
+        elif role == OAUTH_ROLE:
+            if origin in allowed_origins:
+                return
+            if (
+                origin == server_origin
+                and request.method == "GET"
+                and not request.url.query
+                and _canonical_url(str(request.url)) in discovery_urls
+            ):
+                return
+            reason = "an OAuth request left the permitted origins"
+        else:
+            reason = "a request carried no OAuth role marker"
+
+        logger.warning(
+            "MCP OAuth request refused (%s): %s", reason, _render_origin(origin)
+        )
+        raise McpOAuthOriginError(f"MCP OAuth request refused: {reason}.")
+
+    return guard
 
 
 @dataclass(repr=False)
