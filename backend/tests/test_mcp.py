@@ -1,15 +1,39 @@
+import asyncio
+import logging
 import sys
-from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
+from urllib.parse import urlsplit
 
+import httpx
+import jwt
 import pytest
+from mcp.shared.auth import OAuthToken
 from pydantic import ValidationError
+from starlette.requests import Request
 
+from chainlit.auth import create_jwt, get_current_user
+from chainlit.config import config
 from chainlit.mcp import (
     HttpMcpConnection,
     SseMcpConnection,
     StdioMcpConnection,
     validate_mcp_command,
 )
+from chainlit.mcp_oauth import (
+    MCP_OAUTH_DETAILS,
+    McpOAuthTokenStore,
+    PendingAuthorizations,
+)
+from chainlit.server import (
+    MCP_CONNECT_FAILED_DETAIL,
+    MCP_OAUTH_CALLBACK_PATH,
+    app,
+    get_mcp_oauth_callback_url,
+    get_user_facing_url,
+)
+from chainlit.session import WebsocketSession
+from chainlit.user import User
 
 
 class TestStdioMcpConnection:
@@ -444,3 +468,343 @@ class TestMcpConnectionEdgeCases:
 
             assert executable == "/opt/my-app/bin/python"
             assert args == ["script.py"]
+
+
+ALICE = User(identifier="alice")
+BOB = User(identifier="bob")
+SERVER_KEY = "https://mcp.example.com/mcp"
+
+
+def login_as(user: User) -> None:
+    app.dependency_overrides[get_current_user] = lambda: user
+
+
+def make_request(path: str = "/mcp") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "server": ("127.0.0.1", 8000),
+            "root_path": "",
+            "path": path,
+            "query_string": b"",
+            "headers": [],
+        }
+    )
+
+
+def make_tokens(access: str) -> OAuthToken:
+    return OAuthToken(access_token=access, refresh_token=f"{access}-refresh")
+
+
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture
+async def client():
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+def mcp_pending(monkeypatch):
+    flows = PendingAuthorizations()
+    monkeypatch.setattr("chainlit.mcp_oauth.get_pending_authorizations", lambda: flows)
+    yield flows
+    for state in list(flows._pending):
+        flows.cancel(state)
+
+
+@pytest.fixture
+def mcp_store(monkeypatch):
+    store = McpOAuthTokenStore()
+    monkeypatch.setattr("chainlit.mcp_oauth.get_token_store", lambda: store)
+    return store
+
+
+@pytest.fixture
+def auth_enabled(monkeypatch):
+    monkeypatch.setenv("CHAINLIT_CUSTOM_AUTH", "1")
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret-with-at-least-32-bytes!!")
+
+
+@pytest.fixture
+def logout_calls(monkeypatch):
+    calls: list[Request] = []
+
+    async def on_logout(request: Request, response):
+        calls.append(request)
+        return {"success": True, "from": "callback"}
+
+    monkeypatch.setattr(config.code, "on_logout", on_logout)
+    return calls
+
+
+class TestMcpOAuthCallback:
+    async def test_oauth_callback_rejects_an_unauthenticated_request(self, client):
+        response = await client.get(
+            MCP_OAUTH_CALLBACK_PATH, params={"code": "c", "state": "s"}
+        )
+
+        assert response.status_code == 401
+
+    async def test_oauth_callback_rejects_missing_code_or_state(
+        self, client, mcp_pending
+    ):
+        login_as(ALICE)
+
+        for params in ({}, {"state": "s"}, {"code": "c"}):
+            response = await client.get(MCP_OAUTH_CALLBACK_PATH, params=params)
+            assert response.status_code == 400
+            assert response.json()["detail"] in MCP_OAUTH_DETAILS
+
+    async def test_oauth_callback_rejects_an_unknown_state(self, client, mcp_pending):
+        login_as(ALICE)
+
+        response = await client.get(
+            MCP_OAUTH_CALLBACK_PATH, params={"code": "c", "state": "state-abc123"}
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] in MCP_OAUTH_DETAILS
+        assert "state-abc123" not in response.text
+
+    async def test_oauth_callback_rejects_an_expired_state(self, client, monkeypatch):
+        login_as(ALICE)
+        flows = PendingAuthorizations(ttl_seconds=0.01)
+        monkeypatch.setattr(
+            "chainlit.mcp_oauth.get_pending_authorizations", lambda: flows
+        )
+        flows.register("stale", "alice", SERVER_KEY)
+        await asyncio.sleep(0.02)
+
+        response = await client.get(
+            MCP_OAUTH_CALLBACK_PATH, params={"code": "c", "state": "stale"}
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] in MCP_OAUTH_DETAILS
+        assert "stale" not in response.text
+
+    async def test_oauth_callback_accepts_a_state_once(self, client, mcp_pending):
+        login_as(ALICE)
+        mcp_pending.register("state-1", "alice", SERVER_KEY)
+
+        first = await client.get(
+            MCP_OAUTH_CALLBACK_PATH, params={"code": "c", "state": "state-1"}
+        )
+        replay = await client.get(
+            MCP_OAUTH_CALLBACK_PATH, params={"code": "c", "state": "state-1"}
+        )
+
+        assert first.status_code == 200
+        assert replay.status_code == 400
+        assert replay.json()["detail"] in MCP_OAUTH_DETAILS
+
+    async def test_oauth_callback_refuses_another_users_state_without_consuming_it(
+        self, client, mcp_pending
+    ):
+        mcp_pending.register("owner-state", "alice", SERVER_KEY)
+        login_as(BOB)
+
+        refused = await client.get(
+            MCP_OAUTH_CALLBACK_PATH, params={"code": "c", "state": "owner-state"}
+        )
+
+        assert refused.status_code == 403
+        assert refused.json()["detail"] in MCP_OAUTH_DETAILS
+        assert "owner-state" not in refused.text
+        assert "alice" not in refused.text
+
+        login_as(ALICE)
+        accepted = await client.get(
+            MCP_OAUTH_CALLBACK_PATH,
+            params={"code": "the-code", "state": "owner-state"},
+        )
+        assert accepted.status_code == 200
+
+    async def test_oauth_callback_returns_a_tokenless_html_page(
+        self, client, mcp_pending
+    ):
+        login_as(ALICE)
+        handle = mcp_pending.register("state-1", "alice", SERVER_KEY)
+
+        response = await client.get(
+            MCP_OAUTH_CALLBACK_PATH,
+            params={"code": "secret-code", "state": "state-1"},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "no-referrer"
+        assert response.headers["content-type"].startswith("text/html")
+        assert "secret-code" not in response.text
+        assert "state-1" not in response.text
+        assert "access_token" not in response.text
+        assert handle._future.done()
+
+
+class TestMcpOAuthCallbackUrl:
+    def test_oauth_callback_url_shares_origin_and_prefix_with_login(self, monkeypatch):
+        monkeypatch.setenv("CHAINLIT_URL", "https://app.example.com")
+        monkeypatch.setenv("CHAINLIT_ROOT_PATH", "/chainlit")
+        request = make_request("/chainlit/mcp")
+
+        callback = get_mcp_oauth_callback_url(request)
+        login = (
+            get_user_facing_url(request.url.replace(path="/chainlit/auth/oauth/github"))
+            + "/callback"
+        )
+
+        assert callback == "https://app.example.com/chainlit/mcp/oauth/callback"
+        assert urlsplit(callback)[:2] == urlsplit(login)[:2]
+        assert urlsplit(login).path == "/chainlit/auth/oauth/github/callback"
+
+    def test_oauth_callback_url_keeps_root_path_without_chainlit_url(self, monkeypatch):
+        monkeypatch.delenv("CHAINLIT_URL", raising=False)
+        monkeypatch.setenv("CHAINLIT_ROOT_PATH", "/chainlit")
+
+        callback = get_mcp_oauth_callback_url(make_request("/chainlit/mcp"))
+
+        assert callback == "http://127.0.0.1:8000/chainlit/mcp/oauth/callback"
+
+
+class TestLogout:
+    async def test_it_forgets_the_users_tokens_and_pending_flows(
+        self, client, auth_enabled, mcp_store, mcp_pending, logout_calls
+    ):
+        await mcp_store.scoped("alice", SERVER_KEY).set_tokens(make_tokens("alice-at"))
+        await mcp_store.scoped("bob", SERVER_KEY).set_tokens(make_tokens("bob-at"))
+        mcp_pending.register("alice-flow", "alice", SERVER_KEY)
+        mcp_pending.register("bob-flow", "bob", SERVER_KEY)
+
+        client.cookies.set("access_token", create_jwt(ALICE))
+
+        response = await client.post("/logout")
+
+        assert response.status_code == 200
+        assert response.json() == {"success": True, "from": "callback"}
+        assert len(logout_calls) == 1
+        assert "access_token" in response.headers.get("set-cookie", "")
+        assert await mcp_store.scoped("alice", SERVER_KEY).get_tokens() is None
+        with pytest.raises(KeyError):
+            mcp_pending.resolve("alice-flow", "alice", "code")
+        # Another user's credentials and flow are untouched.
+        assert await mcp_store.scoped("bob", SERVER_KEY).get_tokens() is not None
+        mcp_pending.resolve("bob-flow", "bob", "code")
+
+    @pytest.mark.parametrize("token", ["", "garbage", "expired"])
+    async def test_it_clears_the_cookie_and_calls_on_logout_for_any_token(
+        self, client, auth_enabled, logout_calls, token, monkeypatch
+    ):
+        if token == "expired":
+            token = jwt.encode(
+                {
+                    "identifier": "alice",
+                    "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+                },
+                "test-secret-with-at-least-32-bytes!!",
+                algorithm="HS256",
+            )
+
+        if token:
+            client.cookies.set("access_token", token)
+
+        response = await client.post("/logout")
+
+        assert response.status_code == 200
+        assert len(logout_calls) == 1
+        if token:
+            assert "access_token" in response.headers.get("set-cookie", "")
+
+    async def test_a_raising_on_logout_still_clears_cookie_and_tokens(
+        self, client, auth_enabled, mcp_store, logout_calls, monkeypatch
+    ):
+        await mcp_store.scoped("alice", SERVER_KEY).set_tokens(make_tokens("alice-at"))
+
+        async def raising(request, response):
+            raise RuntimeError("on_logout exploded")
+
+        monkeypatch.setattr(config.code, "on_logout", raising)
+
+        client.cookies.set("access_token", create_jwt(ALICE))
+
+        response = await client.post("/logout")
+
+        assert response.status_code == 200
+        assert "access_token" in response.headers.get("set-cookie", "")
+        assert await mcp_store.scoped("alice", SERVER_KEY).get_tokens() is None
+
+    async def test_it_leaves_the_store_alone_without_a_cookie(self, client, mcp_store):
+        await mcp_store.scoped("alice", SERVER_KEY).set_tokens(make_tokens("alice-at"))
+
+        response = await client.post("/logout")
+
+        assert response.status_code == 200
+        assert await mcp_store.scoped("alice", SERVER_KEY).get_tokens() is not None
+
+    async def test_it_leaves_the_store_alone_with_auth_enabled_but_no_cookie(
+        self, client, auth_enabled, mcp_store, logout_calls
+    ):
+        await mcp_store.scoped("alice", SERVER_KEY).set_tokens(make_tokens("alice-at"))
+
+        response = await client.post("/logout")
+
+        assert response.status_code == 200
+        assert len(logout_calls) == 1
+        assert await mcp_store.scoped("alice", SERVER_KEY).get_tokens() is not None
+
+
+@pytest.fixture
+async def ws_session():
+    session = WebsocketSession(
+        id="mcp-session",
+        socket_id="mcp-socket",
+        emit=AsyncMock(),
+        emit_call=AsyncMock(),
+        user_env={},
+        client_type="webapp",
+        user=ALICE,
+    )
+    yield session
+    await session.delete()
+
+
+class TestMcpConnectErrorBody:
+    async def test_hostile_server_text_is_logged_but_not_echoed(
+        self, client, test_config, ws_session, monkeypatch, caplog
+    ):
+        test_config.features.mcp.enabled = True
+        test_config.features.mcp.streamable_http.enabled = True
+        login_as(ALICE)
+        hostile = "PRM body https://evil.example/token?secret=hostile-value"
+
+        def explode(*args, **kwargs):
+            raise RuntimeError(hostile)
+
+        monkeypatch.setattr(
+            "mcp.client.streamable_http.streamable_http_client", explode
+        )
+
+        with caplog.at_level(logging.WARNING):
+            response = await client.post(
+                "/mcp",
+                json={
+                    "sessionId": ws_session.id,
+                    "clientType": "streamable-http",
+                    "name": "weather",
+                    "url": SERVER_KEY,
+                },
+            )
+
+        assert response.status_code == 400
+        assert response.json() == {"detail": MCP_CONNECT_FAILED_DETAIL}
+        assert hostile not in response.text
+        assert "hostile-value" in caplog.text

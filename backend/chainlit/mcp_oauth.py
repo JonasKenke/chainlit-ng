@@ -2,9 +2,9 @@
 
 This module holds the in-memory token store, the pending-authorization map that
 correlates an OAuth redirect back to the user who started it, and the factory
-that adapts the MCP SDK's ``OAuthClientProvider`` to both. The OAuth flow wiring
-(callback route, ``/mcp`` integration) lands on top of it; nothing here is
-reachable from the rest of Chainlit yet.
+that adapts the MCP SDK's ``OAuthClientProvider`` to both. The callback route
+and logout use the process-wide instances below; the ``/mcp`` wiring will use
+the same ones.
 
 Tokens and dynamic-client-registration data live in one process-wide
 ``McpOAuthTokenStore`` keyed by ``(user identifier, canonical server key)``.
@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, NamedTuple, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from mcp.client.auth import OAuthClientProvider, TokenStorage
+from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import (
     AuthorizationCodeResult,
     OAuthClientInformationFull,
@@ -94,6 +94,29 @@ class McpAuthorizationTimeout(McpAuthorizationError):
 
 class McpTooManyFlows(McpOAuthError):
     """A user already has the maximum number of flows in flight."""
+
+
+# Client-visible failure details: the whole set a browser or a socket payload
+# may ever see. Exception text can carry a state, a URL or a token, and a state
+# mismatch names both states, so every failure maps to one of these strings.
+MCP_OAUTH_UNKNOWN_STATE_DETAIL = (
+    "This MCP authorization link is unknown or has expired."
+)
+MCP_OAUTH_OTHER_USER_DETAIL = "This MCP authorization belongs to a different user."
+MCP_OAUTH_FAILED_DETAIL = "The MCP authorization failed."
+MCP_OAUTH_TIMEOUT_DETAIL = "The MCP authorization was not completed in time."
+MCP_OAUTH_TOO_MANY_DETAIL = (
+    "Too many MCP authorizations are in progress; finish one first."
+)
+MCP_OAUTH_DETAILS = frozenset(
+    {
+        MCP_OAUTH_UNKNOWN_STATE_DETAIL,
+        MCP_OAUTH_OTHER_USER_DETAIL,
+        MCP_OAUTH_FAILED_DETAIL,
+        MCP_OAUTH_TIMEOUT_DETAIL,
+        MCP_OAUTH_TOO_MANY_DETAIL,
+    }
+)
 
 
 class Origin(NamedTuple):
@@ -458,6 +481,27 @@ class ScopedTokenStorage:
         )
 
 
+class ChainlitOAuthProvider(OAuthClientProvider):
+    """The SDK provider, plus cleanup of the token whose refresh just failed.
+
+    ``OAuthClientProvider._handle_refresh_response`` clears only the provider's
+    in-memory token and never calls ``storage``, so a rejected refresh token
+    would stay in the store and every later connect would retry it. The
+    override drops the stored token, but only if it is still the one this
+    provider read: a token written by a concurrent successful refresh survives.
+    """
+
+    def __init__(self, *, storage: ScopedTokenStorage, **kwargs) -> None:
+        self._scoped_storage = storage
+        super().__init__(storage=storage, **kwargs)
+
+    async def _handle_refresh_response(self, response) -> bool:
+        refreshed = await super()._handle_refresh_response(response)
+        if not refreshed:
+            self._scoped_storage.delete_failed_token()
+        return refreshed
+
+
 class PendingAuthorization:
     """One in-flight authorization, reachable through its SDK-minted ``state``.
 
@@ -753,7 +797,7 @@ class McpOAuthFlow:
     def __init__(
         self,
         *,
-        storage: TokenStorage,
+        storage: ScopedTokenStorage,
         pending: PendingAuthorizations,
         user_identifier: str,
         server_url: str,
@@ -775,7 +819,7 @@ class McpOAuthFlow:
         self._authorization_url_ready = asyncio.Event()
         self._authorization: Optional[PendingAuthorization] = None
 
-        self.provider = OAuthClientProvider(
+        self.provider = ChainlitOAuthProvider(
             server_url=server_url,
             client_metadata=OAuthClientMetadata(
                 client_name=client_name,
@@ -870,7 +914,7 @@ class McpOAuthFlow:
 
 def build_oauth_provider(
     *,
-    storage: TokenStorage,
+    storage: ScopedTokenStorage,
     pending: PendingAuthorizations,
     user_identifier: str,
     server_url: str,
@@ -911,3 +955,18 @@ def build_oauth_provider(
         on_redirect=on_redirect,
         on_failure=on_failure,
     )
+
+
+# One store and one pending map per process: nothing is persisted, so a restart
+# forces re-authorization. The routes reach them through these getters so the
+# callback, logout and the /mcp wiring cannot drift onto different instances.
+_token_store = McpOAuthTokenStore()
+_pending_authorizations = PendingAuthorizations()
+
+
+def get_token_store() -> McpOAuthTokenStore:
+    return _token_store
+
+
+def get_pending_authorizations() -> PendingAuthorizations:
+    return _pending_authorizations

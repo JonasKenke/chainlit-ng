@@ -42,6 +42,7 @@ from chainlit.auth import (
     get_configuration,
     get_current_user,
     require_login,
+    resolve_current_user_optional,
 )
 from chainlit.auth.cookie import (
     clear_auth_cookie,
@@ -513,6 +514,40 @@ def get_user_facing_url(url: URL):
     return config_url.__str__() + url.path
 
 
+# The OAuth callback sits on the same router as every other route, so it moves
+# with config.run.root_path like the login callback does.
+MCP_OAUTH_CALLBACK_PATH = "/mcp/oauth/callback"
+
+MCP_OAUTH_CALLBACK_PAGE = """<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>MCP authorization complete</title></head>
+  <body><p>Authorization complete. You can close this window and return to the chat.</p></body>
+</html>
+"""
+
+# A failed /mcp connect answers with this instead of the exception text: the SDK
+# error can quote a URL, a PRM document or a token from the OAuth flow.
+MCP_CONNECT_FAILED_DETAIL = "Could not connect to the MCP server."
+
+
+def get_mcp_oauth_callback_url(request: Request) -> str:
+    """Return the absolute URL the authorization server redirects back to.
+
+    Derived like the OAuth login callback: ``get_user_facing_url`` applies
+    ``CHAINLIT_URL`` and ``CHAINLIT_ROOT_PATH`` keeps the app prefix in front of
+    the route, so the two callbacks always share origin and prefix.
+    """
+    root_path = os.environ.get("CHAINLIT_ROOT_PATH", "")
+    if root_path == "/":
+        root_path = ""
+    url = request.url.replace(
+        path=f"{root_path}{MCP_OAUTH_CALLBACK_PATH}",
+        query="",
+        fragment="",
+    )
+    return get_user_facing_url(url)
+
+
 @router.get("/auth/config")
 async def auth(request: Request):
     return get_configuration()
@@ -613,11 +648,29 @@ async def login(
 
 @router.post("/logout")
 async def logout(request: Request, response: Response):
-    """Logout the user by calling the on_logout callback."""
+    """Logout the user by calling the on_logout callback.
+
+    Identity is resolved best effort: an absent, expired or invalid token must
+    not turn logout into a 401 before the cookie is cleared. When it resolves,
+    the user's MCP credentials and in-flight authorizations are dropped before
+    ``on_logout`` runs, so a failing callback cannot leave them behind.
+    """
+    from chainlit.mcp_oauth import get_pending_authorizations, get_token_store
+
+    user = await resolve_current_user_optional(request)
+    if user is not None:
+        get_token_store().forget_user(user.identifier)
+        get_pending_authorizations().cancel_user(user.identifier)
+
     clear_auth_cookie(request, response)
 
     if config.code.on_logout:
-        return await config.code.on_logout(request, response)
+        try:
+            return await config.code.on_logout(request, response)
+        except Exception:
+            # Still answer with the response that carries the cleared cookie.
+            logger.exception("on_logout callback failed")
+            return {"success": True}
 
     return {"success": True}
 
@@ -1952,6 +2005,59 @@ async def call_action(
     return JSONResponse(content={"success": True, "response": response})
 
 
+@router.get(MCP_OAUTH_CALLBACK_PATH)
+async def mcp_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    current_user: UserParam = None,
+):
+    """Deliver an authorization code to the flow that parked it.
+
+    Every failure answers with a fixed detail: exception text can carry a state,
+    a URL or a token, and a state mismatch names both states.
+    """
+    from chainlit.mcp_oauth import (
+        MCP_OAUTH_OTHER_USER_DETAIL,
+        MCP_OAUTH_UNKNOWN_STATE_DETAIL,
+        McpAuthorizationTimeout,
+        get_pending_authorizations,
+    )
+
+    if current_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+        )
+
+    if not code or not state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=MCP_OAUTH_UNKNOWN_STATE_DETAIL,
+        )
+
+    try:
+        get_pending_authorizations().resolve(state, current_user.identifier, code)
+    except PermissionError:
+        # The flow is left alone: its owner can still complete it.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=MCP_OAUTH_OTHER_USER_DETAIL,
+        )
+    except (KeyError, McpAuthorizationTimeout):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=MCP_OAUTH_UNKNOWN_STATE_DETAIL,
+        )
+
+    return HTMLResponse(
+        content=MCP_OAUTH_CALLBACK_PAGE,
+        headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
+
+
 @router.post("/mcp")
 async def connect_mcp(
     payload: ConnectMCPRequest,
@@ -2160,11 +2266,16 @@ async def connect_mcp(
             await task
         except BaseException:
             pass
+        error = cast(BaseException, result_holder["error"])
+        logger.warning(
+            "MCP connection %r failed: %s",
+            payload.name,
+            error,
+            exc_info=error,
+        )
         return JSONResponse(
             status_code=400,
-            content={
-                "detail": f"Could not connect to the MCP: {result_holder['error']!s}"
-            },
+            content={"detail": MCP_CONNECT_FAILED_DETAIL},
         )
 
     mcp_client_session = cast("ClientSession", result_holder["client"])
@@ -2180,9 +2291,12 @@ async def connect_mcp(
                 await task
             except BaseException:
                 pass
+            logger.warning(
+                "on_mcp_connect callback for %r failed", payload.name, exc_info=e
+            )
             return JSONResponse(
                 status_code=400,
-                content={"detail": f"Could not connect to the MCP: {e!s}"},
+                content={"detail": MCP_CONNECT_FAILED_DETAIL},
             )
 
     # Store the session

@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx2
 import pytest
 from mcp.client.auth import OAuthClientProvider
 from mcp.shared.auth import (
@@ -889,3 +890,51 @@ class TestBuildOAuthProvider:
     async def test_authorization_url_wait_is_bounded(self, flow):
         with pytest.raises(McpAuthorizationError):
             await flow.wait_for_authorization_url(timeout=0.01)
+
+
+class TestRefreshFailure:
+    async def test_a_failed_refresh_deletes_the_token_it_read(self, store, pending):
+        storage = store.scoped("alice", SERVER_KEY)
+        await storage.set_tokens(make_tokens("access-1", "refresh-1"))
+        # The provider reads the token, and its generation, before refreshing.
+        await storage.get_tokens()
+        flow = build_oauth_provider(
+            storage=storage,
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+        )
+
+        failed = await flow.provider._handle_refresh_response(httpx2.Response(400))
+
+        assert failed is False
+        assert await storage.get_tokens() is None
+
+    async def test_a_concurrent_successful_refresh_survives(self, store, pending):
+        storage = store.scoped("alice", SERVER_KEY)
+        await storage.set_tokens(make_tokens("access-1", "refresh-1"))
+        await storage.get_tokens()
+        flow = build_oauth_provider(
+            storage=storage,
+            pending=pending,
+            user_identifier="alice",
+            server_url=SERVER_KEY,
+            session_id="session-1",
+            name="weather",
+            redirect_uri=REDIRECT_URI,
+        )
+        # Another tab rotates the token between this provider's read and its
+        # failed refresh; the loser must not delete the winner's token.
+        await store.scoped("alice", SERVER_KEY).set_tokens(
+            make_tokens("access-2", "refresh-2")
+        )
+
+        failed = await flow.provider._handle_refresh_response(httpx2.Response(400))
+
+        assert failed is False
+        surviving = await store.scoped("alice", SERVER_KEY).get_tokens()
+        assert surviving is not None
+        assert surviving.access_token == "access-2"
