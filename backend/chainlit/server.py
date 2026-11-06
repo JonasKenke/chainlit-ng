@@ -407,6 +407,13 @@ def replace_between_tags(
     return re.sub(pattern, start_tag + replacement + end_tag, text, flags=re.DOTALL)
 
 
+def prefix_asset_url(url: Optional[str], root_path: str) -> Optional[str]:
+    """Prefix a root-relative asset URL with the app root path."""
+    if not url or not root_path or not url.startswith("/") or url.startswith("//"):
+        return url
+    return f"{root_path.rstrip('/')}{url}"
+
+
 def get_html_template(root_path):
     """
     Get HTML template for the index view.
@@ -429,8 +436,10 @@ def get_html_template(root_path):
     default_meta_image_url = (
         "https://chainlit-cloud.s3.eu-west-3.amazonaws.com/logo/chainlit_banner.png"
     )
-    meta_image_url = config.ui.custom_meta_image_url or default_meta_image_url
-    favicon_path = "/favicon"
+    meta_image_url = prefix_asset_url(
+        config.ui.custom_meta_image_url or default_meta_image_url, root_path
+    )
+    favicon_path = prefix_asset_url("/favicon", root_path)
 
     tags = f"""<title>{config.ui.name}</title>
     <link rel="icon" href="{favicon_path}" />
@@ -449,15 +458,17 @@ def get_html_template(root_path):
 
     css = None
     if config.ui.custom_css:
-        css = f"""<link rel="stylesheet" type="text/css" href="{config.ui.custom_css}" {config.ui.custom_css_attributes}>"""
+        css_url = prefix_asset_url(config.ui.custom_css, root_path)
+        css = f"""<link rel="stylesheet" type="text/css" href="{css_url}" {config.ui.custom_css_attributes}>"""
 
     if config.ui.custom_js:
-        js += f"""<script src="{config.ui.custom_js}" {config.ui.custom_js_attributes}></script>"""
+        js_url = prefix_asset_url(config.ui.custom_js, root_path)
+        js += f"""<script src="{js_url}" {config.ui.custom_js_attributes}></script>"""
 
     font = None
     if custom_theme and "custom_fonts" in custom_theme:
         font = "\n".join(
-            f"""<link rel="stylesheet" href="{f}">"""
+            f"""<link rel="stylesheet" href="{prefix_asset_url(f, root_path)}">"""
             for f in custom_theme["custom_fonts"]
         )
 
@@ -465,6 +476,8 @@ def get_html_template(root_path):
 
     with open(index_html_file_path, encoding="utf-8") as f:
         content = f.read()
+        content = content.replace('href="/', f'href="{root_path}/')
+        content = content.replace('src="/', f'src="{root_path}/')
         content = content.replace(PLACEHOLDER, tags)
         if js:
             content = content.replace(JS_PLACEHOLDER, js)
@@ -474,8 +487,6 @@ def get_html_template(root_path):
             content = replace_between_tags(
                 content, "<!-- FONT START -->", "<!-- FONT END -->", font
             )
-        content = content.replace('href="/', f'href="{root_path}/')
-        content = content.replace('src="/', f'src="{root_path}/')
         return content
 
 
@@ -1788,6 +1799,7 @@ def _sanitize_custom_element(element_dict: "ElementDict") -> "CustomElement":
         name=element_dict["name"],
         props=element_dict.get("props") or {},
         display=element_dict["display"],
+        auto_expand=element_dict.get("autoExpand", True),
     )
 
 

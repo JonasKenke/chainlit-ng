@@ -183,6 +183,7 @@ Add a cached JWKS client and an async verifier:
 import hmac
 from functools import lru_cache
 
+
 def _azure_hf_jwks_url() -> str:
     tenant = os.environ.get("OAUTH_AZURE_AD_HYBRID_TENANT_ID", "common")
     authority = os.environ.get(
@@ -208,9 +209,7 @@ async def _verify_azure_hf_id_token(
         raise ValueError("missing nonce cookie")
 
     client = _azure_hf_jwks_client(_azure_hf_jwks_url())
-    signing_key = await asyncio.to_thread(
-        client.get_signing_key_from_jwt, id_token
-    )
+    signing_key = await asyncio.to_thread(client.get_signing_key_from_jwt, id_token)
 
     decode_kwargs = {
         "algorithms": ["RS256"],
