@@ -3,7 +3,9 @@ import pytest
 from chainlit.chat_settings import ChatSettings
 from chainlit.input_widget import (
     Checkbox,
+    MultiSelect,
     NumberInput,
+    RadioGroup,
     Select,
     Slider,
     Switch,
@@ -341,3 +343,162 @@ class TestChatSettingsEdgeCases:
             assert result["timeout"] == 30
             assert result["mode"] == "dev"
             assert len(result) == 4
+
+
+class TestChatSettingsDependencies:
+    """Test suite for declarative dependencies between chat settings widgets."""
+
+    @staticmethod
+    def _country(**kwargs):
+        return Select(id="country", label="Country", values=["US", "CA"], **kwargs)
+
+    @staticmethod
+    def _city(**kwargs):
+        return Select(
+            id="city",
+            label="City",
+            items={"Other": "other"},
+            dependent_items={"US": {"New York": "ny"}},
+            **kwargs,
+        )
+
+    @staticmethod
+    def _error(inputs):
+        with pytest.raises(ValueError, match="depends_on") as exc_info:
+            ChatSettings(inputs=inputs)
+        return str(exc_info.value)
+
+    def test_parent_and_child_in_different_tabs(self):
+        country = self._country(initial_value="US")
+        city = self._city(depends_on="country", initial_value="ny")
+        settings = ChatSettings(
+            inputs=[
+                Tab(id="location", label="Location", inputs=[country]),
+                Tab(id="details", label="Details", inputs=[city]),
+            ]
+        )
+
+        assert settings.settings() == {"country": "US", "city": "ny"}
+        serialized = settings._inputs_as_dicts()
+        assert serialized[1]["inputs"][0]["depends_on"] == "country"
+        assert serialized[1]["inputs"][0]["dependent_items"] == {
+            "US": [{"label": "New York", "value": "ny"}]
+        }
+
+    def test_child_initial_uses_items_fallback(self):
+        country = Select(
+            id="country", label="Country", values=["MX"], initial_value="MX"
+        )
+        city = self._city(depends_on="country", initial_value="other")
+
+        settings = ChatSettings(inputs=[country, city])
+
+        assert settings.settings() == {"country": "MX", "city": "other"}
+
+    def test_radio_parent(self):
+        theme = RadioGroup(
+            id="theme", label="Theme", items={"Dark": "dark"}, initial_value="dark"
+        )
+        city = Select(
+            id="city",
+            label="City",
+            items={"Other": "other"},
+            depends_on="theme",
+            dependent_items={"dark": {"New York": "ny"}},
+        )
+
+        settings = ChatSettings(inputs=[theme, city])
+
+        assert settings.settings() == {"theme": "dark", "city": None}
+
+    def test_multiselect_child_initial(self):
+        country = self._country(initial_value="US")
+        cities = MultiSelect(
+            id="cities",
+            label="Cities",
+            items={"Other": "other"},
+            depends_on="country",
+            dependent_items={"US": {"New York": "ny"}},
+            initial=["ny"],
+        )
+
+        assert ChatSettings(inputs=[country, cities]).settings() == {
+            "country": "US",
+            "cities": ["ny"],
+        }
+
+        cities.initial = ["paris"]
+        message = self._error([country, cities])
+
+        assert "'cities'" in message
+        assert "'country'" in message
+
+    def test_unknown_parent(self):
+        message = self._error([self._city(depends_on="missing")])
+
+        assert "'city'" in message
+        assert "'missing'" in message
+        assert "depends_on" in message
+
+    def test_parent_must_be_select_or_radio(self):
+        country = MultiSelect(id="country", label="Country", values=["US"])
+        message = self._error([country, self._city(depends_on="country")])
+
+        assert "'city'" in message
+        assert "'country'" in message
+        assert "depends_on" in message
+
+    def test_empty_dependent_items(self):
+        city = Select(
+            id="city", label="City", items={"Other": "other"}, depends_on="country"
+        )
+        message = self._error([self._country(), city])
+
+        assert "'city'" in message
+        assert "'country'" in message
+        assert "dependent_items" in message
+
+    def test_dependent_items_without_depends_on(self):
+        message = self._error([self._city()])
+
+        assert "'city'" in message
+        assert "dependent_items" in message
+        assert "depends_on" in message
+
+    def test_self_dependency(self):
+        message = self._error([self._city(depends_on="city")])
+
+        assert "'city'" in message
+        assert "depends_on" in message
+
+    def test_cycle(self):
+        first = Select(
+            id="first",
+            label="First",
+            items={"A": "a"},
+            depends_on="second",
+            dependent_items={"B": {"b": "b"}},
+        )
+        second = Select(
+            id="second",
+            label="Second",
+            items={"B": "b"},
+            depends_on="first",
+            dependent_items={"A": {"a": "a"}},
+        )
+
+        message = self._error([first, second])
+
+        assert "'first'" in message
+        assert "'second'" in message
+        assert "depends_on" in message
+
+    def test_incompatible_initial_value(self):
+        country = self._country(initial_value="CA")
+        city = self._city(depends_on="country", initial_value="ny")
+
+        message = self._error([country, city])
+
+        assert "'city'" in message
+        assert "'country'" in message
+        assert "depends_on" in message

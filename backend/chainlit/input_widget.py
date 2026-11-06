@@ -8,6 +8,22 @@ from pydantic.dataclasses import dataclass
 from chainlit.types import InputWidgetType
 
 
+def _with_dependencies(
+    data: Dict[str, Any],
+    depends_on: Optional[str],
+    dependent_items: Dict[str, Dict[str, str]],
+) -> Dict[str, Any]:
+    if depends_on:
+        data["depends_on"] = depends_on
+        data["dependent_items"] = {
+            parent_value: [
+                {"label": label, "value": value} for label, value in items.items()
+            ]
+            for parent_value, items in dependent_items.items()
+        }
+    return data
+
+
 @dataclass
 class InputWidget:
     id: str
@@ -74,7 +90,25 @@ class Slider(InputWidget):
 
 @dataclass
 class Select(InputWidget):
-    """Useful to create a select input."""
+    """Useful to create a select input.
+
+    Use ``depends_on`` and ``dependent_items`` to change the options based on
+    another select or radio input:
+
+        Select(
+            id="city",
+            label="City",
+            depends_on="country",
+            dependent_items={
+                "US": {"New York": "ny", "San Francisco": "sf"},
+                "CA": {"Toronto": "toronto"},
+            },
+        )
+
+    ``items`` is the fallback option set for parent values that are not in
+    ``dependent_items``. Dependencies only guide the UI; apps must still
+    validate submitted setting values.
+    """
 
     type: InputWidgetType = "select"
     initial: Optional[str] = None
@@ -82,6 +116,8 @@ class Select(InputWidget):
     initial_value: Optional[str] = None
     values: List[str] = Field(default_factory=list)
     items: Dict[str, str] = Field(default_factory=dict)
+    depends_on: Optional[str] = None
+    dependent_items: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
     def __post_init__(
         self,
@@ -112,18 +148,22 @@ class Select(InputWidget):
             )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "type": self.type,
-            "id": self.id,
-            "label": self.label,
-            "initial": self.initial,
-            "items": [
-                {"label": id, "value": value} for id, value in self.items.items()
-            ],
-            "tooltip": self.tooltip,
-            "description": self.description,
-            "disabled": self.disabled,
-        }
+        return _with_dependencies(
+            {
+                "type": self.type,
+                "id": self.id,
+                "label": self.label,
+                "initial": self.initial,
+                "items": [
+                    {"label": id, "value": value} for id, value in self.items.items()
+                ],
+                "tooltip": self.tooltip,
+                "description": self.description,
+                "disabled": self.disabled,
+            },
+            self.depends_on,
+            self.dependent_items,
+        )
 
 
 @dataclass
@@ -198,6 +238,8 @@ class MultiSelect(InputWidget):
     initial: List[str] = Field(default_factory=list)
     values: List[str] = Field(default_factory=list)
     items: Dict[str, str] = Field(default_factory=dict)
+    depends_on: Optional[str] = None
+    dependent_items: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
     def __post_init__(
         self,
@@ -216,18 +258,22 @@ class MultiSelect(InputWidget):
             self.items = {value: value for value in self.values}
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "type": self.type,
-            "id": self.id,
-            "label": self.label,
-            "initial": self.initial,
-            "items": [
-                {"label": id, "value": value} for id, value in self.items.items()
-            ],
-            "tooltip": self.tooltip,
-            "description": self.description,
-            "disabled": self.disabled,
-        }
+        return _with_dependencies(
+            {
+                "type": self.type,
+                "id": self.id,
+                "label": self.label,
+                "initial": self.initial,
+                "items": [
+                    {"label": id, "value": value} for id, value in self.items.items()
+                ],
+                "tooltip": self.tooltip,
+                "description": self.description,
+                "disabled": self.disabled,
+            },
+            self.depends_on,
+            self.dependent_items,
+        )
 
 
 @dataclass
@@ -259,6 +305,8 @@ class RadioGroup(InputWidget):
     initial_value: Optional[str] = None
     values: List[str] = Field(default_factory=list)
     items: Dict[str, str] = Field(default_factory=dict)
+    depends_on: Optional[str] = None
+    dependent_items: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
     def __post_init__(
         self,
@@ -289,18 +337,22 @@ class RadioGroup(InputWidget):
             )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "type": self.type,
-            "id": self.id,
-            "label": self.label,
-            "initial": self.initial,
-            "items": [
-                {"label": id, "value": value} for id, value in self.items.items()
-            ],
-            "tooltip": self.tooltip,
-            "description": self.description,
-            "disabled": self.disabled,
-        }
+        return _with_dependencies(
+            {
+                "type": self.type,
+                "id": self.id,
+                "label": self.label,
+                "initial": self.initial,
+                "items": [
+                    {"label": id, "value": value} for id, value in self.items.items()
+                ],
+                "tooltip": self.tooltip,
+                "description": self.description,
+                "disabled": self.disabled,
+            },
+            self.depends_on,
+            self.dependent_items,
+        )
 
 
 @dataclass
