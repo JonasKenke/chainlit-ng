@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from chainlit import config as chainlit_config
-from chainlit.config import ChainlitConfig
+from chainlit.config import DEFAULT_CONFIG_STR, ChainlitConfig, UISettings
 
 
 class TestLoadSettingsMetaGuard:
@@ -137,3 +137,29 @@ class TestLoadTranslation:
             chainlit_config, "config_translation_dir", str(translation_dir)
         )
         assert test_config.load_translation("fr") == {"greeting": "Hello"}
+
+
+class TestUISettings:
+    def test_cot_display_defaults_to_list(self):
+        assert UISettings(name="Assistant").cot_display == "list"
+
+    def test_cot_display_accepts_compact(self):
+        assert (
+            UISettings(name="Assistant", cot_display="compact").cot_display == "compact"
+        )
+
+    def test_config_template_documents_cot_display(self):
+        assert '# cot_display = "list"' in DEFAULT_CONFIG_STR
+
+
+class TestCompactStepsTranslations:
+    def test_all_locales_define_compact_step_labels(self):
+        files = sorted(Path(chainlit_config.TRANSLATIONS_DIR).glob("*.json"))
+        assert files
+
+        for file in files:
+            status = json.loads(file.read_text(encoding="utf-8"))["chat"]["messages"][
+                "status"
+            ]
+            assert "{{count}}" in status["usedSteps"], file.name
+            assert "{{count}}" in status["usedTools"], file.name
