@@ -21,7 +21,12 @@ from chainlit.config import (
     ChainlitConfig,
     SpontaneousFileUploadFeature,
 )
-from chainlit.server import _verify_azure_hf_id_token, app
+from chainlit.server import (
+    _verify_azure_hf_id_token,
+    app,
+    get_html_template,
+    prefix_asset_url,
+)
 from chainlit.types import AskFileSpec
 from chainlit.user import PersistedUser, User
 
@@ -1427,3 +1432,95 @@ async def test_verify_azure_hf_token_single_tenant_issuer(
             wrong_token,
             "login-nonce",
         )
+
+
+@pytest.mark.parametrize(
+    ("url", "root_path", "expected"),
+    [
+        ("/public/test.css", "/app", "/app/public/test.css"),
+        ("/public/test.css", "/app/", "/app/public/test.css"),
+        ("/public/test.css", "", "/public/test.css"),
+        (
+            "https://cdn.example.com/test.css",
+            "/app",
+            "https://cdn.example.com/test.css",
+        ),
+        ("http://cdn.example.com/test.css", "/app", "http://cdn.example.com/test.css"),
+        ("//cdn.example.com/test.css", "/app", "//cdn.example.com/test.css"),
+        ("data:text/css,body{}", "/app", "data:text/css,body{}"),
+        (None, "/app", None),
+    ],
+)
+def test_prefix_asset_url(url: str | None, root_path: str, expected: str | None):
+    assert prefix_asset_url(url, root_path) == expected
+
+
+@pytest.fixture
+def html_build_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "index.html").write_text(
+        """<!doctype html>
+<html>
+  <head>
+    <!-- TAG INJECTION PLACEHOLDER -->
+    <!-- FONT START --><!-- FONT END -->
+    <!-- JS INJECTION PLACEHOLDER -->
+    <!-- CSS INJECTION PLACEHOLDER -->
+    <script type="module" src="/assets/app.js"></script>
+    <link rel="stylesheet" href="/assets/app.css">
+  </head>
+</html>""",
+        encoding="utf-8",
+    )
+    public_dir = tmp_path / "public"
+    public_dir.mkdir()
+    monkeypatch.setattr("chainlit.server.build_dir", str(build_dir))
+    monkeypatch.setattr("chainlit.server.public_dir", str(public_dir))
+
+
+def test_get_html_template_prefixes_configured_assets(
+    html_build_dirs, test_config: ChainlitConfig
+):
+    test_config.ui.custom_css = "/public/custom.css"
+    test_config.ui.custom_js = "/public/custom.js"
+    test_config.ui.custom_meta_image_url = "/public/banner.png"
+
+    html = get_html_template("/app")
+
+    assert 'href="/app/public/custom.css"' in html
+    assert 'src="/app/public/custom.js"' in html
+    assert 'content="/app/public/banner.png"' in html
+    assert 'href="/app/favicon"' in html
+    assert 'src="/app/assets/app.js"' in html
+    assert 'href="/app/assets/app.css"' in html
+
+
+def test_get_html_template_without_root_path_keeps_configured_assets(
+    html_build_dirs, test_config: ChainlitConfig
+):
+    test_config.ui.custom_css = "/public/custom.css"
+    test_config.ui.custom_js = "/public/custom.js"
+    test_config.ui.custom_meta_image_url = "/public/banner.png"
+
+    html = get_html_template("")
+
+    assert 'href="/public/custom.css"' in html
+    assert 'src="/public/custom.js"' in html
+    assert 'content="/public/banner.png"' in html
+    assert 'href="/favicon"' in html
+    assert 'src="/assets/app.js"' in html
+
+
+def test_get_html_template_keeps_external_assets(
+    html_build_dirs, test_config: ChainlitConfig
+):
+    test_config.ui.custom_css = "https://cdn.example.com/custom.css"
+    test_config.ui.custom_js = "//cdn.example.com/custom.js"
+    test_config.ui.custom_meta_image_url = "https://cdn.example.com/banner.png"
+
+    html = get_html_template("/app")
+
+    assert 'href="https://cdn.example.com/custom.css"' in html
+    assert 'src="//cdn.example.com/custom.js"' in html
+    assert 'content="https://cdn.example.com/banner.png"' in html
