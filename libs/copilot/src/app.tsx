@@ -18,6 +18,9 @@ interface Props {
   widgetConfig: IWidgetConfig;
 }
 
+const BLOCKED_COOKIE_ERROR =
+  'Authentication failed. This browser may be blocking third-party cookies. Serve Chainlit on the same site as this page (recommended), or allow third-party cookies for this site.';
+
 declare global {
   interface Window {
     cl_shadowRootElement: HTMLDivElement;
@@ -32,7 +35,7 @@ declare global {
 }
 
 export default function App({ widgetConfig }: Props) {
-  const { isAuthenticated, data } = useAuth();
+  const { isAuthenticated, data, setUserFromAPI } = useAuth();
   const apiClient = useContext(ChainlitContext);
   const { i18n } = useTranslation();
   const { startNewChat } = useCopilotInteract();
@@ -63,6 +66,19 @@ export default function App({ widgetConfig }: Props) {
       } else {
         apiClient
           .jwtAuth(widgetConfig.accessToken)
+          .then(async () => {
+            // A dropped Set-Cookie still resolves jwtAuth; only /user can detect it.
+            const res = await fetch(apiClient.buildEndpoint('/user'), {
+              credentials: 'include'
+            });
+            if (res.status === 401) {
+              setAuthError(BLOCKED_COOKIE_ERROR);
+            } else if (!res.ok) {
+              setAuthError(`${res.status} ${res.statusText}`);
+            } else {
+              await setUserFromAPI();
+            }
+          })
           .catch((err) => setAuthError(String(err)));
       }
     } else {
