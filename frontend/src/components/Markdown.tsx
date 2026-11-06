@@ -42,6 +42,55 @@ interface Props {
   className?: string;
 }
 
+type TextDirectiveHandler = NonNullable<
+  NonNullable<Options['remarkRehypeOptions']>['handlers']
+>['textDirective'];
+
+const hasOwn = Object.prototype.hasOwnProperty;
+
+// Preserve the original syntax unless another plugin explicitly mapped the
+// directive to a hast node.
+const preserveUnhandledTextDirective: TextDirectiveHandler = (state, node) => {
+  const data = node.data || {};
+  const hasHastData = ['hName', 'hProperties', 'hChildren'].some((key) =>
+    hasOwn.call(data, key)
+  );
+
+  if (hasHastData) {
+    const result = {
+      type: 'element' as const,
+      tagName: 'div',
+      properties: {},
+      children: state.all(node)
+    };
+
+    state.patch(node, result);
+    return state.applyData(node, result);
+  }
+
+  const source = state.options.file?.value;
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  const result = {
+    type: 'text' as const,
+    value:
+      typeof source === 'string' &&
+      typeof start === 'number' &&
+      typeof end === 'number'
+        ? source.slice(start, end)
+        : `:${node.name}`
+  };
+
+  state.patch(node, result);
+  return result;
+};
+
+const remarkRehypeOptions: Readonly<Options['remarkRehypeOptions']> = {
+  handlers: {
+    textDirective: preserveUnhandledTextDirective
+  }
+};
+
 const cursorPlugin = () => {
   return (tree: any) => {
     visit(tree, 'text', (node: any, index, parent) => {
@@ -138,6 +187,7 @@ const Markdown = ({
     <div className={cn('prose lg:prose-xl', className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
+        remarkRehypeOptions={remarkRehypeOptions}
         rehypePlugins={rehypePlugins}
         components={{
           ...alertComponents, // add alert components
