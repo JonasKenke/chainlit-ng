@@ -1,5 +1,4 @@
 import { cn } from '@/lib/utils';
-import hljs from 'highlight.js';
 import { useEffect, useRef } from 'react';
 
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -16,25 +15,38 @@ interface CodeSnippetProps {
 const HighlightedCode = ({ language, children }: CodeSnippetProps) => {
   const codeRef = useRef<HTMLElement>(null);
 
-  if (!hljs.getLanguage(language)) {
-    language = 'txt';
-  }
-
   useEffect(() => {
-    if (codeRef.current) {
-      const highlighted =
-        codeRef.current.getAttribute('data-highlighted') === 'yes';
-      if (!highlighted) {
-        hljs.highlightElement(codeRef.current);
-      }
-    }
-  }, []);
+    let cancelled = false;
+
+    import('highlight.js')
+      .then(({ default: hljs }) => {
+        const code = codeRef.current;
+        // Ignore a load that finishes after an unmount or newer content.
+        if (cancelled || !code || code.textContent !== children) {
+          return;
+        }
+
+        if (!hljs.getLanguage(language)) {
+          code.classList.replace(`language-${language}`, 'language-txt');
+        }
+
+        code.removeAttribute('data-highlighted');
+        hljs.highlightElement(code);
+      })
+      .catch(() => {
+        // Keep the plain code block if the chunk fails to load.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [language, children]);
 
   return (
     <pre className="m-0">
       <code
         ref={codeRef}
-        className={`language-${language} font-mono text-sm rounded-b-md block`}
+        className={`language-${language} hljs font-mono text-sm rounded-b-md block`}
       >
         {children}
       </code>
