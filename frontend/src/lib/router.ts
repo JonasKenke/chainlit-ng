@@ -7,4 +7,13 @@ const getRouterBasename = () => {
   }
 };
 
+const ABSOLUTE_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+// Absolute URL for an app route, keeping the configured root path.
+export const getAppUrl = (path: string) => {
+  if (ABSOLUTE_URL.test(path)) return path;
+  const basename = getRouterBasename().replace(/\/+$/, '');
+  return `${window.location.origin}${basename}/${path.replace(/^\/+/, '')}`;
+};
+
 export default getRouterBasename;
