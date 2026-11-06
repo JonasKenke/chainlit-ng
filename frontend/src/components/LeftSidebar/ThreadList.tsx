@@ -205,29 +205,36 @@ export function ThreadList({
 
   const handleDeleteThread = async () => {
     if (!threadIdToDelete) return;
-    if (
-      threadIdToDelete === idToResume ||
-      threadIdToDelete === currentThreadId
-    ) {
+    const threadId = threadIdToDelete;
+    const isActiveThread =
+      threadId === idToResume || threadId === currentThreadId;
+
+    if (isActiveThread) {
+      // Leave the thread route before deleting: AutoResumeThread would
+      // otherwise re-select the thread while the request is in flight.
       clear();
+      navigate('/');
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
-    toast.promise(apiClient.deleteThread(threadIdToDelete), {
+    toast.promise(apiClient.deleteThread(threadId), {
       loading: (
         <Translator path="threadHistory.thread.actions.delete.inProgress" />
       ),
       success: () => {
         setThreadHistory((prev) => ({
           ...prev,
-          threads: prev?.threads?.filter((t) => t.id !== threadIdToDelete)
+          threads: prev?.threads?.filter((t) => t.id !== threadId)
         }));
-        navigate('/');
         return (
           <Translator path="threadHistory.thread.actions.delete.success" />
         );
       },
       error: (err) => {
+        if (isActiveThread) {
+          // The thread still exists, so restore the view the user left.
+          navigate(`/thread/${threadId}`);
+        }
         if (err instanceof ClientError) {
           return <span>{err.message}</span>;
         } else {
