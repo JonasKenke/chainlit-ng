@@ -38,7 +38,10 @@ from chainlit.mcp_oauth import (
     MCP_OAUTH_FAILED_DETAIL,
     MCP_OAUTH_TIMEOUT_DETAIL,
     MCP_OAUTH_TOO_MANY_DETAIL,
+    OAUTH_ROLE_EXTENSION,
+    TRANSPORT_ROLE,
     McpAuthorizationTimeout,
+    McpOAuthOriginError,
     McpOAuthRateLimiter,
     McpOAuthTokenStore,
     PendingAuthorizations,
@@ -344,6 +347,19 @@ class TestMcpConnectionEdgeCases:
             True,
         ),
         ("https://allowed.com/api/\uff0f../admin", ["https://allowed.com/api"], True),
+        # Ambiguities that only appear at some origins: path parameters,
+        # NUL/control truncation, encoded ';', and IIS %u escapes.
+        ("https://allowed.com/api/..;/admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/..%00/admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/..%3b/admin", ["https://allowed.com/api"], True),
+        (
+            "https://allowed.com/api/%u002e%u002e/admin",
+            ["https://allowed.com/api"],
+            True,
+        ),
+        ("https://allowed.com/api/..%7f/admin", ["https://allowed.com/api"], True),
+        # A legitimate percent-encoded path segment must still pass.
+        ("https://allowed.com/api/name%20x", ["https://allowed.com/api"], False),
     ],
 )
 def test_validate_mcp_url(url, allowed_urls, should_raise):
@@ -364,6 +380,22 @@ class TestValidateMcpHeaders:
     @pytest.mark.parametrize("header_name", ["COOKIE", "X-Forwarded-For"])
     def test_restricted_headers_are_case_insensitive(self, header_name):
         assert validate_mcp_headers({header_name: "value"}) is None
+
+    @pytest.mark.parametrize(
+        "header_name",
+        [
+            "X-Forwarded-User",
+            "X_Forwarded_For",
+            "X-Original-Host",
+            "X-Rewrite-URL",
+            "X-Forwarded-Client-Cert",
+            "X-Scheme",
+        ],
+    )
+    def test_proxy_identity_prefixes_are_stripped(self, header_name):
+        assert validate_mcp_headers({header_name: "spoof", "X-Custom": "keep"}) == {
+            "X-Custom": "keep"
+        }
 
     def test_authorization_survives(self):
         headers = {"Authorization": "Bearer secret-token"}
@@ -2094,10 +2126,10 @@ class TestUserProvidedMcpServers:
         assert body["isUserProvided"] is True
         assert body["url"] == "https://allowed.example.com/api/sse"
         assert body["clientType"] == "sse"
-        assert body["headers"] == {
-            "Authorization": "Bearer user-token",
-            "X-Custom": "keep",
-        }
+        # Headers are not echoed: the frontend persists returned headers to
+        # localStorage, so a bearer token must not come back in the response.
+        assert "headers" not in body
+        assert "user-token" not in response.text
         assert "session=stolen" not in response.text
         assert "10.0.0.1" not in response.text
 
@@ -2327,4 +2359,102 @@ class TestUserProvidedMcpServers:
 
         assert response.status_code == 400
         assert "evil.example.com" in response.json()["detail"]
+        assert elapsed < 5, f"fail-fast did not fire; took {elapsed:.1f}s"
+
+    async def test_callback_exception_text_is_not_returned(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        self._enable_user_servers(test_config, ["https://allowed.example.com/api"])
+
+        @contextlib.asynccontextmanager
+        async def fake_sse(url, headers=None, httpx_client_factory=None):
+            yield (AsyncMock(), AsyncMock())
+
+        async def explode(_connection, _client):
+            raise ValueError("secret-token")
+
+        monkeypatch.setattr("mcp.client.sse.sse_client", fake_sse)
+        monkeypatch.setattr(test_config.code, "on_mcp_connect", explode)
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp",
+            json={
+                "sessionId": ws_session.id,
+                "name": "custom",
+                "url": "https://allowed.example.com/api",
+                "clientType": "sse",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_CONNECT_FAILED_DETAIL
+        assert "secret-token" not in response.text
+
+
+class TestOAuthTransportAllowlist:
+    async def test_same_origin_redirect_outside_the_allowlist_fails_fast(
+        self,
+        client,
+        oauth_config,
+        ws_session,
+        fake_sdk,
+        fake_flows,
+        mcp_pending,
+        mcp_store,
+        mcp_rate_limiter,
+        monkeypatch,
+    ):
+        allowed_url = "https://mcp.example.com/api"
+        oauth_config.features.mcp.user_servers.allowed_urls = [allowed_url]
+
+        async def never(_self, timeout: float | None = None) -> None:
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(
+            FakeOAuthFlow, "wait_for_authorization_url", never, raising=True
+        )
+        storage = mcp_store.scoped("alice", canonical_server_key(allowed_url))
+        await storage.set_tokens(
+            OAuthToken(access_token="stored-at", refresh_token="stored-rt")
+        )
+
+        attempts: list[tuple[str, str]] = []
+
+        @contextlib.asynccontextmanager
+        async def redirecting_transport(url, http_client):
+            # The SDK follows a same-origin 307/308 itself; the redirected
+            # request keeps the TRANSPORT role marker.
+            hook = http_client.event_hooks["request"][0]
+            for target in (allowed_url, "https://mcp.example.com/admin"):
+                request = httpx2.Request("POST", target)
+                request.extensions[OAUTH_ROLE_EXTENSION] = TRANSPORT_ROLE
+                try:
+                    await hook(request)
+                except McpOAuthOriginError:
+                    attempts.append(("blocked", target))
+                else:
+                    attempts.append(("allowed", target))
+            await asyncio.Event().wait()  # the SDK swallows and hangs
+            yield (AsyncMock(), AsyncMock())  # pragma: no cover - unreachable
+
+        monkeypatch.setattr(
+            "mcp.client.streamable_http.streamable_http_client",
+            redirecting_transport,
+        )
+        login_as(ALICE)
+
+        start = asyncio.get_running_loop().time()
+        response = await client.post(
+            "/mcp", json=oauth_body(ws_session, url=allowed_url)
+        )
+        elapsed = asyncio.get_running_loop().time() - start
+
+        assert response.status_code == 400
+        assert "not in the allowed" in response.json()["detail"]
+        assert attempts == [
+            ("allowed", allowed_url),
+            ("blocked", "https://mcp.example.com/admin"),
+        ]
+        assert ws_session.mcp_sessions == {}
         assert elapsed < 5, f"fail-fast did not fire; took {elapsed:.1f}s"

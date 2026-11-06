@@ -1,3 +1,4 @@
+import re
 from typing import Callable, Dict, Literal, Optional, Union
 from urllib.parse import unquote, urlparse
 
@@ -54,7 +55,14 @@ _RESTRICTED_HEADERS = frozenset(
         "x-forwarded-port",
         "x-forwarded-proto",
         "x-forwarded-server",
+        "x-forwarded-user",
+        "x-forwarded-email",
+        "x-forwarded-groups",
+        "x-forwarded-prefix",
+        "x-forwarded-client-cert",
+        "x-original-host",
         "x-real-ip",
+        "x-scheme",
         # Routing/method overrides honoured by some proxies and frameworks,
         # which can reach endpoints the literal request line would not.
         "x-http-method-override",
@@ -63,6 +71,18 @@ _RESTRICTED_HEADERS = frozenset(
         "x-rewrite-url",
     }
 )
+
+# Prefixes for proxy/edge identity headers, matched after folding ``_`` to ``-``
+# so underscore spellings cannot slip past the exact-name set above.
+_RESTRICTED_HEADER_PREFIXES = ("x-forwarded-", "x-original-", "x-rewrite-")
+
+# POSITIVE path grammar: RFC 3986 pchar plus '/', and percent triplets are
+# validated separately below. Enumerating dangerous sequences kept coming up
+# short (``..;``, ``..%00``, IIS ``%u002e``), so only characters that cannot
+# change path meaning at an origin are accepted. ``;`` (path parameters) and
+# controls are deliberately absent.
+_PATH_CHARS_RE = re.compile(r"^[A-Za-z0-9\-._~!$&'()*+,=:@/%]*$")
+_PCT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
 
 
 def _effective_port(parsed) -> int:
@@ -124,7 +144,22 @@ def _has_ambiguous_path(raw_path: str) -> bool:
         decoded = unquote(raw_path, errors="strict")
     except UnicodeDecodeError:
         return True
-    return not decoded.isascii()
+    if not decoded.isascii():
+        return True
+
+    if not _PATH_CHARS_RE.fullmatch(raw_path):
+        return True
+    # Every '%' must start exactly one two-hex-digit triplet; leftovers reject
+    # IIS/legacy %u escapes and malformed encodings.
+    if "%" in _PCT_RE.sub("", raw_path):
+        return True
+    for triplet in _PCT_RE.findall(raw_path):
+        value = int(triplet[1:], 16)
+        if value < 0x20 or value == 0x7F or value in (0x3B, 0x5C):
+            # controls, ';' (path parameters) and '\\' have all been used to
+            # truncate or re-route a path at some origin.
+            return True
+    return False
 
 
 def validate_mcp_url(url: str, allowed_urls: list[str]) -> None:
@@ -187,9 +222,14 @@ def validate_mcp_headers(
     """
     if not headers:
         return None
-    filtered = {
-        k: v for k, v in headers.items() if k.lower() not in _RESTRICTED_HEADERS
-    }
+    filtered = {}
+    for key, value in headers.items():
+        normalized = key.lower().replace("_", "-")
+        if normalized in _RESTRICTED_HEADERS or normalized.startswith(
+            _RESTRICTED_HEADER_PREFIXES
+        ):
+            continue
+        filtered[key] = value
     return filtered or None
 
 

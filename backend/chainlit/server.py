@@ -2410,7 +2410,28 @@ async def connect_mcp(
             on_failure=_record_oauth_failure,
             max_pending=config.features.mcp.user_oauth.max_pending_per_user,
         )
-        oauth_guard = oauth_request_guard(oauth_url, oauth_allowed_origins)
+        # The SDK follows same-origin redirects itself, so the origin check
+        # alone would let an allowlisted path redirect to a sibling path. The
+        # guard also validates every transport request against the user-server
+        # allowlist; this event is its fail-fast channel because the SDK
+        # swallows request-hook exceptions.
+        oauth_transport_blocked = asyncio.Event()
+        oauth_transport_blocked_detail: list[str] = []
+        oauth_task_holder: dict[str, asyncio.Task] = {}
+
+        def _record_transport_blocked(detail: str) -> None:
+            oauth_transport_blocked_detail.append(detail)
+            oauth_transport_blocked.set()
+            task = oauth_task_holder.get("task")
+            if task is not None and not task.done():
+                task.cancel()
+
+        oauth_guard = oauth_request_guard(
+            oauth_url,
+            oauth_allowed_origins,
+            config.features.mcp.user_servers.allowed_urls,
+            _record_transport_blocked,
+        )
         oauth_connection = HttpMcpConnection(
             url=oauth_url, name=payload.name, headers=None
         )
@@ -2572,6 +2593,7 @@ async def connect_mcp(
         oauth_task = asyncio.create_task(
             _run_oauth_session(), name=f"mcp-oauth-{payload.name}"
         )
+        oauth_task_holder["task"] = oauth_task
         session.mcp_oauth_tasks[payload.name] = oauth_task
 
         def _oauth_success_response() -> JSONResponse:
@@ -2585,15 +2607,37 @@ async def connect_mcp(
             name=f"mcp-oauth-url-{payload.name}",
         )
         connected_waiter = asyncio.create_task(oauth_connected.wait())
+        blocked_waiter = asyncio.create_task(oauth_transport_blocked.wait())
         try:
             await asyncio.wait(
-                {url_waiter, connected_waiter, oauth_task},
+                {url_waiter, connected_waiter, oauth_task, blocked_waiter},
                 return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
             if not connected_waiter.done():
                 connected_waiter.cancel()
-            await asyncio.gather(connected_waiter, return_exceptions=True)
+            if not blocked_waiter.done():
+                blocked_waiter.cancel()
+            await asyncio.gather(
+                connected_waiter, blocked_waiter, return_exceptions=True
+            )
+
+        # An allowlisted path that redirected to a sibling path (or any other
+        # out-of-grant transport request) fails here, before the 202/connected
+        # branches below can claim success.
+        if oauth_transport_blocked.is_set():
+            if not url_waiter.done():
+                url_waiter.cancel()
+            await asyncio.gather(url_waiter, return_exceptions=True)
+            if not oauth_task.done():
+                oauth_task.cancel()
+            await asyncio.gather(oauth_task, return_exceptions=True)
+            detail = (
+                oauth_transport_blocked_detail[0]
+                if oauth_transport_blocked_detail
+                else MCP_OAUTH_FAILED_DETAIL
+            )
+            raise HTTPException(status_code=400, detail=detail)
 
         # A produced URL means the SDK is waiting for the browser callback,
         # even if a test or a pre-resolved callback already let it connect.
@@ -2947,14 +2991,12 @@ async def connect_mcp(
             logger.warning(
                 "on_mcp_connect callback for %r failed", payload.name, exc_info=e
             )
-            detail = (
-                f"Could not connect to the MCP: {e!s}"
-                if is_user_provided
-                else MCP_CONNECT_FAILED_DETAIL
-            )
+            # A developer callback can raise anything (DB URLs, API tokens,
+            # internal hostnames), so never reflect its text to the client --
+            # not even for user-provided servers.
             return JSONResponse(
                 status_code=400,
-                content={"detail": detail},
+                content={"detail": MCP_CONNECT_FAILED_DETAIL},
             )
 
     # Store the session. The pop+store is a single await-free step, so a
@@ -3000,7 +3042,11 @@ async def connect_mcp(
     if is_user_provided:
         mcp_payload["clientType"] = mcp_connection.clientType
         mcp_payload["url"] = getattr(mcp_connection, "url", None)
-        mcp_payload["headers"] = getattr(mcp_connection, "headers", None)
+        # Headers are deliberately not echoed: the client already holds the
+        # values it submitted, and the current frontend persists returned
+        # headers to localStorage, which would make a bearer token readable by
+        # same-origin JS and survive logout. P3 decides how to keep them for
+        # reconnects.
     else:
         mcp_payload["type"] = mcp_connection.clientType
 

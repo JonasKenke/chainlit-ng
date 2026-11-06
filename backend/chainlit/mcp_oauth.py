@@ -419,7 +419,10 @@ class MarkedOAuthAuth(httpx2.Auth):
 
 
 def oauth_request_guard(
-    server_url: str, allowed_origins: OriginAllowlist
+    server_url: str,
+    allowed_origins: OriginAllowlist,
+    transport_allowed_urls: Optional[list[str]] = None,
+    on_transport_blocked: Optional[Callable[[str], None]] = None,
 ) -> Callable[[httpx2.Request], Awaitable[None]]:
     """Build an ``httpx2.AsyncClient`` request hook that enforces the boundary.
 
@@ -429,6 +432,14 @@ def oauth_request_guard(
     ``prm_urls`` passes. Anything else raises ``McpOAuthOriginError`` before the
     request is sent. Rejections are logged with the normalized origin only,
     never the path or query.
+
+    ``transport_allowed_urls`` additionally binds transport-role requests to
+    the operator's user-server allowlist. The SDK follows same-origin redirects
+    itself (307/308 keep the method and request extensions), so an allowlisted
+    path can otherwise redirect to any sibling path on the same origin.
+    ``on_transport_blocked`` is the fail-fast side channel for the caller: the
+    SDK swallows request-hook exceptions, so it fires synchronously before the
+    raise.
 
     This is a request-role allowlist for the OAuth flow, not a network sandbox:
     it does not close SSRF through the plain (non-OAuth) MCP transport, cannot
@@ -454,6 +465,19 @@ def oauth_request_guard(
         role = request.extensions.get(OAUTH_ROLE_EXTENSION)
         if role == TRANSPORT_ROLE:
             if origin == server_origin:
+                if transport_allowed_urls is not None:
+                    from chainlit.mcp import validate_mcp_url
+
+                    try:
+                        validate_mcp_url(str(request.url), transport_allowed_urls)
+                    except ValueError as exc:
+                        if on_transport_blocked is not None:
+                            on_transport_blocked(str(exc))
+                        logger.warning(
+                            "MCP OAuth transport request refused: "
+                            "destination outside the user-server allowlist"
+                        )
+                        raise McpOAuthOriginError(str(exc)) from None
                 return
             reason = "a transport request left the server origin"
         elif role == OAUTH_ROLE:

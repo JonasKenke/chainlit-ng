@@ -1070,8 +1070,8 @@ def mark(request: httpx2.Request, role: str) -> httpx2.Request:
     return request
 
 
-def build_guard(entries=(ALLOWED_ORIGIN,), server_url: str = SERVER_KEY):
-    return oauth_request_guard(server_url, OriginAllowlist(entries))
+def build_guard(entries=(ALLOWED_ORIGIN,), server_url: str = SERVER_KEY, **kwargs):
+    return oauth_request_guard(server_url, OriginAllowlist(entries), **kwargs)
 
 
 async def assert_refused(guard, request: httpx2.Request) -> None:
@@ -1191,6 +1191,30 @@ class TestOAuthRequestGuard:
             await assert_refused(
                 guard, mark(httpx2.Request("GET", url), TRANSPORT_ROLE)
             )
+
+    async def test_a_transport_request_is_bound_to_the_user_url_allowlist(self):
+        blocked: list[str] = []
+        guard = build_guard(
+            transport_allowed_urls=[f"{SERVER_ORIGIN}/api"],
+            on_transport_blocked=blocked.append,
+        )
+
+        await guard(
+            mark(httpx2.Request("POST", f"{SERVER_ORIGIN}/api"), TRANSPORT_ROLE)
+        )
+        await guard(
+            mark(
+                httpx2.Request("POST", f"{SERVER_ORIGIN}/api/messages"),
+                TRANSPORT_ROLE,
+            )
+        )
+
+        with pytest.raises(McpOAuthOriginError, match="not in the allowed"):
+            await guard(
+                mark(httpx2.Request("POST", f"{SERVER_ORIGIN}/admin"), TRANSPORT_ROLE)
+            )
+        assert len(blocked) == 1
+        assert "not in the allowed" in blocked[0]
 
     async def test_an_oauth_request_may_reach_a_listed_origin(self):
         guard = build_guard()
