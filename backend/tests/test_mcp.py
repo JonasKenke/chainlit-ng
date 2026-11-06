@@ -358,6 +358,18 @@ class TestMcpConnectionEdgeCases:
             True,
         ),
         ("https://allowed.com/api/..%7f/admin", ["https://allowed.com/api"], True),
+        # A ';params' tail must not hide traversal: urlsplit keeps it in the
+        # path, urlparse would strip it into .params.
+        (
+            "https://allowed.com/api/x;%5c..%5c..%5cadmin",
+            ["https://allowed.com/api"],
+            True,
+        ),
+        ("https://allowed.com/api/x;%2f..%2fadmin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/x;%2e%2e/admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/x;%00/admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/x;%25admin", ["https://allowed.com/api"], True),
+        ("https://allowed.com/api/x;../../admin", ["https://allowed.com/api"], True),
         # A legitimate percent-encoded path segment must still pass.
         ("https://allowed.com/api/name%20x", ["https://allowed.com/api"], False),
     ],

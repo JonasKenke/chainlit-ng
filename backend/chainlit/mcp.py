@@ -1,6 +1,6 @@
 import re
 from typing import Callable, Dict, Literal, Optional, Union
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlsplit
 
 import httpx2
 from pydantic import BaseModel
@@ -189,7 +189,10 @@ def validate_mcp_url(url: str, allowed_urls: list[str]) -> None:
             "Only http and https URLs are supported."
         )
 
-    if _has_ambiguous_path(urlparse(url).path):
+    # ``urlsplit`` keeps ``;params`` in the path; ``urlparse`` would move that
+    # tail into ``.params`` and hide ``/api/x;%5c..%5c..%5cadmin`` from every
+    # check below.
+    if _has_ambiguous_path(urlsplit(url).path):
         raise ValueError(
             f"URL {url!r} is not in the allowed MCP URL list. Its path must not "
             "contain '.' or '..' segments, encoded separators (%2e, %2f, %5c), "

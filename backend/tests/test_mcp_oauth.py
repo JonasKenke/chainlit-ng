@@ -1213,8 +1213,19 @@ class TestOAuthRequestGuard:
             await guard(
                 mark(httpx2.Request("POST", f"{SERVER_ORIGIN}/admin"), TRANSPORT_ROLE)
             )
-        assert len(blocked) == 1
-        assert "not in the allowed" in blocked[0]
+        # A ';params' tail must not smuggle the traversal past the guard.
+        with pytest.raises(McpOAuthOriginError, match="not in the allowed"):
+            await guard(
+                mark(
+                    httpx2.Request(
+                        "POST",
+                        f"{SERVER_ORIGIN}/api/x;%5c..%5c..%5cadmin",
+                    ),
+                    TRANSPORT_ROLE,
+                )
+            )
+        assert len(blocked) == 2
+        assert all("not in the allowed" in detail for detail in blocked)
 
     async def test_an_oauth_request_may_reach_a_listed_origin(self):
         guard = build_guard()
