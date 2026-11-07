@@ -1,0 +1,11 @@
+[project]
+allow_origins = ["*"]
+
+[features]
+latex = true
+
+[UI]
+name = "Assistant"
+
+[meta]
+generated_by = "2.12.0"
