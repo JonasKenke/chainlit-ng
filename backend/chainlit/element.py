@@ -224,6 +224,18 @@ class Element:
         """
         return "inline" if cls.type in cls._BROWSER_RENDERED_TYPES else None
 
+    @classmethod
+    def is_browser_rendered_mime(cls, mime_type: str) -> bool:
+        """Whether a file of this MIME type may be served inline.
+
+        SVG is excluded: a top-level SVG document can execute script.
+        """
+        mime = mime_type.split(";", 1)[0].strip().lower()
+        return (
+            mime != "image/svg+xml"
+            and cls.infer_type_from_mime(mime) in cls._BROWSER_RENDERED_TYPES
+        )
+
     async def _create(self, persist=True) -> bool:
         if self.persisted and not self.updatable:
             return True

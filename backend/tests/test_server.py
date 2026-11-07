@@ -305,6 +305,81 @@ def test_get_file_success(
     assert response.headers["content-type"].startswith("text/plain")
 
 
+@pytest.mark.parametrize(
+    ("mime", "disposition"),
+    [
+        ("text/html", "attachment"),
+        ("text/plain; charset=utf-8", "attachment"),
+        ("image/svg+xml", "attachment"),
+        ("image/png", "inline"),
+        ("application/pdf", "inline"),
+        ("audio/mpeg", "inline"),
+        ("video/mp4", "inline"),
+    ],
+)
+def test_get_file_disposition_prevents_inline_execution(
+    test_client: TestClient,
+    mock_session_get_by_id_patched: Mock,
+    tmp_path: pathlib.Path,
+    mock_get_current_user: Mock,
+    mime: str,
+    disposition: str,
+):
+    """Non-media attachments must download; media elements stay inline."""
+    mock_get_current_user.return_value = mock_session_get_by_id_patched.user
+
+    test_file = tmp_path / "test_file"
+    test_file.write_bytes(b"payload")
+    mock_session_get_by_id_patched.files = {
+        "test_file_id": {
+            "id": "test_file_id",
+            "path": test_file,
+            "name": "test_file",
+            "type": mime,
+            "size": 7,
+        }
+    }
+
+    response = test_client.get(
+        f"/project/file/test_file_id?session_id={mock_session_get_by_id_patched.id}"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-disposition"].startswith(disposition)
+    assert 'filename="test_file"' in response.headers["content-disposition"]
+
+
+def test_get_file_does_not_reflect_hostile_filename(
+    test_client: TestClient,
+    mock_session_get_by_id_patched: Mock,
+    tmp_path: pathlib.Path,
+    mock_get_current_user: Mock,
+):
+    """The client-controlled name must not inject response headers."""
+    mock_get_current_user.return_value = mock_session_get_by_id_patched.user
+
+    test_file = tmp_path / "test_file"
+    test_file.write_bytes(b"payload")
+    mock_session_get_by_id_patched.files = {
+        "test_file_id": {
+            "id": "test_file_id",
+            "path": test_file,
+            "name": 'x"\r\nX-Injected: yes',
+            "type": "text/html",
+            "size": 7,
+        }
+    }
+
+    response = test_client.get(
+        f"/project/file/test_file_id?session_id={mock_session_get_by_id_patched.id}"
+    )
+
+    assert response.status_code == 200
+    assert "x-injected" not in {key.lower() for key in response.headers}
+    assert response.headers["content-disposition"].startswith("attachment")
+
+
 def test_get_file_not_existent_file(
     test_client: TestClient,
     mock_session_get_by_id_patched: Mock,
