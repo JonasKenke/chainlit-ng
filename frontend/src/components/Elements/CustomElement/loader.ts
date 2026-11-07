@@ -6,7 +6,11 @@ import { importCode } from 'react-runner';
  * Supported grammar: static, top-level `import` declarations with an explicit
  * `.jsx` extension (default, named, namespace, and side-effect imports).
  * Not supported: dynamic `import()`, import cycles, imports outside
- * `/public/elements/`, and bare packages outside the caller's base import map.
+ * `/public/elements/`, percent-encoded paths, and bare packages outside the
+ * caller's base import map.
+ *
+ * The entry module is only rewritten, never compiled: `Runner` evaluates it
+ * with its runtime globals (`apiClient`, `props`, ...) in scope.
  */
 
 const ELEMENTS_ROOT = '/public/elements/';
@@ -45,12 +49,17 @@ export async function loadCustomElement({
 }: LoadCustomElementOptions): Promise<LoadedCustomElement> {
   const entryPath = resolveEntryPath(name);
   const registry: ImportMap = { ...baseImports };
-  const compiled = new Map<string, string>();
+  const rewritten = new Map<string, string>();
   const sources = new Map<string, string>();
   const stack: string[] = [];
 
-  const load = async (path: string, depth: number): Promise<string> => {
-    const cached = compiled.get(path);
+  /** Rewrites a module's imports; compiles it unless it is the entry. */
+  const load = async (
+    path: string,
+    depth: number,
+    isEntry: boolean
+  ): Promise<string> => {
+    const cached = rewritten.get(path);
     if (cached !== undefined) return cached;
 
     const cycleStart = stack.indexOf(path);
@@ -75,30 +84,39 @@ export async function loadCustomElement({
       for (const specifier of collectSpecifiers(source)) {
         const dependency = resolveSpecifier(specifier, path, baseImports);
         if (dependency === undefined) continue;
-        await load(dependency, depth + 1);
+        await load(dependency, depth + 1, false);
         rewrites.set(specifier, dependency);
       }
 
       const code = rewriteImports(source, rewrites);
-      try {
-        registry[path] = importCode(code, { import: registry });
-      } catch (error) {
-        throw new Error(`Failed to compile '${path}': ${errorMessage(error)}`, {
-          cause: error
-        });
+      if (!isEntry) {
+        try {
+          registry[path] = importCode(code, { import: registry });
+        } catch (error) {
+          throw new Error(
+            `Failed to compile '${path}': ${errorMessage(error)}`,
+            { cause: error }
+          );
+        }
       }
-      compiled.set(path, code);
+      rewritten.set(path, code);
       return code;
     } finally {
       stack.pop();
     }
   };
 
-  const code = await load(entryPath, 0);
+  const code = await load(entryPath, 0, true);
   return { code, imports: registry };
 }
 
 function resolveEntryPath(name: string): string {
+  if (/[%?#]/.test(name)) {
+    throw new Error(
+      `Invalid custom element name '${name}': must not contain '?', '#', or percent-encoding`
+    );
+  }
+
   const url = new URL(`${name}.jsx`, LOADER_ORIGIN + ELEMENTS_ROOT);
   if (url.origin !== LOADER_ORIGIN || !url.pathname.startsWith(ELEMENTS_ROOT)) {
     throw new Error(
@@ -117,6 +135,16 @@ function resolveSpecifier(
   importer: string,
   baseImports: ImportMap
 ): string | undefined {
+  // Reject all percent-encoding: the server decodes it once more, so `%2f`,
+  // `%5c`, and encoded dot segments could escape `/public/elements/`.
+  if (specifier.includes('%')) {
+    throw invalidImport(
+      specifier,
+      importer,
+      'percent-encoding is not supported'
+    );
+  }
+
   if (isRelative(specifier)) {
     if (/[?#]/.test(specifier)) {
       throw invalidImport(

@@ -74,9 +74,37 @@ describe('custom element loader', () => {
     expect(imports['/public/elements/lib/helper.jsx']).toHaveProperty(
       'default'
     );
-    expect(imports['/public/elements/demo/entry.jsx']).toHaveProperty(
-      'default'
-    );
+    expect(imports).not.toHaveProperty('/public/elements/demo/entry.jsx');
+  });
+
+  it('does not compile or execute the entry module', async () => {
+    const runtimeScope = globalThis as unknown as {
+      __customElementEntryRan?: boolean;
+    };
+    delete runtimeScope.__customElementEntryRan;
+    const files = {
+      [entry]: `
+        import Helper from './helper.jsx';
+        globalThis.__customElementEntryRan = true;
+        const client = apiClient;
+        export default function Entry() {
+          return [Helper, client];
+        }
+      `,
+      '/public/elements/helper.jsx': `
+        export default function Helper() {
+          return null;
+        }
+      `
+    };
+
+    const { code, imports } = await load(files);
+
+    expect(runtimeScope.__customElementEntryRan).toBeUndefined();
+    expect(imports['/public/elements/helper.jsx']).toHaveProperty('default');
+    expect(imports).not.toHaveProperty(entry);
+    expect(code).toContain("from '/public/elements/helper.jsx'");
+    expect(code).toContain('const client = apiClient;');
   });
 
   it('lets a helper import another helper and an allowlisted package', async () => {
@@ -140,7 +168,12 @@ describe('custom element loader', () => {
     ['../../secret.jsx', /path escapes \/public\/elements\//],
     ['./nested/../../secret.jsx', /path escapes \/public\/elements\//],
     ['./helper.jsx?v=1', /query strings and fragments are not supported/],
-    ['./helper.jsx#fragment', /query strings and fragments are not supported/]
+    ['./helper.jsx#fragment', /query strings and fragments are not supported/],
+    ['..%2fsecret.jsx', /percent-encoding is not supported/],
+    ['..%5csecret.jsx', /percent-encoding is not supported/],
+    ['%2e%2e%2fsecret.jsx', /percent-encoding is not supported/],
+    ['./%2e%2e%2fsecret.jsx', /percent-encoding is not supported/],
+    ['..%252fsecret.jsx', /percent-encoding is not supported/]
   ])('rejects %s without fetching it', async (specifier, message) => {
     const apiClient = createApiClient({
       [entry]: `import value from '${specifier}';`
@@ -161,6 +194,23 @@ describe('custom element loader', () => {
 
     await expect(load({}, '../../secret', apiClient)).rejects.toThrow(
       /entry must stay under \/public\/elements\//
+    );
+    expect(apiClient.get).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '..%2fsecret',
+    '%2e%2e%2fsecret',
+    '..%252fsecret',
+    '..%5csecret',
+    'nested%2f..%2f..%2fsecret',
+    'entry?query',
+    'entry#fragment'
+  ])('rejects encoded or delimited entry name %s', async (name) => {
+    const apiClient = createApiClient({});
+
+    await expect(load({}, name, apiClient)).rejects.toThrow(
+      /must not contain '\?', '#', or percent-encoding/
     );
     expect(apiClient.get).not.toHaveBeenCalled();
   });
