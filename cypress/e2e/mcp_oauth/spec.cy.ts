@@ -18,11 +18,16 @@ const openMcpDialog = () => {
 const selectStreamableHttp = () => {
   cy.get('#server-type').click();
   cy.get('[role="option"]').contains('streamable-http').click();
+  // Wait for the menu to unmount; typing into the form while it closes drops
+  // keystrokes and leaves the Add button disabled.
+  cy.get('[role="option"]').should('not.exist');
 };
 
 const fillUserServer = (name: string, url: string) => {
   cy.get('#server-name').type(name);
+  cy.get('#server-name').should('have.value', name);
   cy.get('#server-url').type(url);
+  cy.get('#server-url').should('have.value', url);
 };
 
 describe('MCP OAuth sign-in', () => {
