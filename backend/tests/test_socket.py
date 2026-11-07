@@ -707,3 +707,48 @@ class TestConnectSessionIdValidation:
                 await connect("sid", {}, auth)
 
         mock_session.assert_not_called()
+
+
+class TestConnectThreadIdValidation:
+    @pytest.mark.parametrize(
+        "thread_id",
+        [
+            "../../etc/passwd",
+            "x' OR '1'='1",
+            "00000000-0000-0000-0000-00000000000",
+            "00000000-0000-0000-0000-00000000000g",
+            "a" * 36,
+            123,
+        ],
+    )
+    async def test_connect_refuses_invalid_thread_id(self, thread_id):
+        auth = {
+            "sessionId": "valid-session-id",
+            "clientType": "webapp",
+            "threadId": thread_id,
+        }
+
+        with patch("chainlit.socket.WebsocketSession") as mock_session:
+            with pytest.raises(ConnectionRefusedError, match="invalid thread id"):
+                await connect("sid", {}, auth)
+
+        mock_session.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "thread_id", [None, "", "0190a4b0-2f3c-4d5e-8f90-123456789abc"]
+    )
+    async def test_connect_accepts_uuid_or_empty_thread_id(self, thread_id):
+        auth = {
+            "sessionId": "valid-session-id",
+            "clientType": "webapp",
+            "threadId": thread_id,
+        }
+
+        with (
+            patch("chainlit.socket.require_login", return_value=False),
+            patch("chainlit.socket.WebsocketSession") as mock_session,
+        ):
+            mock_session.get_by_id.return_value = None
+            assert await connect("sid", {}, auth) is True
+
+        mock_session.assert_called_once()

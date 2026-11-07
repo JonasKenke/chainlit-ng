@@ -530,3 +530,63 @@ async def test_delete_all_threads_raises_when_sql_fails(
 
     with pytest.raises(RuntimeError, match="delete_all_threads failed"):
         await data_layer.delete_all_threads("some-user")
+
+
+@pytest.mark.parametrize(
+    "payload_template",
+    [
+        # UNION read of another user's steps (the original F1 repro).
+        (
+            "x') UNION SELECT 'inj-step','Injected','assistant_message',t.\"id\","
+            "NULL,0,NULL,0,'{}',NULL,'',v.\"output\",NULL,NULL,NULL,NULL,NULL,"
+            "NULL,NULL,NULL,NULL FROM threads t, steps v "
+            'WHERE t."id" = (SELECT "id" FROM threads WHERE "userId" = '
+            "'__ATTACKER_ID__') AND v.\"threadId\" = 'victim_thread' --"
+        ),
+        # Make every step match.
+        "x') OR 1=1 --",
+        # Stacked statement attempt.
+        "x'; DROP TABLE steps; --",
+    ],
+)
+async def test_thread_id_cannot_inject_sql(
+    data_layer: SQLAlchemyDataLayer, payload_template: str
+):
+    attacker = await data_layer.create_user(User(identifier="sqli_attacker"))
+    victim = await data_layer.create_user(User(identifier="sqli_victim"))
+    assert attacker
+    assert victim
+    await data_layer.update_thread("victim_thread", user_id=victim.id)
+    await data_layer.execute_sql(
+        query="""
+            INSERT INTO steps
+                ("id", "threadId", "name", "type", "output", "disableFeedback", "streaming")
+            VALUES
+                (:id, :thread_id, :name, :type, :output, 0, 0)
+        """,
+        parameters={
+            "id": "victim-step",
+            "thread_id": "victim_thread",
+            "name": "victim",
+            "type": "assistant_message",
+            "output": "VICTIM-SECRET",
+        },
+    )
+    payload = payload_template.replace("__ATTACKER_ID__", attacker.id)
+    await data_layer.update_thread(payload, user_id=attacker.id)
+
+    threads = await data_layer.get_all_user_threads(user_id=attacker.id)
+
+    leaked = [
+        step.get("output")
+        for thread in threads or []
+        for step in thread["steps"]
+        if step.get("output") == "VICTIM-SECRET"
+    ]
+    assert leaked == []
+
+    victim_steps = await data_layer.execute_sql(
+        query='SELECT COUNT(*) AS count FROM steps WHERE "threadId" = :thread_id',
+        parameters={"thread_id": "victim_thread"},
+    )
+    assert victim_steps == [{"count": 1}]
