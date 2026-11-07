@@ -48,7 +48,13 @@ from chainlit.message import (
 )
 from chainlit.mode import Mode, ModeOption
 from chainlit.sidebar import ElementSidebar
-from chainlit.skill import get_skill, list_skills, render_skill, skills_catalog
+from chainlit.skill import (
+    get_skill,
+    list_skills,
+    render_skill,
+    skill_tool,
+    skills_catalog,
+)
 from chainlit.step import Step, step
 from chainlit.sync import make_async, run_sync
 from chainlit.types import (
@@ -217,6 +223,7 @@ __all__ = [
     "set_scheduled_task_models",
     "set_starter_categories",
     "set_starters",
+    "skill_tool",
     "skills_catalog",
     "sleep",
     "step",

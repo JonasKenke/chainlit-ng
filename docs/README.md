@@ -7,6 +7,7 @@ See also:
 
 ## Guides
 
+- [Skills: app-directory instructions and progressive disclosure](skills.md)
 - [Per-user OAuth for MCP connections](mcp-oauth.md)
 - [Scheduled prompts integration](scheduled-prompts.md)
 - [Embedding Chainlit Copilot: supported authentication model](copilot-embedding.md)
