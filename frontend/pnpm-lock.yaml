@@ -22,6 +22,9 @@ overrides:
   immutable@>=3.0.0 <3.8.4: '>=3.8.4 <4.0.0'
   immutable@>=4.0.0 <4.3.9: '>=4.3.9 <5.0.0'
 
+patchedDependencies:
+  micromark-extension-math-extended@3.2.2: 90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b
+
 importers:
 
   .:
@@ -6943,7 +6946,7 @@ snapshots:
       micromark-util-combine-extensions: 2.0.1
       micromark-util-types: 2.0.3
 
-  micromark-extension-math-extended@3.2.2:
+  micromark-extension-math-extended@3.2.2(patch_hash=90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b):
     dependencies:
       '@types/katex': 0.16.8
       devlop: 1.1.0
@@ -7577,7 +7580,7 @@ snapshots:
     dependencies:
       '@types/mdast': 4.0.4
       mdast-util-math: 3.0.0
-      micromark-extension-math-extended: 3.2.2
+      micromark-extension-math-extended: 3.2.2(patch_hash=90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b)
       unified: 11.0.5
     transitivePeerDependencies:
       - supports-color
