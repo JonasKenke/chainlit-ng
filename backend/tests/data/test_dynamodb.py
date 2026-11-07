@@ -301,6 +301,36 @@ async def test_delete_thread_deletes_storage_objects():
 
 
 @pytest.mark.asyncio
+async def test_delete_thread_deletes_an_element_written_while_deleting():
+    """A blob uploaded mid-erasure still has its row when the loop sees it."""
+    storage = _make_storage()
+    layer, client = _make_delete_layer(
+        [
+            _thread_item("target-thread", "user-1"),
+            _element_item("target-thread", "element-a", "object-a"),
+        ],
+        storage=storage,
+    )
+    late_element = _element_item("target-thread", "element-b", "object-b")
+
+    async def delete_blob(object_key):
+        if object_key == "object-a" and late_element not in client.items:
+            client.items.append(late_element)
+        return True
+
+    storage.delete_file.side_effect = delete_blob
+
+    await layer.delete_thread("target-thread")
+
+    delete_file = cast(AsyncMock, storage.delete_file)
+    assert {call.kwargs["object_key"] for call in delete_file.await_args_list} == {
+        "object-a",
+        "object-b",
+    }
+    assert client.items == []
+
+
+@pytest.mark.asyncio
 async def test_delete_all_threads_keeps_items_when_a_storage_delete_fails():
     storage = _make_storage()
     storage.delete_file.return_value = False

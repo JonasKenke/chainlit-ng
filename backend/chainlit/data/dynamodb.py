@@ -452,14 +452,6 @@ class DynamoDBDataLayer(BaseDataLayer):
         if not items:
             return
 
-        object_keys: List[str] = []
-        for item in items:
-            object_key = item.get("objectKey", {}).get("S")
-            if item.get("SK", {}).get("S", "").startswith("ELEMENT#") and object_key:
-                object_keys.append(object_key)
-
-        await delete_storage_objects(self.storage_provider, object_keys)
-
         # Delete the thread's items first and the THREAD marker last, re-querying
         # until the partition holds only the marker: a step or element written
         # while deleting must not be orphaned.
@@ -471,6 +463,16 @@ class DynamoDBDataLayer(BaseDataLayer):
             ]
             if not keys:
                 break
+            # Read the keys from every re-query: an element written during the
+            # deletion has a blob the initial query never saw, and deleting its
+            # row without the blob leaves personal data with no handle.
+            object_keys = [
+                item["objectKey"]["S"]
+                for item in items
+                if item.get("SK", {}).get("S", "").startswith("ELEMENT#")
+                and item.get("objectKey", {}).get("S")
+            ]
+            await delete_storage_objects(self.storage_provider, object_keys)
             await self._batch_delete_items(keys)
             items = await self._query_thread_items(thread_id)
 
