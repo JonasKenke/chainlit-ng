@@ -21,6 +21,7 @@ from chainlit.config import (
     ChainlitConfig,
     SpontaneousFileUploadFeature,
 )
+from chainlit.data.base import BaseDataLayer
 from chainlit.server import (
     _verify_azure_hf_id_token,
     app,
@@ -2100,7 +2101,9 @@ class _BulkDeleteDataLayer:
 
 
 class _NoBulkDeleteDataLayer:
-    """Stand-in for a data layer that does not implement bulk deletion."""
+    """Layer that inherits, rather than overrides, the base bulk delete method."""
+
+    delete_all_threads = BaseDataLayer.delete_all_threads
 
 
 @pytest.fixture
