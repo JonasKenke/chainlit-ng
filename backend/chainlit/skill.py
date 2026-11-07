@@ -12,12 +12,14 @@ from typing import Any, Dict, List, Optional
 import chainlit.config as chainlit_config
 
 from ._utils import is_path_inside
+from .step import Step
 
 SKILLS_DIRNAME = "skills"
 MAX_SKILLS = 200
 MAX_BODY_BYTES = 64 * 1024
 MAX_DESCRIPTION_BYTES = 1024
 CATALOG_MAX_CHARS = 8 * 1024
+SKILL_TOOL_NAME = "load_skill"
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
@@ -294,3 +296,53 @@ def render_skill(name: str) -> str:
         f"{body}\n"
         f"--- END SKILL {skill.name} ---"
     )
+
+
+def skill_tool() -> Dict[str, Any]:
+    """Return a provider-neutral ``load_skill`` tool spec and async handler.
+
+    The handler emits a Chainlit step named after the loaded skill, so the thread
+    shows which skill fired and the loaded body stays inspectable.
+    """
+
+    async def handler(name: str) -> str:
+        try:
+            skill = _find_skill(name)
+        except KeyError:
+            available = ", ".join(item.name for item in load_skills()) or "none"
+            return f"Unknown skill {name!r}. Available skills: {available}."
+
+        # The loader rejects oversize bodies; re-check so a cached registry can
+        # never hand a model more than the cap.
+        body_size = len(skill.body.encode("utf-8"))
+        if body_size > MAX_BODY_BYTES:
+            return (
+                f"Skill {skill.name!r} is unavailable: its body is {body_size} "
+                f"bytes; maximum is {MAX_BODY_BYTES}."
+            )
+
+        rendered = render_skill(skill.name)
+        async with Step(name=f"skill: {skill.name}", type="tool") as step:
+            step.input = name
+            step.output = rendered
+        return rendered
+
+    return {
+        "name": SKILL_TOOL_NAME,
+        "description": (
+            "Load the full instructions for one skill by name. Use it only when a "
+            "skill in the catalog matches the user's request."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Exact skill name from the skills catalog.",
+                }
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        "handler": handler,
+    }

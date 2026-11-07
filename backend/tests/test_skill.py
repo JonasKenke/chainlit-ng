@@ -209,3 +209,49 @@ def test_catalog_is_capped(skills_root: Path, monkeypatch: pytest.MonkeyPatch):
 def test_unknown_skill_raises_key_error(skills_root: Path):
     with pytest.raises(KeyError, match="Unknown skill"):
         cl.get_skill("missing")
+
+
+def test_skill_tool_spec():
+    tool = skill_module.skill_tool()
+
+    assert tool["name"] == "load_skill"
+    assert callable(tool["handler"])
+    schema = tool["input_schema"]
+    assert schema["required"] == ["name"]
+    assert schema["properties"]["name"]["type"] == "string"
+
+
+async def test_skill_tool_emits_step_with_skill_name(
+    skills_root: Path, mock_chainlit_context
+):
+    write_skill(skills_root / "alpha.md")
+
+    async with mock_chainlit_context as ctx:
+        result = await skill_module.skill_tool()["handler"]("alpha")
+
+    assert "Alpha body." in result
+    sent = [call.args[0] for call in ctx.emitter.send_step.await_args_list]
+    assert any(step["name"] == "skill: alpha" for step in sent)
+    updated = [call.args[0] for call in ctx.emitter.update_step.await_args_list]
+    assert any("Alpha body." in step["output"] for step in updated)
+
+
+async def test_skill_tool_rejects_unknown_skill(skills_root: Path):
+    write_skill(skills_root / "alpha.md")
+
+    result = await skill_module.skill_tool()["handler"]("missing")
+
+    assert result == "Unknown skill 'missing'. Available skills: alpha."
+
+
+async def test_skill_tool_never_returns_oversize_body(
+    skills_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    write_skill(skills_root / "alpha.md", body="x" * 100)
+    skill_module.load_skills()
+    monkeypatch.setattr(skill_module, "MAX_BODY_BYTES", 10)
+
+    result = await skill_module.skill_tool()["handler"]("alpha")
+
+    assert result.startswith("Skill 'alpha' is unavailable")
+    assert "x" * 100 not in result
