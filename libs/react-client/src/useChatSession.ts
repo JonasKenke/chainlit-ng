@@ -80,6 +80,10 @@ const useChatSession = () => {
     }
   }, [currentThreadId]);
 
+  // Only the latest connect may open its socket. Closing an older socket is
+  // not enough: it could still resolve after a newer connect and replace it.
+  const connectIdRef = useRef(0);
+
   const _connect = useCallback(
     async ({
       transports,
@@ -88,6 +92,7 @@ const useChatSession = () => {
       transports?: string[];
       userEnv: Record<string, string>;
     }) => {
+      const connectId = ++connectIdRef.current;
       const { protocol, host, pathname } = new URL(client.httpEndpoint);
       const uri = `${protocol}//${host}`;
       const path =
@@ -100,6 +105,9 @@ const useChatSession = () => {
       } catch (err) {
         console.error(`Failed to set sticky session cookie: ${err}`);
       }
+
+      // A newer connect was requested while the cookie was in flight.
+      if (connectId !== connectIdRef.current) return;
 
       const socket = io(uri, {
         path,
