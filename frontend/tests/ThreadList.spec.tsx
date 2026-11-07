@@ -200,8 +200,8 @@ describe('ThreadList deletion', () => {
     expect(store.getState().threadHistory?.threads).toEqual([thread]);
   });
 
-  it('returns to the active thread when its deletion fails', async () => {
-    const { deleteThread } = setup({ currentThreadId: thread.id });
+  it('returns to the active thread and re-requests its resume when deletion fails', async () => {
+    const { deleteThread, store } = setup({ currentThreadId: thread.id });
     let rejectDeletion!: (reason: unknown) => void;
     deleteThread.mockImplementation(
       () =>
@@ -221,5 +221,6 @@ describe('ThreadList deletion', () => {
     });
 
     expect(path()).toBe(`/thread/${thread.id}`);
+    expect(store.getState().threadIdToResume).toBe(thread.id);
   });
 });
