@@ -57,10 +57,29 @@ async def start():
                 step=64,
                 tooltip="Measured in pixels",
             ),
+            Select(
+                id="country",
+                label="Country",
+                items={"United States": "US", "Canada": "CA"},
+                initial_value="US",
+            ),
+            Select(
+                id="city",
+                label="City",
+                items={"Other": "other"},
+                depends_on="country",
+                dependent_items={
+                    "US": {"New York": "ny", "San Francisco": "sf"},
+                    "CA": {"Toronto": "toronto"},
+                },
+                initial_value="ny",
+            ),
         ]
     ).send()
 
 
 @cl.on_settings_update
 async def setup_agent(settings):
-    await cl.Message(content="Settings updated!").send()
+    await cl.Message(
+        content=f"Settings updated! country={settings.get('country')} city={settings.get('city')}"
+    ).send()
