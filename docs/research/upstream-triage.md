@@ -98,23 +98,23 @@ model is in [security hardening](security-hardening.md).
 
 ## Issues with traction
 
-| Issue                                             | Signal                    | Status / related PR               |
-| ------------------------------------------------- | ------------------------- | --------------------------------- |
-| #2325 headers not populated with user values      | 24 comments               | No PR found; auth investigation   |
-| #1213 full `Request` object in chat               | 20 comments               | Feature/architecture              |
-| #2013 Safari blocks third-party cookies (Copilot) | 15 comments               | Architectural                     |
-| #2491 “Times are messed up”                       | 10 comments               | #2798                             |
-| #2434 unified SQL data layer                      | 10 comments               | Design proposal                   |
-| #2098 define MCP server connections               | 10 comments, 15 reactions | Verify against current MCP config |
-| #1077 nested steps for tools                      | 10 comments, 7 reactions  | Feature                           |
-| #1226 LaTeX handling                              | 8 comments, 10 reactions  | Frontend                          |
-| #1934 persistent sidebar toggle                   | 7 comments                | Feature                           |
-| #1240 replace custom OAuth                        | 7 comments, 8 reactions   | Architecture                      |
-| #2340 ~4 MB initial frontend payload              | 6 comments                | Build/asset work                  |
-| #1858 more input widgets                          | 6 comments, 15 reactions  | Feature                           |
-| #2197 OAuth for MCP                               | 6 comments, 15 reactions  | #3013                             |
-| #2094 clear all chat history                      | 2 comments, 12 reactions  | Feature                           |
-| #2135 imports in custom elements                  | 2 comments, 15 reactions  | Feature                           |
+| Issue                                             | Signal                    | Status / related PR             |
+| ------------------------------------------------- | ------------------------- | ------------------------------- |
+| #2325 headers not populated with user values      | 24 comments               | No PR found; auth investigation |
+| #1213 full `Request` object in chat               | 20 comments               | Feature/architecture            |
+| #2013 Safari blocks third-party cookies (Copilot) | 15 comments               | Architectural                   |
+| #2491 “Times are messed up”                       | 10 comments               | #2798                           |
+| #2434 unified SQL data layer                      | 10 comments               | Design proposal                 |
+| #2098 define MCP server connections               | 10 comments, 15 reactions | **Ported** in #20 (`3320cae9`)  |
+| #1077 nested steps for tools                      | 10 comments, 7 reactions  | Feature                         |
+| #1226 LaTeX handling                              | 8 comments, 10 reactions  | Frontend                        |
+| #1934 persistent sidebar toggle                   | 7 comments                | Feature                         |
+| #1240 replace custom OAuth                        | 7 comments, 8 reactions   | Architecture                    |
+| #2340 ~4 MB initial frontend payload              | 6 comments                | Build/asset work                |
+| #1858 more input widgets                          | 6 comments, 15 reactions  | Feature                         |
+| #2197 OAuth for MCP                               | 6 comments, 15 reactions  | #3013                           |
+| #2094 clear all chat history                      | 2 comments, 12 reactions  | Feature                         |
+| #2135 imports in custom elements                  | 2 comments, 15 reactions  | Feature                         |
 
 ### Issue → fix mapping
 
