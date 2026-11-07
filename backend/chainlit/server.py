@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import shutil
+import time
 import urllib.parse
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -1091,6 +1092,15 @@ def _supports_prompt_gallery(data_layer: Optional[BaseDataLayer]) -> bool:
     )
 
 
+def _supports_delete_all_threads(data_layer: Optional[BaseDataLayer]) -> bool:
+    """Return whether a data layer overrides bulk thread deletion."""
+    if data_layer is None:
+        return False
+
+    method = getattr(type(data_layer), "delete_all_threads", None)
+    return callable(method) and method is not BaseDataLayer.delete_all_threads
+
+
 @router.get("/user")
 async def get_user(current_user: UserParam) -> GenericUser:
     return current_user
@@ -1254,6 +1264,7 @@ async def project_settings(
                 getattr(cfg.features, "prompt_gallery", False)
                 and _supports_prompt_gallery(data_layer)
             ),
+            "threadClearAll": _supports_delete_all_threads(data_layer),
             "promptScheduling": bool(
                 getattr(cfg.features, "prompt_scheduling", False)
                 and scheduled_user
@@ -2033,6 +2044,38 @@ async def delete_thread(
 
     await data_layer.delete_thread(thread_id)
     return JSONResponse(content={"success": True})
+
+
+@router.delete("/project/threads")
+async def delete_user_threads(current_user: UserParam):
+    """Delete all threads owned by the current user."""
+
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    data_layer = get_data_layer()
+
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+
+    identifier = current_user.identifier
+    user_id = await _get_user_id(current_user, data_layer)
+    start = time.perf_counter()
+
+    try:
+        deleted = await data_layer.delete_all_threads(user_id)
+    except NotImplementedError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail=str(exc)
+            or "Bulk thread deletion is not supported by this data layer",
+        ) from exc
+
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    logger.info(
+        "Deleted %s threads for user %s in %sms", deleted, identifier, duration_ms
+    )
+    return JSONResponse(content={"success": True, "deleted": deleted})
 
 
 @router.post("/project/action")
