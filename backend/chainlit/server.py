@@ -3748,8 +3748,15 @@ async def serve(request: Request):
 
 # Register skills routes only when the flag is on: the flag is startup-time so a
 # disabled app has no route, no data-layer call and no schema change.
-if config.features.skills:
-    app.include_router(skills_router)
+def _register_skills_routes(target: FastAPI) -> bool:
+    """Mount the skills router when the flag is on; return whether it mounted."""
+    if not config.features.skills:
+        return False
+    target.include_router(skills_router)
+    return True
+
+
+_SKILLS_ROUTES_MOUNTED = _register_skills_routes(app)
 
 app.include_router(router)
 

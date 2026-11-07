@@ -7,12 +7,18 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.routing import NoMatchFound
 
 import chainlit.config as chainlit_config
 import chainlit.skill as skill_module
 from chainlit.auth import get_current_user
 from chainlit.data.base import BaseDataLayer
-from chainlit.server import app, skills_router
+from chainlit.server import (
+    _SKILLS_ROUTES_MOUNTED,
+    _register_skills_routes,
+    app,
+    skills_router,
+)
 from chainlit.skill import Skill
 from chainlit.types import PromptDict
 from chainlit.user import PersistedUser
@@ -91,10 +97,29 @@ def data_layer_for(rows: list[PromptDict]) -> AsyncMock:
 # ---- feature gating ----
 
 
-def test_routes_are_absent_when_flag_is_off(monkeypatch):
+def test_global_app_matches_the_startup_flag():
+    """The real app mounts the router exactly when the import-time flag is on."""
+    try:
+        app.url_path_for("list_user_skills")
+    except NoMatchFound:
+        assert _SKILLS_ROUTES_MOUNTED is False
+    else:
+        assert _SKILLS_ROUTES_MOUNTED is True
+
+
+def test_register_skills_routes_is_flag_gated(monkeypatch):
     monkeypatch.setattr(chainlit_config.config.features, "skills", False)
-    paths = {getattr(route, "path", "") for route in app.routes}
-    assert not any(path.startswith("/project/skills") for path in paths)
+    off_app = FastAPI()
+    assert _register_skills_routes(off_app) is False
+    with pytest.raises(NoMatchFound):
+        off_app.url_path_for("list_user_skills")
+
+    monkeypatch.setattr(chainlit_config.config.features, "skills", True)
+    on_app = FastAPI()
+    assert _register_skills_routes(on_app) is True
+    assert on_app.url_path_for("list_user_skills") == (
+        f"{chainlit_config.config.run.root_path}/project/skills"
+    )
     assert skills_router is not None
 
 
@@ -194,6 +219,30 @@ def test_export_returns_markdown_for_the_owner(client, user):
     assert response.headers["content-type"].startswith("text/markdown")
     assert response.text.startswith("---\nname: alpha")
     assert "Alpha body." in response.text
+
+
+def test_storage_failure_never_reports_success(skill_app, user):
+    dl = data_layer_for([skill_row(user.id)])
+    dl.create_skill.side_effect = RuntimeError("Could not store the skill")
+    failing_client = TestClient(skill_app, raise_server_exceptions=False)
+
+    with patch("chainlit.server.get_data_layer", return_value=dl):
+        created = failing_client.post(
+            "/project/skills",
+            json={
+                "name": "beta",
+                "description": "Beta description",
+                "content": "Beta body.",
+            },
+        )
+
+    assert created.status_code == 500
+
+    dl.update_skill.side_effect = RuntimeError("Could not update the skill")
+    with patch("chainlit.server.get_data_layer", return_value=dl):
+        updated = failing_client.put("/project/skills/skill-1", json={"enabled": False})
+
+    assert updated.status_code == 500
 
 
 # ---- validation and unsupported layers ----

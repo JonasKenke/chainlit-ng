@@ -1140,11 +1140,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
         if self.engine.dialect.name == "sqlite":
             columns = await self.execute_sql("PRAGMA table_info(prompts)", {})
-            existing = (
-                {row.get("name") for row in columns}
-                if isinstance(columns, list)
-                else set()
-            )
+            if not isinstance(columns, list):
+                raise RuntimeError("Could not inspect the prompts table for skills")
+            existing = {row.get("name") for row in columns}
         else:
             columns = await self.execute_sql(
                 """
@@ -1153,11 +1151,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 """,
                 {},
             )
-            existing = (
-                {row.get("column_name") for row in columns}
-                if isinstance(columns, list)
-                else set()
-            )
+            if not isinstance(columns, list):
+                raise RuntimeError("Could not inspect the prompts table for skills")
+            existing = {row.get("column_name") for row in columns}
 
         for name, ddl in (
             ("kind", "TEXT NOT NULL DEFAULT 'prompt'"),
@@ -1168,17 +1164,21 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             ("contentHash", "TEXT"),
         ):
             if name not in existing:
-                await self.execute_sql(
+                result = await self.execute_sql(
                     f'ALTER TABLE prompts ADD COLUMN "{name}" {ddl}', {}
                 )
+                if result is None:
+                    raise RuntimeError("Could not add skill columns to prompts")
 
-        await self.execute_sql(
+        result = await self.execute_sql(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS prompts_skill_name
             ON prompts ("userId", "title") WHERE "kind" = 'skill'
             """,
             {},
         )
+        if result is None:
+            raise RuntimeError("Could not create the skill index")
         self._skills_columns_checked = True
 
     @staticmethod
@@ -1203,7 +1203,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_skill, id={skill['id']}")
         await self._ensure_skills_columns()
-        await self.execute_sql(
+        result = await self.execute_sql(
             """
             INSERT INTO prompts
             ("id", "userId", "title", "content", "isShared", "kind", "description", "enabled", "importedFrom", "importedAt", "contentHash", "createdAt", "updatedAt")
@@ -1224,6 +1224,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "updatedAt": skill["updatedAt"],
             },
         )
+        if result is None:
+            raise RuntimeError("Could not store the skill")
         return skill
 
     async def list_skills(self, user_id: str) -> List[PromptDict]:
@@ -1234,11 +1236,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             'SELECT * FROM prompts WHERE "userId" = :user_id AND "kind" = \'skill\' ORDER BY "createdAt" DESC',
             {"user_id": user_id},
         )
-        return (
-            [self._skill_from_row(row) for row in result]
-            if isinstance(result, list)
-            else []
-        )
+        if not isinstance(result, list):
+            raise RuntimeError("Could not read skills from the database")
+        return [self._skill_from_row(row) for row in result]
 
     async def get_skill(self, skill_id: str, user_id: str) -> Optional[PromptDict]:
         if self.show_logger:
@@ -1248,7 +1248,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             'SELECT * FROM prompts WHERE "id" = :id AND "userId" = :user_id AND "kind" = \'skill\'',
             {"id": skill_id, "user_id": user_id},
         )
-        if not isinstance(result, list) or not result:
+        if not isinstance(result, list):
+            raise RuntimeError("Could not read the skill from the database")
+        if not result:
             return None
         return self._skill_from_row(result[0])
 
@@ -1256,7 +1258,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_skill, id={skill['id']}")
         await self._ensure_skills_columns()
-        await self.execute_sql(
+        result = await self.execute_sql(
             """
             UPDATE prompts
             SET "title" = :title, "description" = :description, "content" = :content,
@@ -1273,6 +1275,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "updatedAt": skill["updatedAt"],
             },
         )
+        if result != 1:
+            raise RuntimeError("Could not update the skill")
         return skill
 
     async def delete_skill(self, skill_id: str, user_id: str) -> bool:
@@ -1283,6 +1287,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id AND "kind" = \'skill\'',
             {"id": skill_id, "user_id": user_id},
         )
+        if result is None:
+            raise RuntimeError("Could not delete the skill")
         return isinstance(result, int) and result > 0
 
     # ---- Prompt scheduling ----

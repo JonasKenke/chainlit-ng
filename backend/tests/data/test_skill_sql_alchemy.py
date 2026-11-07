@@ -159,7 +159,8 @@ async def test_update_cannot_move_a_skill_to_another_user(
     await skill_data_layer.create_skill(mine)
 
     stolen = cast(PromptDict, {**mine, "userId": "user-b", "title": "stolen"})
-    await skill_data_layer.update_skill(stolen)
+    with pytest.raises(RuntimeError, match="Could not update"):
+        await skill_data_layer.update_skill(stolen)
 
     stored = await skill_data_layer.get_skill(mine["id"], "user-a")
     assert stored is not None
@@ -190,3 +191,80 @@ async def test_prompts_and_skills_do_not_leak_into_each_other(
     assert [p["id"] for p in await skill_data_layer.list_prompts("user-a")] == [
         "prompt-1"
     ]
+
+
+async def test_failed_create_is_not_reported_as_success(
+    skill_data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    await skill_data_layer._ensure_skills_columns()
+
+    async def failing(query, parameters):
+        return None
+
+    monkeypatch.setattr(skill_data_layer, "execute_sql", failing)
+    with pytest.raises(RuntimeError, match="Could not store"):
+        await skill_data_layer.create_skill(skill_row("user-a"))
+
+
+async def test_failed_update_is_not_reported_as_success(
+    skill_data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    skill = skill_row("user-a")
+    await skill_data_layer.create_skill(skill)
+    disabled = cast(PromptDict, {**skill, "enabled": False})
+
+    async def no_result(query, parameters):
+        return None
+
+    monkeypatch.setattr(skill_data_layer, "execute_sql", no_result)
+    with pytest.raises(RuntimeError, match="Could not update"):
+        await skill_data_layer.update_skill(disabled)
+
+    async def no_rows(query, parameters):
+        return 0
+
+    monkeypatch.setattr(skill_data_layer, "execute_sql", no_rows)
+    with pytest.raises(RuntimeError, match="Could not update"):
+        await skill_data_layer.update_skill(disabled)
+
+
+async def test_failed_reads_and_delete_raise(
+    skill_data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    skill = skill_row("user-a")
+    await skill_data_layer.create_skill(skill)
+
+    async def failing(query, parameters):
+        return None
+
+    monkeypatch.setattr(skill_data_layer, "execute_sql", failing)
+    with pytest.raises(RuntimeError, match="Could not read"):
+        await skill_data_layer.list_skills("user-a")
+    with pytest.raises(RuntimeError, match="Could not read"):
+        await skill_data_layer.get_skill(skill["id"], "user-a")
+    with pytest.raises(RuntimeError, match="Could not delete"):
+        await skill_data_layer.delete_skill(skill["id"], "user-a")
+
+
+async def test_failed_migration_does_not_latch_and_retry_succeeds(
+    skill_data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    real_execute_sql = skill_data_layer.execute_sql
+
+    async def failing_alter(query, parameters):
+        if "ALTER TABLE" in query:
+            return None
+        return await real_execute_sql(query, parameters)
+
+    monkeypatch.setattr(skill_data_layer, "execute_sql", failing_alter)
+    with pytest.raises(RuntimeError, match="skill columns"):
+        await skill_data_layer._ensure_skills_columns()
+    assert skill_data_layer._skills_columns_checked is False
+
+    monkeypatch.setattr(skill_data_layer, "execute_sql", real_execute_sql)
+    await skill_data_layer._ensure_skills_columns()
+    assert skill_data_layer._skills_columns_checked is True
+
+    columns = await real_execute_sql("PRAGMA table_info(prompts)", {})
+    assert isinstance(columns, list)
+    assert "kind" in {row["name"] for row in columns}
