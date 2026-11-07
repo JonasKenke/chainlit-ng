@@ -80,6 +80,7 @@ from chainlit.scheduled_task import (
 )
 from chainlit.scheduler import ScheduledTaskWorker
 from chainlit.secret import random_secret
+from chainlit.skill import load_skills
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AskFileSpec,
@@ -117,6 +118,8 @@ mimetypes.add_type("text/css", ".css")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Context manager to handle app start and shutdown."""
+    load_skills()
+
     if config.code.on_app_startup:
         await config.code.on_app_startup()
 
