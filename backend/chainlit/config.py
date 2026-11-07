@@ -165,7 +165,9 @@ reaction_on_message_received = false
 [features.mcp.user_oauth]
     # Second, independent opt-in for OAuth against user-supplied MCP servers.
     # The user chooses the server, and therefore the authorization server, so
-    # both this flag and oauth_authorization_origins are required.
+    # both this flag and oauth_authorization_origins are required. Also needs
+    # authentication, an https CHAINLIT_URL outside localhost, and
+    # user_servers.enabled; see docs/mcp-oauth.md.
     enabled = false
     max_starts_per_user_per_minute = 5
     max_pending_per_user = 3

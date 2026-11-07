@@ -7,6 +7,7 @@ See also:
 
 ## Guides
 
+- [Per-user OAuth for MCP connections](mcp-oauth.md)
 - [Scheduled prompts integration](scheduled-prompts.md)
 - [Embedding Chainlit Copilot: supported authentication model](copilot-embedding.md)
 - [SDK-native LLM instrumentation](integrations/sdk-instrumentation.md)
