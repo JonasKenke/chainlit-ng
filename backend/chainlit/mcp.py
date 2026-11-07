@@ -1,6 +1,7 @@
+import ipaddress
 import re
 from typing import Callable, Dict, Literal, Optional, Union
-from urllib.parse import unquote, urlparse, urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx2
 from pydantic import BaseModel
@@ -102,9 +103,45 @@ def _path_matches(req_path: str, allowed_path: str) -> bool:
     no path component, e.g. "https://example.com"), all sub-paths on that host
     are permitted. Use a path-restricted entry (e.g. "https://example.com/api")
     to limit access to a sub-tree.
+
+    A '*' in allowed_path matches one or more characters other than '/', so it
+    never moves the match into a different segment. The matched segment's
+    sub-tree is still permitted, as for a literal path: '/tenant/*' covers
+    '/tenant/alice' and '/tenant/alice/messages', but '/tenant/*/mcp' does not
+    cover '/tenant/alice/other/mcp'.
     """
-    norm = allowed_path.rstrip("/") + "/"
-    return req_path == norm.rstrip("/") or req_path.startswith(norm)
+    norm = allowed_path.rstrip("/")
+    if "*" in norm:
+        regex = re.escape(norm).replace(r"\*", "[^/]+")
+        return re.fullmatch(rf"{regex}(?:/.*)?", req_path) is not None
+    return req_path == norm or req_path.startswith(norm + "/")
+
+
+def _host_matches(host: str, allowed_host: str) -> bool:
+    """True if host matches an allowlist host, which may start with '*.'.
+
+    The only supported host wildcard is a single leading label: '*.' covers one
+    or more subdomain labels (so 'a.b.example.com' matches '*.example.com'), but
+    not the apex 'example.com'. The suffix is anchored, so
+    'example.com.evil.com' cannot match either.
+    """
+    if "*" not in allowed_host:
+        return host == allowed_host
+
+    # A wildcard is for DNS names; never let it match an IP literal, even when
+    # an operator writes a wildcard over an IP-shaped suffix.
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return False
+
+    suffix = allowed_host[len("*.") :]
+    return (
+        re.fullmatch(rf"(?:[^.]+\.)+{re.escape(suffix)}", host, re.IGNORECASE)
+        is not None
+    )
 
 
 def _has_ambiguous_path(raw_path: str) -> bool:
@@ -162,6 +199,58 @@ def _has_ambiguous_path(raw_path: str) -> bool:
     return False
 
 
+def validate_mcp_allowlist_entry(entry: str) -> None:
+    """Reject an allowlist entry that cannot be matched safely.
+
+    '*' is supported as a single leading '*.' host label wildcard and anywhere
+    in the path, where it matches one or more non-'/' characters. Scheme, port,
+    credentials, query and fragment must stay literal; a '*' there is a config
+    error rather than a silently dead entry.
+    """
+    try:
+        parsed = urlsplit(entry)
+    except ValueError as exc:
+        raise ValueError("the URL could not be parsed") from exc
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("only http and https URLs are supported")
+
+    if "@" in parsed.netloc:
+        userinfo = parsed.netloc.rsplit("@", 1)[0]
+        if "*" in userinfo:
+            raise ValueError("'*' is not supported in credentials")
+
+    try:
+        parsed.port
+    except ValueError:
+        raise ValueError("the port must be a literal number") from None
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("the URL must include a host")
+    if "*" in host:
+        suffix = host[2:] if host.startswith("*.") else ""
+        if (
+            "*" in suffix
+            or not suffix
+            or suffix.startswith(".")
+            or suffix.endswith(".")
+            or ".." in suffix
+        ):
+            raise ValueError(
+                "host wildcards are only supported as a single leading '*.' label"
+            )
+
+    if "*" in parsed.query or "*" in parsed.fragment:
+        raise ValueError("'*' is only supported in the host and path")
+    if "%2a" in parsed.path.lower():
+        raise ValueError(
+            "percent-encoded '*' is not a wildcard; use a literal '*' in the path"
+        )
+    if _has_ambiguous_path(parsed.path):
+        raise ValueError("the path must not contain ambiguous segments")
+
+
 def validate_mcp_url(url: str, allowed_urls: list[str]) -> None:
     """Validate that a user-provided MCP URL is in the allowlist.
 
@@ -201,10 +290,16 @@ def validate_mcp_url(url: str, allowed_urls: list[str]) -> None:
         )
 
     for allowed in allowed_urls:
-        allowed_parsed = urlparse(allowed)
+        try:
+            validate_mcp_allowlist_entry(allowed)
+        except ValueError as exc:
+            raise ValueError(
+                f"The MCP URL allowlist contains an invalid entry: {exc}"
+            ) from None
+        allowed_parsed = urlsplit(allowed)
         if (
             parsed.scheme == allowed_parsed.scheme
-            and parsed.host == allowed_parsed.hostname
+            and _host_matches(parsed.host, allowed_parsed.hostname or "")
             and _effective_port(parsed) == _effective_port(allowed_parsed)
             and _path_matches(parsed.path or "/", allowed_parsed.path or "/")
         ):

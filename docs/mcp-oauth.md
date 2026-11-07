@@ -54,7 +54,14 @@ max_pending_per_user = 3
   include the MCP server. Entries match the scheme, hostname and effective port,
   plus an optional path subtree (`https://mcp.example.com` allows every path on
   that host; `https://mcp.example.com/team` allows only that subtree). An empty
-  list denies every user-provided server.
+  list denies every user-provided server. A single leading `*.` host label
+  matches one or more subdomains but not the apex (`https://*.example.com`
+  covers `a.example.com`, not `example.com` or `example.com.evil.com`); `*` in
+  a path matches one or more characters within one segment and never crosses
+  `/`, but the matched segment's sub-tree is still allowed as for a literal
+  path (`https://mcp.example.com/tenant/*` covers
+  `/tenant/alice/messages`). Wildcards in the scheme, port, credentials, query
+  or fragment are rejected when the config loads.
 - `features.mcp.oauth_authorization_origins` is the hard gate: when it is empty,
   every `useOAuth` request is rejected. List each authorization server as a bare
   origin (`https://auth.example.com`), with no path, query, fragment or

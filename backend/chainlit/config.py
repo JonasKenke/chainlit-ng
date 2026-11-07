@@ -201,7 +201,11 @@ reaction_on_message_received = false
         # stdio is never user-provided (server-side config only).
         enabled = false
         # Allowlist of permitted URL prefixes. Empty list = deny all.
-        # Example: allowed_urls = ["https://mcp.example.com"]
+        # '*' is allowed in the host as a leading '*.' label wildcard and in
+        # path segments (the matched segment's sub-tree is allowed); scheme,
+        # port and credentials stay literal.
+        # Example:
+        # allowed_urls = ["https://*.example.com", "https://mcp.example.com/tenant/*"]
         allowed_urls = []
 
 [UI]
@@ -389,6 +393,20 @@ McpServerConfig = Annotated[
 class McpUserServersFeature(BaseModel):
     enabled: bool = False
     allowed_urls: list[str] = []
+
+    @field_validator("allowed_urls")
+    @classmethod
+    def _validate_allowed_urls(cls, entries: list[str]) -> list[str]:
+        from chainlit.mcp import validate_mcp_allowlist_entry
+
+        for index, entry in enumerate(entries):
+            try:
+                validate_mcp_allowlist_entry(entry)
+            except ValueError as exc:
+                raise ValueError(
+                    f"features.mcp.user_servers.allowed_urls[{index}] is invalid: {exc}"
+                ) from None
+        return entries
 
 
 class McpFeature(BaseModel):
