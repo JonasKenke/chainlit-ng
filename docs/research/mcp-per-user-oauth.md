@@ -110,9 +110,9 @@ Constraints that shape the design:
 ## 2. What upstream #3013 does, and why it cannot be cherry-picked
 
 PR #3013 is 17 files, +2603/−159. Roughly half of it is test code (1436 lines).
-It is written against an upstream MCP integration this fork does not have:
+It was written against an upstream MCP integration this fork did not have when the note was written:
 
-| #3013 depends on                                                                                                                                                            | In this fork (`main`)                                                                                                                                                  |
+| #3013 depends on                                                                                                                                                            | In this fork at design time                                                                                                                                            |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Named developer servers `[[features.mcp.servers]]`, `SseMcpServer` / `StreamableHttpMcpServer` config models, `McpServerOAuth`, `oauth = { authorization_origins = [...] }` | **Absent.** `McpFeature` (`backend/chainlit/config.py:323-329`) has only `enabled` + per-transport toggles.                                                            |
 | `features.mcp.user_servers` opt-in and `allowed_urls` allowlist                                                                                                             | **Absent.** `POST /mcp` accepts any user-supplied URL.                                                                                                                 |
@@ -122,11 +122,19 @@ It is written against an upstream MCP integration this fork does not have:
 | Transport named `streamablehttp_client`, `auth=` accepted as a transport argument, `callback_handler` returns `(code, state)`                                               | **Different.** SDK 2.3.0 exposes `streamable_http_client(url, *, http_client, ...)` with no `auth` argument; `callback_handler` must return `AuthorizationCodeResult`. |
 | Endpoint-level test harness for `/mcp` (`mcp_chainlit_app`, `mock_mcp_transport`, ~1400 lines)                                                                              | **Absent.** `backend/tests/test_mcp.py` (446 lines) only exercises the models and `validate_mcp_command`.                                                              |
 
+**Status update (2026-11-07).** The fork now has named developer servers, the
+user-server allowlist and the destination checks from the 2.12.0 port (PR #20,
+merge `3320cae9`); see the [security advisory](../security-advisory-2026-mcp.md).
+The "Absent" cells above describe the fork at design time and are kept as the
+rationale for adapting #3013 instead of cherry-picking it. `useOAuth` remains
+the user-server flow; named-server OAuth is still an upstream #3013 follow-up.
+
 So #3013 is a source of design decisions and a provider/store implementation to
 adapt, not a patch to apply. Roughly 45% of the upstream diff (config + named
-servers + allowlist + destination-check refactor of `mcp.py`) has no target in
-this fork; ~55% (store, pending map, provider, callback route, `/mcp` wiring,
-frontend) does.
+servers + allowlist + destination-check refactor of `mcp.py`) had no target in
+this fork at design time; the 2.12.0 port has since added it. The remaining
+#3013 gap is OAuth for named developer-configured servers; `useOAuth` stays a
+user-server flow (see [MCP OAuth setup](../mcp-oauth.md)).
 
 ## 3. What the MCP SDK already gives us (verified against 2.3.0)
 
@@ -988,10 +996,10 @@ second review's ACs in without changing the architecture.
 - **Persistence across restarts** wanted → add a `TokenStore` interface with an
   encrypted SQL implementation; S1 grows, S3/S4 do not. Recommendation becomes
   "in-memory now, interface now, persistence later".
-- **Named developer-configured servers** added first (upstream parity) → the
-  config-shaped variant becomes primary and `useOAuth` secondary; the store,
-  guard and provider are unchanged, and the AS allowlist moves from a global set
-  to a per-server field.
+- **Named developer-configured servers** added first (upstream parity) →
+  **done in the 2.12.0 port** (PR #20, `3320cae9`). `useOAuth` remains the
+  user-server flow; per-server OAuth for named servers is still an upstream
+  #3013 follow-up, and the store, guard and provider are unchanged.
 - **No-proxy deployment guaranteed** → Option B becomes acceptable and saves two
   socket events and the frontend 202 path, but M1's deadlines still apply.
 - **Security requires per-server allowlists** → needs a server-identity config
