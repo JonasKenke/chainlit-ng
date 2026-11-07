@@ -1,4 +1,6 @@
-import * as LucideIcons from 'lucide-react';
+import { Suspense, lazy } from 'react';
+
+const IconDynamic = lazy(() => import('@/components/IconDynamic'));
 
 interface Props {
   name: string;
@@ -7,36 +9,30 @@ interface Props {
   color?: string;
 }
 
-const Icon = ({ name, ...props }: Props) => {
-  // Convert the name to proper case
-  const formatIconName = (name: string): string => {
-    //aggressively lowercase the parts to clean up inputs like "ChEvRoN-rIgHt"
-    if (name.includes('-')) {
-      return name
-        .split('-')
-        .map(
-          (part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-        )
-        .join('');
-    }
-    if (name === name.toUpperCase()) {
-      return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-    }
-    return name.charAt(0).toUpperCase() + name.slice(1);
-  };
+const Icon = ({ name, className, size, color }: Props) => {
+  // Reserve the icon box while the registry or the per-icon chunk loads so
+  // buttons and avatars do not shift once the icon arrives.
+  const placeholder = (
+    <svg
+      className={className}
+      width={size ?? 24}
+      height={size ?? 24}
+      aria-hidden="true"
+      data-icon-placeholder
+    />
+  );
 
-  // Try to get the icon component using the formatted name
-  const formattedName = formatIconName(name);
-  const IconComponent = LucideIcons[
-    formattedName as keyof typeof LucideIcons
-  ] as any;
-
-  if (!IconComponent) {
-    console.warn(`Icon "${name}" not found in Lucide icons`);
-    return null;
-  }
-
-  return <IconComponent {...props} />;
+  return (
+    <Suspense fallback={placeholder}>
+      <IconDynamic
+        name={name}
+        className={className}
+        size={size}
+        color={color}
+        placeholder={placeholder}
+      />
+    </Suspense>
+  );
 };
 
 export default Icon;
