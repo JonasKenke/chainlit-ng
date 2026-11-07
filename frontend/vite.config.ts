@@ -8,6 +8,13 @@ export default defineConfig({
   build: {
     sourcemap: true
   },
+  experimental: {
+    // Resolve JS asset URLs (lazy chunk preloads, their CSS, ?url imports)
+    // relative to the importing module so they respect CHAINLIT_ROOT_PATH.
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === 'js') return { relative: true };
+    }
+  },
   plugins: [react(), svgr()],
   resolve: {
     tsconfigPaths: true,

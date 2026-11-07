@@ -74,4 +74,38 @@ describe('Customize chat settings', () => {
     cy.contains('Cancel').click();
     cy.get('#chat-settings').should('not.exist');
   });
+
+  it('should update dependent options without a settings round-trip', () => {
+    openChatSettingsModal();
+
+    cy.step('Change the parent select');
+
+    cy.get('#country').click();
+    cy.get('[role="listbox"]')
+      .should('be.visible')
+      .within(() => {
+        cy.contains('[role="option"]', 'Canada').click();
+      });
+    cy.get('#country').should('contain.text', 'Canada');
+    cy.get('.step').should('have.length', 0);
+
+    cy.step('Check the child options are narrowed');
+
+    cy.get('#city').click();
+    cy.get('[role="listbox"]')
+      .should('be.visible')
+      .within(() => {
+        cy.contains('[role="option"]', 'Toronto').should('be.visible');
+        cy.contains('[role="option"]', 'New York').should('not.exist');
+        cy.contains('[role="option"]', 'Toronto').click();
+      });
+    cy.get('#city').should('contain.text', 'Toronto');
+
+    cy.step('Confirm and check the reconciled pair is submitted');
+
+    cy.get('#confirm').click();
+
+    cy.get('.step').should('have.length', 1);
+    cy.get('.step').eq(0).should('contain', 'country=CA city=toronto');
+  });
 });

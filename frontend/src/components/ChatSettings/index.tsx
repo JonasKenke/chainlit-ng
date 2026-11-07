@@ -24,6 +24,7 @@ import { Translator } from 'components/i18n';
 import { useAppStore } from '@/state/store';
 
 import { FormInput, TFormInputValue } from './FormInput';
+import { effectiveItems, resolveDependentValues } from './dependentInputs';
 import { useChatSettingsSnapshotAtOpen } from './useChatSettingsSnapshotAtOpen';
 
 export default function ChatSettingsModal() {
@@ -63,7 +64,8 @@ export default function ChatSettingsModal() {
   };
 
   const handleConfirm = handleSubmit((data) => {
-    const processedValues = mapValues(data, (x: TFormInputValue) =>
+    const reconciledValues = resolveDependentValues(chatSettingsInputs, data);
+    const processedValues = mapValues(reconciledValues, (x: TFormInputValue) =>
       x !== '' ? x : null
     );
     updateChatSettings(processedValues);
@@ -80,10 +82,31 @@ export default function ChatSettingsModal() {
 
   const setFieldValue = (field: string, value: any) => {
     setValue(field, value);
-    editChatSettings(getValues());
+    const currentValues = getValues();
+    const resolvedValues = resolveDependentValues(
+      chatSettingsInputs,
+      currentValues
+    );
+    Object.entries(resolvedValues).forEach(([key, resolvedValue]) => {
+      if (resolvedValue !== currentValues[key]) {
+        setValue(key, resolvedValue);
+      }
+    });
+    editChatSettings(resolvedValues);
   };
 
   const values = watch();
+  const resolvedValues = resolveDependentValues(chatSettingsInputs, values);
+
+  const getElement = (input: any) => ({
+    ...input,
+    ...(input.depends_on
+      ? { items: effectiveItems(input, resolvedValues[input.depends_on]) }
+      : {}),
+    value: resolvedValues[input.id],
+    onChange: handleChange,
+    setField: setFieldValue
+  });
 
   const tabInputs = chatSettingsInputs.filter(
     (input: any) => Array.isArray(input?.inputs) && input.inputs.length > 0
@@ -129,15 +152,7 @@ export default function ChatSettingsModal() {
                 className="data-[state=active]:flex flex-col flex-grow overflow-y-auto gap-6 p-1 mt-4"
               >
                 {tab.inputs?.map((input: any) => (
-                  <FormInput
-                    key={input.id}
-                    element={{
-                      ...input,
-                      value: values[input.id],
-                      onChange: handleChange,
-                      setField: setFieldValue
-                    }}
-                  />
+                  <FormInput key={input.id} element={getElement(input)} />
                 ))}
               </TabsContent>
             ))}
@@ -145,15 +160,7 @@ export default function ChatSettingsModal() {
         ) : (
           <div className="flex flex-col flex-grow overflow-y-auto gap-6 p-1">
             {regularInputs.map((input: any) => (
-              <FormInput
-                key={input.id}
-                element={{
-                  ...input,
-                  value: values[input.id],
-                  onChange: handleChange,
-                  setField: setFieldValue
-                }}
-              />
+              <FormInput key={input.id} element={getElement(input)} />
             ))}
           </div>
         )}

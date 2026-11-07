@@ -1,8 +1,8 @@
 diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
-index 57254ca0a2e259e7eb4060a5c84992e50f3a7109..9cb98db11a977672dcfa3aaec20befa6d2cf5d0e 100644
+index 57254ca..30f23fb 100644
 --- a/dev/lib/math-text.js
 +++ b/dev/lib/math-text.js
-@@ -220,6 +220,7 @@ function createBackslashMathText(open, close) {
+@@ -52,6 +52,7 @@ function createDollarMathText(allowSingle) {
    function tokenizeMathText(effects, ok, nok) {
      const self = this
      let sizeOpen = 0
@@ -10,7 +10,99 @@ index 57254ca0a2e259e7eb4060a5c84992e50f3a7109..9cb98db11a977672dcfa3aaec20befa6
      /** @type {number} */
      let size
      /** @type {Token} */
-@@ -235,6 +236,7 @@ function createBackslashMathText(open, close) {
+@@ -59,6 +60,17 @@ function createDollarMathText(allowSingle) {
+ 
+     return start
+ 
++    /**
++     * Check the fixed lookahead budget from the opener. States that can run
++     * unbounded check it, so repeated openers stay linear overall.
++     *
++     * @returns {boolean}
++     *   Whether the budget is exhausted.
++     */
++    function lookaheadExceeded() {
++      return self.now().offset - startOffset > 256
++    }
++
+     /**
+      * Start of math (text).
+      *
+@@ -77,6 +89,7 @@ function createDollarMathText(allowSingle) {
+         previousDollar.call(self, self.previous),
+         'expected correct previous'
+       )
++      startOffset = self.now().offset
+       effects.enter('mathText')
+       effects.enter('mathTextSequence')
+       return sequenceOpen(code)
+@@ -93,6 +106,9 @@ function createDollarMathText(allowSingle) {
+      * @type {State}
+      */
+     function sequenceOpen(code) {
++      if (lookaheadExceeded()) {
++        return nok(code)
++      }
+       if (code === codes.dollarSign) {
+         effects.consume(code)
+         sizeOpen++
+@@ -118,6 +134,9 @@ function createDollarMathText(allowSingle) {
+      * @type {State}
+      */
+     function between(code) {
++      if (lookaheadExceeded()) {
++        return nok(code)
++      }
+       if (code === codes.eof) {
+         return nok(code)
+       }
+@@ -157,6 +176,9 @@ function createDollarMathText(allowSingle) {
+      * @type {State}
+      */
+     function data(code) {
++      if (lookaheadExceeded()) {
++        return nok(code)
++      }
+       if (
+         code === codes.eof ||
+         code === codes.space ||
+@@ -182,6 +204,9 @@ function createDollarMathText(allowSingle) {
+      * @type {State}
+      */
+     function sequenceClose(code) {
++      if (lookaheadExceeded()) {
++        return nok(code)
++      }
+       if (code === codes.dollarSign) {
+         effects.consume(code)
+         size++
+@@ -220,6 +245,7 @@ function createBackslashMathText(open, close) {
+   function tokenizeMathText(effects, ok, nok) {
+     const self = this
+     let sizeOpen = 0
++    let startOffset = 0
+     /** @type {number} */
+     let size
+     /** @type {Token} */
+@@ -227,6 +253,17 @@ function createBackslashMathText(open, close) {
+ 
+     return start
+ 
++    /**
++     * Check the fixed lookahead budget from the opener. States that can run
++     * unbounded check it, so repeated openers stay linear overall.
++     *
++     * @returns {boolean}
++     *   Whether the budget is exhausted.
++     */
++    function lookaheadExceeded() {
++      return self.now().offset - startOffset > 256
++    }
++
+     /**
+      * Start of math (text) for backslash variant.
+      *
+@@ -235,6 +272,7 @@ function createBackslashMathText(open, close) {
       * @type {State}
       */
      function start(code) {
@@ -18,23 +110,31 @@ index 57254ca0a2e259e7eb4060a5c84992e50f3a7109..9cb98db11a977672dcfa3aaec20befa6
        assert(code === codes.backslash, 'expected `\\`')
        assert(
          previousBackslash.call(self, self.previous),
-@@ -279,6 +281,11 @@ function createBackslashMathText(open, close) {
+@@ -279,6 +317,9 @@ function createBackslashMathText(open, close) {
       * @type {State}
       */
      function between(code) {
-+      // An unclosed opener must fall back to text after a fixed lookahead
-+      // instead of scanning to end-of-input (O(n^2) across openers).
-+      if (self.now().offset - startOffset > 256) {
++      if (lookaheadExceeded()) {
 +        return nok(code)
 +      }
        if (code === codes.eof) {
          return nok(code)
        }
+@@ -314,6 +355,9 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function data(code) {
++      if (lookaheadExceeded()) {
++        return nok(code)
++      }
+       if (
+         code === codes.eof ||
+         code === codes.space ||
 diff --git a/lib/math-text.js b/lib/math-text.js
-index 802e3d6f227d1c34b5192a9473685dd8cc563970..99531814d9dbd11b6735c9fb2154173627d97740 100644
+index 802e3d6..f365da3 100644
 --- a/lib/math-text.js
 +++ b/lib/math-text.js
-@@ -192,6 +192,7 @@ function createBackslashMathText(open, close) {
+@@ -44,12 +44,24 @@ function createDollarMathText(allowSingle) {
    function tokenizeMathText(effects, ok, nok) {
      const self = this;
      let sizeOpen = 0;
@@ -42,7 +142,24 @@ index 802e3d6f227d1c34b5192a9473685dd8cc563970..99531814d9dbd11b6735c9fb21541736
      /** @type {number} */
      let size;
      /** @type {Token} */
-@@ -206,6 +207,7 @@ function createBackslashMathText(open, close) {
+     let token;
+     return start;
+ 
++    /**
++     * Check the fixed lookahead budget from the opener. States that can run
++     * unbounded check it, so repeated openers stay linear overall.
++     *
++     * @returns {boolean}
++     *   Whether the budget is exhausted.
++     */
++    function lookaheadExceeded() {
++      return self.now().offset - startOffset > 256;
++    }
++
+     /**
+      * Start of math (text).
+      *
+@@ -63,6 +75,7 @@ function createDollarMathText(allowSingle) {
       * @type {State}
       */
      function start(code) {
@@ -50,15 +167,96 @@ index 802e3d6f227d1c34b5192a9473685dd8cc563970..99531814d9dbd11b6735c9fb21541736
        effects.enter('mathText');
        effects.enter('mathTextSequence');
        return sequenceOpen(code);
-@@ -242,6 +244,11 @@ function createBackslashMathText(open, close) {
+@@ -79,6 +92,9 @@ function createDollarMathText(allowSingle) {
+      * @type {State}
+      */
+     function sequenceOpen(code) {
++      if (lookaheadExceeded()) {
++        return nok(code);
++      }
+       if (code === 36) {
+         effects.consume(code);
+         sizeOpen++;
+@@ -102,6 +118,9 @@ function createDollarMathText(allowSingle) {
       * @type {State}
       */
      function between(code) {
-+      // An unclosed opener must fall back to text after a fixed lookahead
-+      // instead of scanning to end-of-input (O(n^2) across openers).
-+      if (self.now().offset - startOffset > 256) {
++      if (lookaheadExceeded()) {
 +        return nok(code);
 +      }
        if (code === null) {
          return nok(code);
        }
+@@ -137,6 +156,9 @@ function createDollarMathText(allowSingle) {
+      * @type {State}
+      */
+     function data(code) {
++      if (lookaheadExceeded()) {
++        return nok(code);
++      }
+       if (code === null || code === 32 || code === 36 || markdownLineEnding(code)) {
+         effects.exit('mathTextData');
+         return between(code);
+@@ -156,6 +178,9 @@ function createDollarMathText(allowSingle) {
+      * @type {State}
+      */
+     function sequenceClose(code) {
++      if (lookaheadExceeded()) {
++        return nok(code);
++      }
+       if (code === 36) {
+         effects.consume(code);
+         size++;
+@@ -192,12 +217,24 @@ function createBackslashMathText(open, close) {
+   function tokenizeMathText(effects, ok, nok) {
+     const self = this;
+     let sizeOpen = 0;
++    let startOffset = 0;
+     /** @type {number} */
+     let size;
+     /** @type {Token} */
+     let token;
+     return start;
+ 
++    /**
++     * Check the fixed lookahead budget from the opener. States that can run
++     * unbounded check it, so repeated openers stay linear overall.
++     *
++     * @returns {boolean}
++     *   Whether the budget is exhausted.
++     */
++    function lookaheadExceeded() {
++      return self.now().offset - startOffset > 256;
++    }
++
+     /**
+      * Start of math (text) for backslash variant.
+      *
+@@ -206,6 +243,7 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function start(code) {
++      startOffset = self.now().offset;
+       effects.enter('mathText');
+       effects.enter('mathTextSequence');
+       return sequenceOpen(code);
+@@ -242,6 +280,9 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function between(code) {
++      if (lookaheadExceeded()) {
++        return nok(code);
++      }
+       if (code === null) {
+         return nok(code);
+       }
+@@ -273,6 +314,9 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function data(code) {
++      if (lookaheadExceeded()) {
++        return nok(code);
++      }
+       if (code === null || code === 32 || code === 92 || markdownLineEnding(code)) {
+         effects.exit('mathTextData');
+         return between(code);

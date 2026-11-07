@@ -1,11 +1,11 @@
 import type { IMessageElement } from '@chainlit/react-client';
 
 import { AudioElement } from './Audio';
-import CustomElement from './CustomElement';
 import { FileElement } from './File';
 import { ImageElement } from './Image';
+import { LazyCustomElement } from './LazyCustomElement';
 import { LazyDataframe } from './LazyDataframe';
-import { PDFElement } from './PDF';
+import { LazyPDF } from './LazyPDF';
 import { PlotlyElement } from './Plotly';
 import { TextElement } from './Text';
 import { VideoElement } from './Video';
@@ -25,7 +25,7 @@ const Element = ({
     case 'text':
       return <TextElement element={element} />;
     case 'pdf':
-      return <PDFElement element={element} />;
+      return <LazyPDF element={element} />;
     case 'audio':
       return <AudioElement element={element} />;
     case 'video':
@@ -35,7 +35,7 @@ const Element = ({
     case 'dataframe':
       return <LazyDataframe element={element} />;
     case 'custom':
-      return <CustomElement element={element} />;
+      return <LazyCustomElement element={element} />;
     default:
       return null;
   }
