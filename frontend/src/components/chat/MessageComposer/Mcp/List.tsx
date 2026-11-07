@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { Link, RefreshCw, Trash2, Wrench } from 'lucide-react';
+import { Link, LogIn, RefreshCw, Trash2, Wrench } from 'lucide-react';
 import { useContext, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -27,6 +27,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from 'components/i18n/Translator';
 
+import {
+  getAuthorizationLink,
+  openAuthorizationUrl
+} from './authorizationLink';
+
 interface McpListProps {
   onAddNewClick: () => void;
 }
@@ -39,7 +44,9 @@ export const McpList = ({ onAddNewClick }: McpListProps) => {
   const { t } = useTranslation();
 
   const deleteMcp = (mcp: IMcp) => {
-    if (mcp.status === 'connected') {
+    // A pending sign-in has no McpSession yet, but the backend still has to
+    // cancel the flow and forget the credential, so ask before dropping it.
+    if (mcp.status === 'connected' || mcp.authorizationUrl) {
       setIsLoading(true);
 
       toast.promise(
@@ -115,6 +122,10 @@ const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
         </div>
       </div>
 
+      {mcp.authorizationUrl && <OAuthSignIn url={mcp.authorizationUrl} />}
+
+      {mcp.detail && <p className="text-sm text-destructive">{mcp.detail}</p>}
+
       {mcp.isUserProvided && displayUrl && (
         <div className="flex gap-2 flex-wrap">
           <div className="font-medium text-sm text-muted-foreground flex items-center">
@@ -146,6 +157,30 @@ const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
   );
 };
 
+const OAuthSignIn = ({ url }: { url: string }) => {
+  const { t } = useTranslation();
+  const link = getAuthorizationLink(url);
+
+  if (!link) return null;
+
+  return (
+    <a
+      href={link.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-sm underline flex items-center gap-2 w-fit"
+      onClick={(event) => {
+        // Never navigate the app itself; open the AS in a new tab on click.
+        event.preventDefault();
+        openAuthorizationUrl(link.href);
+      }}
+    >
+      <LogIn className="h-4 w-4" />
+      {t('chat.mcp.list.signIn', { host: link.host })}
+    </a>
+  );
+};
+
 interface DeleteMcpButtonProps {
   mcp: IMcp;
   onDelete: (mcp: IMcp) => void;
@@ -162,6 +197,7 @@ const DeleteMcpButton = ({ mcp, onDelete, disabled }: DeleteMcpButtonProps) => {
           variant="ghost"
           size="icon"
           className="text-destructive"
+          aria-label={t('chat.mcp.list.remove')}
           disabled={disabled}
         >
           <Trash2 className="h-4 w-4" />
