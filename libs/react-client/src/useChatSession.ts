@@ -12,6 +12,7 @@ import {
   IAction,
   ICommand,
   IElement,
+  IMcp,
   IMessageElement,
   IMode,
   IStep,
@@ -33,6 +34,7 @@ import type { IToken } from './useChatData';
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const sessionId = useChainlitStore((state) => state.sessionId);
+  const config = useChainlitStore((state) => state.config);
 
   const [session, setSession] = useChainlitState('session');
   const setIsAiSpeaking = useSetChainlitState('isAiSpeaking');
@@ -116,8 +118,29 @@ const useChatSession = () => {
         socket.emit('connection_successful');
         setSession((s) => ({ ...s!, error: false }));
         socket.emit('fetch_favorites');
-        setMcps((prev) =>
-          prev.map((mcp) => {
+        const configuredServers = config?.features.mcp?.servers ?? [];
+        setMcps((prev) => {
+          const seen = new Set<string>();
+          const mcps: IMcp[] = [];
+          for (const mcp of prev) {
+            if (seen.has(mcp.name)) continue;
+            seen.add(mcp.name);
+            const configured = configuredServers.find(
+              (server) => server.name === mcp.name
+            );
+            mcps.push(
+              configured
+                ? {
+                    name: mcp.name,
+                    tools: mcp.tools,
+                    status: mcp.status,
+                    type: configured.type
+                  }
+                : mcp
+            );
+          }
+
+          mcps.forEach((mcp) => {
             const promise =
               mcp.isUserProvided && mcp.clientType && mcp.url
                 ? client.connectUserMcp(
@@ -156,9 +179,10 @@ const useChatSession = () => {
                   })
                 );
               });
-            return { ...mcp, status: 'connecting' };
-          })
-        );
+          });
+
+          return mcps.map((mcp) => ({ ...mcp, status: 'connecting' }));
+        });
       });
 
       socket.on('connect_error', (_) => {
@@ -494,7 +518,7 @@ const useChatSession = () => {
         }
       });
     },
-    [setSession, sessionId, idToResume, chatProfile]
+    [setSession, sessionId, idToResume, chatProfile, config]
   );
 
   // Keep a single debounced connect for the lifetime of the session. A new

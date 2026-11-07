@@ -63,8 +63,7 @@ export const McpAddForm = ({
     });
   };
 
-  const errorText = (err: any) =>
-    err?.detail || err?.message || t('chat.mcp.errors.connect');
+  const errorText = () => t('chat.mcp.errors.connect');
 
   const connectConfigured = (server: McpServerConfig) => {
     setIsLoading(true);

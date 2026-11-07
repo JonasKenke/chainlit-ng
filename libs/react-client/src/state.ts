@@ -9,7 +9,11 @@ import { IMode } from './types/mode';
 
 import type { ChainlitAPI } from './api';
 import { ChainlitContext } from './context';
-import { MCP_STORAGE_KEY, parseStoredMcps } from './mcpStorage';
+import {
+  MCP_STORAGE_KEY,
+  parseStoredMcps,
+  serializeStoredMcps
+} from './mcpStorage';
 import {
   IAction,
   IAsk,
@@ -160,7 +164,7 @@ function writeValue<K extends ChainlitStateKey>(
   } else if (key === 'threadHistory' && value) {
     nextState.threadHistory = withGroupedThreads(value as ThreadHistory);
   } else if (key === 'mcps') {
-    localStorage.setItem(MCP_STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(MCP_STORAGE_KEY, serializeStoredMcps(value as IMcp[]));
   }
 
   store.setState(nextState);

@@ -8,7 +8,8 @@ export interface IMcp {
   isUserProvided?: boolean;
   /** Transport of a user-provided server; SSE/HTTP only. */
   clientType?: 'sse' | 'streamable-http';
+  /** Raw URL; sanitize before persisting or displaying. */
   url?: string;
-  /** Persisted only for user-provided servers so they can reconnect. */
+  /** In-memory only; never persisted or replayed after reload. */
   headers?: Record<string, string>;
 }

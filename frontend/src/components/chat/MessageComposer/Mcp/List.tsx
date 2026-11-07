@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   ChainlitContext,
   IMcp,
+  sanitizeMcpUrl,
   useChainlitState,
   useChainlitStore
 } from '@chainlit/react-client';
@@ -91,6 +92,7 @@ interface McpItemProps {
 const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
   const { t } = useTranslation();
   const transport = mcp.type || mcp.clientType;
+  const displayUrl = sanitizeMcpUrl(mcp.url);
 
   return (
     <div className="border rounded-lg p-4 flex flex-col gap-3">
@@ -113,7 +115,7 @@ const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
         </div>
       </div>
 
-      {mcp.isUserProvided && mcp.url && (
+      {mcp.isUserProvided && displayUrl && (
         <div className="flex gap-2 flex-wrap">
           <div className="font-medium text-sm text-muted-foreground flex items-center">
             <Link className="h-4 w-4 mr-2" />
@@ -121,9 +123,9 @@ const McpItem = ({ mcp, onDelete, isLoading }: McpItemProps) => {
           </div>
           <div className="flex items-center w-full bg-accent px-3 py-1 rounded gap-2">
             <pre className="text-sm font-mono flex-grow truncate">
-              {mcp.url}
+              {displayUrl}
             </pre>
-            <CopyButton content={mcp.url} />
+            <CopyButton content={displayUrl} />
           </div>
         </div>
       )}

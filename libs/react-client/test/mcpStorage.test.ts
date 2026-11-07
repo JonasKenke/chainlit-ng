@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseStoredMcps } from '../src/mcpStorage';
+import {
+  parseStoredMcps,
+  sanitizeMcpUrl,
+  serializeStoredMcps
+} from '../src/mcpStorage';
 
 const tools = [{ name: 'search' }];
 
@@ -27,12 +31,11 @@ describe('parseStoredMcps', () => {
     ]);
 
     expect(parseStoredMcps(stored)).toEqual([
-      { name: 'files', status: 'connected', tools, type: 'stdio' }
+      { name: 'files', status: 'connected', tools: [], type: 'stdio' }
     ]);
   });
 
-  it('migrates legacy URL entries to user-provided servers', () => {
-    const headers = { Authorization: 'Bearer token' };
+  it('migrates legacy URL entries and drops stored credentials', () => {
     const stored = JSON.stringify([
       {
         name: 'sse',
@@ -45,8 +48,8 @@ describe('parseStoredMcps', () => {
         name: 'http',
         status: 'connected',
         clientType: 'streamable-http',
-        url: 'https://http.example/mcp',
-        headers,
+        url: 'https://user:pass@http.example/mcp?token=secret#frag',
+        headers: { Authorization: 'Bearer token' },
         tools
       }
     ]);
@@ -55,7 +58,7 @@ describe('parseStoredMcps', () => {
       {
         name: 'sse',
         status: 'failed',
-        tools,
+        tools: [],
         clientType: 'sse',
         isUserProvided: true,
         url: 'https://sse.example/mcp'
@@ -63,16 +66,15 @@ describe('parseStoredMcps', () => {
       {
         name: 'http',
         status: 'connected',
-        tools,
+        tools: [],
         clientType: 'streamable-http',
         isUserProvided: true,
-        url: 'https://http.example/mcp',
-        headers
+        url: 'https://http.example/mcp'
       }
     ]);
   });
 
-  it('keeps entries already written in the new shape', () => {
+  it('keeps entries already written in the new shape without persisted tools', () => {
     const entries = [
       { name: 'named', status: 'connected', type: 'streamable-http', tools },
       {
@@ -85,7 +87,22 @@ describe('parseStoredMcps', () => {
       }
     ];
 
-    expect(parseStoredMcps(JSON.stringify(entries))).toEqual(entries);
+    expect(parseStoredMcps(JSON.stringify(entries))).toEqual([
+      {
+        name: 'named',
+        status: 'connected',
+        type: 'streamable-http',
+        tools: []
+      },
+      {
+        name: 'user',
+        status: 'failed',
+        clientType: 'sse',
+        isUserProvided: true,
+        url: 'https://user.example/mcp',
+        tools: []
+      }
+    ]);
   });
 
   it('drops malformed entries and keeps valid ones', () => {
@@ -115,5 +132,74 @@ describe('parseStoredMcps', () => {
       { name: 'missing', type: 'sse', status: 'failed', tools: [] },
       { name: 'unknown', type: 'sse', status: 'failed', tools: [] }
     ]);
+  });
+
+  it('keeps only the first entry for a duplicated name', () => {
+    const stored = JSON.stringify([
+      { name: 'dup', status: 'connected', type: 'sse' },
+      { name: 'dup', status: 'failed', type: 'stdio' }
+    ]);
+
+    expect(parseStoredMcps(stored)).toEqual([
+      { name: 'dup', status: 'connected', type: 'sse', tools: [] }
+    ]);
+  });
+});
+
+describe('serializeStoredMcps', () => {
+  it('never persists headers, tools or URL credentials', () => {
+    const stored = serializeStoredMcps([
+      {
+        name: 'user',
+        status: 'connected',
+        tools,
+        isUserProvided: true,
+        clientType: 'sse',
+        url: 'https://user:pass@example.com/mcp?token=query-secret#frag',
+        headers: { Authorization: 'Bearer header-secret' }
+      }
+    ]);
+
+    expect(stored).not.toContain('header-secret');
+    expect(stored).not.toContain('query-secret');
+    expect(stored).not.toContain('pass@');
+    expect(stored).not.toContain('tools');
+    expect(JSON.parse(stored)).toEqual([
+      {
+        name: 'user',
+        status: 'connected',
+        isUserProvided: true,
+        clientType: 'sse',
+        url: 'https://example.com/mcp'
+      }
+    ]);
+  });
+
+  it('drops user servers whose URL has no safe form', () => {
+    const stored = serializeStoredMcps([
+      {
+        name: 'bad',
+        status: 'failed',
+        tools: [],
+        isUserProvided: true,
+        clientType: 'sse',
+        url: 'not a url'
+      }
+    ]);
+
+    expect(stored).toBe('[]');
+  });
+});
+
+describe('sanitizeMcpUrl', () => {
+  it('strips userinfo, query and fragment', () => {
+    expect(
+      sanitizeMcpUrl('https://user:pass@example.com/mcp?token=secret#frag')
+    ).toBe('https://example.com/mcp');
+  });
+
+  it('returns undefined for invalid URLs', () => {
+    expect(sanitizeMcpUrl('not a url')).toBeUndefined();
+    expect(sanitizeMcpUrl(undefined)).toBeUndefined();
   });
 });

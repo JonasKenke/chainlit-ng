@@ -10,6 +10,7 @@ export * from './api';
 export * from './types';
 export * from './context';
 export * from './state';
+export { sanitizeMcpUrl } from './mcpStorage';
 export * from './utils/message';
 
 export { Socket } from 'socket.io-client';
