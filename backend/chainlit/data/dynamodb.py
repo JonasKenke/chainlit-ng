@@ -323,7 +323,7 @@ class DynamoDBDataLayer(BaseDataLayer):
 
     @queue_until_user_message()
     async def delete_element(self, element_id: str, thread_id: Optional[str] = None):
-        thread_id = self.context.session.thread_id
+        thread_id = thread_id or self.context.session.thread_id
         _logger.info(
             "DynamoDB: delete_element thread=%s element=%s", thread_id, element_id
         )

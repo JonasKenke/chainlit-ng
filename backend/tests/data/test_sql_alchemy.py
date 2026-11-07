@@ -570,6 +570,60 @@ async def test_get_element_is_scoped_to_its_thread(data_layer: SQLAlchemyDataLay
     assert await data_layer.get_element("bob_thread_0", "alice_element_0") is None
 
 
+async def test_delete_element_is_scoped_to_its_thread(
+    mock_chainlit_context,
+    data_layer: SQLAlchemyDataLayer,
+    mock_storage_client: BaseStorageClient,
+):
+    alice = await data_layer.create_user(User(identifier="delete_element_alice"))
+    bob = await data_layer.create_user(User(identifier="delete_element_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+    delete_file = cast(AsyncMock, mock_storage_client.delete_file)
+
+    async with mock_chainlit_context:
+        await data_layer.delete_element("alice_element_0", "bob_thread_0")
+
+        assert await data_layer.get_element("alice_thread_0", "alice_element_0")
+        delete_file.assert_not_awaited()
+
+        await data_layer.delete_element("alice_element_0", "alice_thread_0")
+
+    assert await data_layer.get_element("alice_thread_0", "alice_element_0") is None
+    delete_file.assert_awaited_once_with(object_key="alice-object-0")
+
+
+async def test_create_element_cannot_overwrite_another_threads_element(
+    mock_chainlit_context,
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="overwrite_alice"))
+    bob = await data_layer.create_user(User(identifier="overwrite_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+
+    async with mock_chainlit_context:
+        await data_layer.create_element(
+            Text(
+                id="alice_element_0",
+                name="overwrite.txt",
+                mime="text/plain",
+                content="overwritten",
+                for_id="bob_step_0",
+                thread_id="bob_thread_0",
+            )
+        )
+
+    element = await data_layer.get_element("alice_thread_0", "alice_element_0")
+    assert element is not None
+    assert element["name"] == "attachment.txt"
+    assert await data_layer.get_element("bob_thread_0", "alice_element_0") is None
+
+
 async def test_favorite_steps_only_returns_target_user_steps(
     data_layer: SQLAlchemyDataLayer,
 ):

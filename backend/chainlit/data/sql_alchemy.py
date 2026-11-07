@@ -692,7 +692,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             for column in element_dict_cleaned.keys()
             if column != "id"
         )
-        query = f"INSERT INTO elements ({columns}) VALUES ({placeholders}) ON CONFLICT (id) DO UPDATE SET {updates};"
+        query = f'INSERT INTO elements ({columns}) VALUES ({placeholders}) ON CONFLICT (id) DO UPDATE SET {updates} WHERE "threadId" = excluded."threadId";'
         await self.execute_sql(query=query, parameters=element_dict_cleaned)
 
     @queue_until_user_message()
@@ -701,7 +701,11 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             logger.info(f"SQLAlchemy: delete_element, element_id={element_id}")
 
         query = """SELECT * FROM elements WHERE "id" = :id"""
-        elements = await self.execute_sql(query, {"id": element_id})
+        params = {"id": element_id}
+        if thread_id:
+            query += ' AND "threadId" = :thread_id'
+            params["thread_id"] = thread_id
+        elements = await self.execute_sql(query, params)
 
         if (
             self.storage_provider is not None
@@ -712,9 +716,12 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             await self.storage_provider.delete_file(object_key=elements[0]["objectKey"])
 
         query = """DELETE FROM elements WHERE "id" = :id"""
-        parameters = {"id": element_id}
+        params = {"id": element_id}
+        if thread_id:
+            query += ' AND "threadId" = :thread_id'
+            params["thread_id"] = thread_id
 
-        await self.execute_sql(query=query, parameters=parameters)
+        await self.execute_sql(query=query, parameters=params)
 
     async def get_all_user_threads(
         self, user_id: Optional[str] = None, thread_id: Optional[str] = None

@@ -251,6 +251,7 @@ class ChainlitDataLayer(BaseDataLayer):
         )
         ON CONFLICT (id) DO UPDATE SET
             props = EXCLUDED.props
+        WHERE "Element"."threadId" = EXCLUDED."threadId"
         """
         params = {
             "id": element.id,
@@ -320,7 +321,11 @@ class ChainlitDataLayer(BaseDataLayer):
         SELECT * FROM "Element"
         WHERE id = $1
         """
-        elements = await self.execute_query(query, {"id": element_id})
+        params: dict = {"id": element_id}
+        if thread_id:
+            query += ' AND "threadId" = $2'
+            params["thread_id"] = thread_id
+        elements = await self.execute_query(query, params)
 
         if self.storage_client is not None and len(elements) > 0:
             if elements[0]["objectKey"]:

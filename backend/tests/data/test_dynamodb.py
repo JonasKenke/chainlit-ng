@@ -55,6 +55,24 @@ async def test_delete_feedback_builds_the_key_from_the_full_identifiers():
     }
 
 
+@pytest.mark.asyncio
+async def test_delete_element_uses_the_explicit_thread(
+    mock_chainlit_context, monkeypatch
+):
+    layer, client = _make_layer()
+    fake_context = Mock()
+    fake_context.session.thread_id = "context-thread"
+    monkeypatch.setattr("chainlit.data.dynamodb.context", fake_context)
+
+    async with mock_chainlit_context:
+        await layer.delete_element("elem-1", "explicit-thread")
+
+    assert client.delete_item.call_args.kwargs["Key"] == {
+        "PK": {"S": "THREAD#explicit-thread"},
+        "SK": {"S": "ELEMENT#elem-1"},
+    }
+
+
 class FakeDynamoDB:
     """Minimal DynamoDB stand-in with the UserThread GSI and 25-item batching."""
 

@@ -185,42 +185,137 @@ class TestSharedThreadExposure:
         assert response.status_code == 404
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "F2 in docs/research/security-threat-model.md: /project/element authorizes "
-        "the caller's session but not the target element's owner"
-    ),
-)
-def test_cross_tenant_custom_element_delete_is_rejected(client, data_layer):
+def _websocket_session(user, thread_id):
+    session = Mock(spec=WebsocketSession)
+    session.id = f"{user.identifier}-session"
+    session.user = user
+    session.thread_id = thread_id
+    session.has_first_interaction = True
+    session.files = {}
+    session.files_spec = {}
+    session.emit = AsyncMock()
+    session.persist_file = AsyncMock(return_value={"id": "chainlit-key"})
+    return session
+
+
+def _element_payload(element_id, thread_id):
+    return {
+        "sessionId": "session-id",
+        "element": {
+            "id": element_id,
+            "type": "custom",
+            "name": "custom-element",
+            "display": "side",
+            "forId": "message-id",
+            "threadId": thread_id,
+        },
+    }
+
+
+def _assert_cross_tenant_mutation_is_rejected(client, data_layer, method, mutator):
     as_user(BOB)
-    bob_session = Mock(spec=WebsocketSession)
-    bob_session.id = "bob-session"
-    bob_session.user = BOB
-    bob_session.thread_id = "bob-thread"
-    bob_session.has_first_interaction = True
-    bob_session.files = {}
-    bob_session.files_spec = {}
-    bob_session.emit = AsyncMock()
+    bob_session = _websocket_session(BOB, "bob-thread")
+    data_layer.get_element.return_value = None
+    data_layer.get_thread_author.return_value = ALICE.identifier
 
     with (
         patch("chainlit.session.WebsocketSession.get_by_id", return_value=bob_session),
+        patch("chainlit.server.get_data_layer", return_value=data_layer),
+        patch("chainlit.data.acl.get_data_layer", return_value=data_layer),
+        patch("chainlit.element.get_data_layer", return_value=data_layer),
+    ):
+        response = client.request(
+            method,
+            "/project/element",
+            # The body claims Alice's thread and element; the route must use
+            # Bob's server-side session thread and reject the mutation.
+            json=_element_payload("alice-element-id", "alice-thread"),
+        )
+
+    assert response.status_code == 404
+    getattr(data_layer, mutator).assert_not_awaited()
+
+
+def test_cross_tenant_custom_element_delete_is_rejected(client, data_layer):
+    _assert_cross_tenant_mutation_is_rejected(
+        client, data_layer, "DELETE", "delete_element"
+    )
+
+
+def test_cross_tenant_custom_element_update_is_rejected(client, data_layer):
+    _assert_cross_tenant_mutation_is_rejected(
+        client, data_layer, "PUT", "create_element"
+    )
+
+
+def test_non_author_of_the_session_thread_is_rejected(client, data_layer):
+    as_user(BOB)
+    bob_session = _websocket_session(BOB, "alice-thread")
+    data_layer.get_element.return_value = {"id": "alice-element-id"}
+    data_layer.get_thread_author.return_value = ALICE.identifier
+
+    with (
+        patch("chainlit.session.WebsocketSession.get_by_id", return_value=bob_session),
+        patch("chainlit.server.get_data_layer", return_value=data_layer),
+        patch("chainlit.data.acl.get_data_layer", return_value=data_layer),
         patch("chainlit.element.get_data_layer", return_value=data_layer),
     ):
         response = client.request(
             "DELETE",
             "/project/element",
-            json={
-                "sessionId": "bob-session",
-                "element": {
-                    "id": "alice-element-id",
-                    "type": "custom",
-                    "name": "alice-element",
-                    "display": "side",
-                    "threadId": "alice-thread",
-                },
-            },
+            json=_element_payload("alice-element-id", "alice-thread"),
+        )
+
+    assert response.status_code == 401
+    data_layer.delete_element.assert_not_awaited()
+
+
+def test_owner_can_delete_element_in_the_session_thread(client, data_layer):
+    as_user(ALICE)
+    alice_session = _websocket_session(ALICE, "alice-thread")
+    data_layer.get_element.return_value = {"id": "alice-element-id"}
+    data_layer.get_thread_author.return_value = ALICE.identifier
+
+    with (
+        patch(
+            "chainlit.session.WebsocketSession.get_by_id", return_value=alice_session
+        ),
+        patch("chainlit.server.get_data_layer", return_value=data_layer),
+        patch("chainlit.data.acl.get_data_layer", return_value=data_layer),
+        patch("chainlit.element.get_data_layer", return_value=data_layer),
+    ):
+        response = client.request(
+            "DELETE",
+            "/project/element",
+            # A forged thread id must not override the session thread.
+            json=_element_payload("alice-element-id", "other-thread"),
         )
 
     assert response.status_code == 200
-    data_layer.delete_element.assert_not_awaited()
+    data_layer.delete_element.assert_awaited_once_with(
+        "alice-element-id", "alice-thread"
+    )
+
+
+def test_owner_can_update_element_in_the_session_thread(client, data_layer):
+    as_user(ALICE)
+    alice_session = _websocket_session(ALICE, "alice-thread")
+    data_layer.get_element.return_value = {"id": "alice-element-id"}
+    data_layer.get_thread_author.return_value = ALICE.identifier
+
+    with (
+        patch(
+            "chainlit.session.WebsocketSession.get_by_id", return_value=alice_session
+        ),
+        patch("chainlit.server.get_data_layer", return_value=data_layer),
+        patch("chainlit.data.acl.get_data_layer", return_value=data_layer),
+        patch("chainlit.element.get_data_layer", return_value=data_layer),
+    ):
+        response = client.request(
+            "PUT",
+            "/project/element",
+            json=_element_payload("alice-element-id", "other-thread"),
+        )
+
+    assert response.status_code == 200
+    data_layer.get_element.assert_awaited_once_with("alice-thread", "alice-element-id")
