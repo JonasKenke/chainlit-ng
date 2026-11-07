@@ -228,6 +228,14 @@
           "inProgress": "正在重新命名對話"
         }
       }
+    },
+    "clearAll": {
+      "title": "刪除所有對話？",
+      "description": "這將永久刪除你的所有對話，包括其中的訊息、元件、上傳的檔案和分享的連結。此操作無法復原。",
+      "confirm": "刪除所有對話",
+      "success": "所有對話已刪除",
+      "inProgress": "正在刪除所有對話",
+      "error": "刪除所有對話失敗"
     }
   },
   "navigation": {
@@ -253,7 +261,8 @@
         "settings": "設定",
         "settingsKey": "S",
         "apiKeys": "API金鑰",
-        "logout": "登出"
+        "logout": "登出",
+        "clearAll": "清除所有對話"
       }
     }
   },

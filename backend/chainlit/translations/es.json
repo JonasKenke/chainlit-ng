@@ -228,6 +228,14 @@
           "inProgress": "Renombrando conversación"
         }
       }
+    },
+    "clearAll": {
+      "title": "¿Borrar todos los chats?",
+      "description": "Esto borrará permanentemente todos tus chats, incluidos sus mensajes, elementos, archivos subidos y enlaces compartidos. Esta acción no se puede deshacer.",
+      "confirm": "Borrar todos los chats",
+      "success": "Todos los chats borrados",
+      "inProgress": "Borrando todos los chats",
+      "error": "No se pudieron borrar todos los chats"
     }
   },
   "navigation": {
@@ -253,7 +261,8 @@
         "settings": "Configuración",
         "settingsKey": "S",
         "apiKeys": "Claves API",
-        "logout": "Cerrar sesión"
+        "logout": "Cerrar sesión",
+        "clearAll": "Borrar todos los chats"
       }
     }
   },

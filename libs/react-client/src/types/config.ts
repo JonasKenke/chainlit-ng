@@ -99,6 +99,7 @@ export interface IChainlitConfig {
   dataPersistence: boolean;
   threadResumable: boolean;
   threadSharing?: boolean;
+  threadClearAll?: boolean;
   promptGallery?: boolean;
   promptScheduling?: boolean;
   scheduledTaskAfterHooks?: { name: string; default: boolean }[];
