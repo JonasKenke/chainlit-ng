@@ -254,7 +254,23 @@ lockfiles and minified bundles. Results: **0 matches**. No tracked `.env`, `.pem
 no values were printed or stored. Test fixtures use obvious fake constants (e.g.
 `test-secret-...`) and are not credentials.
 
-## 8. Mutation evidence
+## 8. Verification
+
+- `cd backend && uv run pytest -q`: **1393 passed, 2 xfailed**.
+- After the pre-commit formatter: targeted security files **106 passed, 2 xfailed**.
+- `uv run scripts/lint.py`: all checks passed.
+- `uv run scripts/format.py --check`: 230 files already formatted.
+- `uv run scripts/type_check.py`: no issues in 126 source files.
+- `git diff -- backend/chainlit` after all mutation checks: empty (no production
+  changes).
+
+The workspace is shared with another concurrent run. Later full-suite reruns under
+load average > 70 on a 2-vCPU host hit the pre-existing 15-second subprocess timeout
+in `tests/test_cache.py::test_cache_nested_and_recursive_calls`; that test passes in
+isolation when import time is normal and is unrelated to this branch. The green run
+above is the verification baseline.
+
+## 8.1 Mutation evidence
 
 Each mutation was applied to a production file, the targeted tests were run, and the
 file was restored from its original copy. `git diff -- backend/chainlit` is empty after
