@@ -1,15 +1,17 @@
-"""Tests for the DynamoDB data layer's thread and step identifier handling.
+"""Tests for the DynamoDB data layer's thread, step and deletion handling.
 
 DynamoDB stores a thread as ``PK="THREAD#<thread_id>"`` and a step as
 ``SK="STEP#<step_id>"``. Reading those identifiers back must strip the prefix
 only, never the characters the identifier happens to end with.
 """
 
-from unittest.mock import Mock
+from typing import cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from chainlit.data.dynamodb import DynamoDBDataLayer
+from chainlit.data.storage_clients.base import BaseStorageClient
 from chainlit.types import Pagination, ThreadFilter
 
 
@@ -51,3 +53,207 @@ async def test_delete_feedback_builds_the_key_from_the_full_identifiers():
         "PK": {"S": "THREAD#CODE"},
         "SK": {"S": "STEP#SEED"},
     }
+
+
+class FakeDynamoDB:
+    """Minimal DynamoDB stand-in with the UserThread GSI and 25-item batching."""
+
+    def __init__(self, items, page_size=2, unprocessed_once=False):
+        self.items = [dict(item) for item in items]
+        self.page_size = page_size
+        self.unprocessed_once = unprocessed_once
+        self.batch_sizes = []
+
+    def _page(self, matched, exclusive_start_key):
+        start = 0
+        if exclusive_start_key:
+            for index, item in enumerate(matched):
+                if (
+                    item["PK"] == exclusive_start_key["PK"]
+                    and item["SK"] == exclusive_start_key["SK"]
+                ):
+                    start = index + 1
+                    break
+        page = matched[start : start + self.page_size]
+        response = {"Items": page}
+        if start + self.page_size < len(matched):
+            response["LastEvaluatedKey"] = {"PK": page[-1]["PK"], "SK": page[-1]["SK"]}
+        return response
+
+    def query(self, **kwargs):
+        pk = kwargs["ExpressionAttributeValues"][":pk"]["S"]
+        if kwargs.get("IndexName") == "UserThread":
+            matched = [
+                item
+                for item in self.items
+                if item.get("UserThreadPK", {}).get("S") == pk
+            ]
+        else:
+            matched = [item for item in self.items if item["PK"]["S"] == pk]
+        return self._page(matched, kwargs.get("ExclusiveStartKey"))
+
+    def batch_write_item(self, RequestItems):
+        table, requests = next(iter(RequestItems.items()))
+        self.batch_sizes.append(len(requests))
+        unprocessed = []
+        if self.unprocessed_once and len(requests) > 1:
+            self.unprocessed_once = False
+            unprocessed, requests = requests[:1], requests[1:]
+        for request in requests:
+            key = request["DeleteRequest"]["Key"]
+            self.items = [
+                item
+                for item in self.items
+                if not (item["PK"] == key["PK"] and item["SK"] == key["SK"])
+            ]
+        return {"UnprocessedItems": {table: unprocessed}} if unprocessed else {}
+
+
+def _thread_item(thread_id, user_id):
+    return {
+        "PK": {"S": f"THREAD#{thread_id}"},
+        "SK": {"S": "THREAD"},
+        "UserThreadPK": {"S": f"USER#{user_id}"},
+        "UserThreadSK": {"S": "TS#2026-01-01T00:00:00"},
+        "name": {"S": thread_id},
+    }
+
+
+def _step_item(thread_id, step_id):
+    return {"PK": {"S": f"THREAD#{thread_id}"}, "SK": {"S": f"STEP#{step_id}"}}
+
+
+def _element_item(thread_id, element_id, object_key):
+    return {
+        "PK": {"S": f"THREAD#{thread_id}"},
+        "SK": {"S": f"ELEMENT#{element_id}"},
+        "objectKey": {"S": object_key},
+    }
+
+
+def _seed_two_users():
+    items = []
+    for user_id, prefix in (("user-1", "target"), ("user-2", "other")):
+        for index in range(2):
+            thread_id = f"{prefix}-thread-{index}"
+            items.append(_thread_item(thread_id, user_id))
+            items.append(_step_item(thread_id, f"{prefix}-step-{index}"))
+            items.append(
+                _element_item(
+                    thread_id, f"{prefix}-element-{index}", f"{prefix}-object-{index}"
+                )
+            )
+    return items
+
+
+def _make_storage():
+    storage = AsyncMock(spec=BaseStorageClient)
+    storage.delete_file.return_value = True
+    return storage
+
+
+def _make_delete_layer(items, page_size=2, unprocessed_once=False, storage=None):
+    client = FakeDynamoDB(items, page_size=page_size, unprocessed_once=unprocessed_once)
+    layer = DynamoDBDataLayer(
+        table_name="test-table",
+        client=client,
+        storage_provider=storage if storage is not None else _make_storage(),
+    )
+    return layer, client
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_removes_only_the_target_users_items():
+    storage = _make_storage()
+    layer, client = _make_delete_layer(_seed_two_users(), storage=storage)
+
+    assert await layer.delete_all_threads("user-1") == 2
+
+    remaining_partitions = {item["PK"]["S"] for item in client.items}
+    assert remaining_partitions == {
+        "THREAD#other-thread-0",
+        "THREAD#other-thread-1",
+    }
+    delete_file = cast(AsyncMock, storage.delete_file)
+    assert {call.kwargs["object_key"] for call in delete_file.await_args_list} == {
+        "target-object-0",
+        "target-object-1",
+    }
+
+    assert await layer.delete_all_threads("user-1") == 0
+    assert delete_file.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_paginates_past_one_gsi_page():
+    items = []
+    for index in range(5):
+        thread_id = f"thread-{index}"
+        items.append(_thread_item(thread_id, "user-1"))
+        items.append(_step_item(thread_id, f"step-{index}"))
+
+    layer, client = _make_delete_layer(items, page_size=2)
+
+    assert await layer.delete_all_threads("user-1") == 5
+    assert client.items == []
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_batches_at_25_and_retries_unprocessed(monkeypatch):
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("chainlit.data.dynamodb.asyncio.sleep", no_sleep)
+
+    items = [_thread_item("big-thread", "user-1")]
+    items += [_step_item("big-thread", f"step-{index}") for index in range(30)]
+    layer, client = _make_delete_layer(items, page_size=100, unprocessed_once=True)
+
+    assert await layer.delete_all_threads("user-1") == 1
+
+    assert client.items == []
+    assert max(client.batch_sizes) == 25
+    assert len(client.batch_sizes) > 2
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_deletes_storage_objects():
+    storage = _make_storage()
+    layer, client = _make_delete_layer(_seed_two_users(), storage=storage)
+
+    await layer.delete_thread("target-thread-0")
+
+    delete_file = cast(AsyncMock, storage.delete_file)
+    assert [call.kwargs["object_key"] for call in delete_file.await_args_list] == [
+        "target-object-0"
+    ]
+    remaining_partitions = {item["PK"]["S"] for item in client.items}
+    assert "THREAD#target-thread-0" not in remaining_partitions
+    assert "THREAD#target-thread-1" in remaining_partitions
+    assert "THREAD#other-thread-0" in remaining_partitions
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_keeps_items_when_a_storage_delete_fails():
+    storage = _make_storage()
+    storage.delete_file.return_value = False
+    layer, client = _make_delete_layer(_seed_two_users(), storage=storage)
+    original_items = list(client.items)
+
+    with pytest.raises(RuntimeError, match="storage object"):
+        await layer.delete_all_threads("user-1")
+
+    assert client.items == original_items
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_keeps_items_when_a_storage_delete_fails():
+    storage = _make_storage()
+    storage.delete_file.return_value = False
+    layer, client = _make_delete_layer(_seed_two_users(), storage=storage)
+    original_items = list(client.items)
+
+    with pytest.raises(RuntimeError, match="storage object"):
+        await layer.delete_thread("target-thread-0")
+
+    assert client.items == original_items
