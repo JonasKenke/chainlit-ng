@@ -3,10 +3,12 @@ import { toast } from 'sonner';
 
 import {
   ChainlitContext,
-  useChainlitStore,
-  useSetChainlitState
+  IMcp,
+  useChainlitState,
+  useChainlitStore
 } from '@chainlit/react-client';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,287 +19,275 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
-import { Translator } from 'components/i18n';
+import { useTranslation } from 'components/i18n/Translator';
+
+interface McpServerConfig {
+  name: string;
+  type: string;
+}
 
 interface McpAddFormProps {
+  servers: McpServerConfig[];
+  userServersEnabled: boolean;
   onSuccess: () => void;
   onCancel: () => void;
-  allowStdio?: boolean;
-  allowSse?: boolean;
-  allowHttp?: boolean;
 }
 
 export const McpAddForm = ({
+  servers,
+  userServersEnabled,
   onSuccess,
-  onCancel,
-  allowStdio,
-  allowSse,
-  allowHttp
+  onCancel
 }: McpAddFormProps) => {
   const apiClient = useContext(ChainlitContext);
   const sessionId = useChainlitStore((state) => state.sessionId);
-  const setMcps = useSetChainlitState('mcps');
+  const [mcps, setMcps] = useChainlitState('mcps');
+  const { t } = useTranslation();
 
   const [serverName, setServerName] = useState('');
-  // Pick the first protocol enabled by the parent component.
-  const defaultType: 'stdio' | 'sse' | 'streamable-http' = allowStdio
-    ? 'stdio'
-    : allowSse
-      ? 'sse'
-      : allowHttp
-        ? 'streamable-http'
-        : 'stdio';
-
-  const [serverType, setServerType] = useState<
-    'stdio' | 'sse' | 'streamable-http'
-  >(defaultType);
+  const [serverType, setServerType] = useState<'sse' | 'streamable-http'>(
+    'sse'
+  );
   const [serverUrl, setServerUrl] = useState('');
-  const [httpUrl, setHttpUrl] = useState('');
-  const [serverCommand, setServerCommand] = useState('');
   const [headersInput, setHeadersInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Form validation function
-  const isFormValid = () => {
-    if (!serverName.trim()) return false;
-
-    if (serverType === 'stdio') {
-      return !!serverCommand.trim();
-    } else if (serverType === 'sse') {
-      return !!serverUrl.trim();
-    } else if (serverType === 'streamable-http') {
-      return !!httpUrl.trim();
-    }
-    return false;
+  const upsertMcp = (incoming: IMcp) => {
+    setMcps((prev) => {
+      if (!prev.some((mcp) => mcp.name === incoming.name)) {
+        return [...prev, incoming];
+      }
+      return prev.map((mcp) =>
+        mcp.name === incoming.name ? { ...mcp, ...incoming } : mcp
+      );
+    });
   };
+
+  const errorText = () => t('chat.mcp.errors.connect');
+
+  const connectConfigured = (server: McpServerConfig) => {
+    setIsLoading(true);
+    toast.promise(
+      apiClient
+        .connectMcp(sessionId, server.name)
+        .then((resp: any) => {
+          if (!resp?.success) {
+            throw new Error(resp?.error || t('chat.mcp.errors.connect'));
+          }
+          upsertMcp({ ...resp.mcp, status: 'connected' });
+          onSuccess();
+        })
+        .finally(() => setIsLoading(false)),
+      {
+        loading: t('chat.mcp.messages.connecting'),
+        success: t('chat.mcp.messages.connected'),
+        error: errorText
+      }
+    );
+  };
+
+  const isFormValid = () => !!serverName.trim() && !!serverUrl.trim();
 
   const resetForm = () => {
     setServerName('');
-    setServerType(defaultType);
+    setServerType('sse');
     setServerUrl('');
-    setServerCommand('');
-    setHttpUrl('');
     setHeadersInput('');
   };
 
-  const addMcp = () => {
-    setIsLoading(true);
-
-    // Helper to parse the optional headers JSON
-    let headersObj: Record<string, string> | undefined;
+  const addUserMcp = () => {
+    let headers: Record<string, string> | undefined;
     if (headersInput.trim()) {
       try {
-        headersObj = JSON.parse(headersInput.trim());
-      } catch (_err) {
-        toast.error('Headers must be valid JSON');
-        setIsLoading(false);
+        const parsed = JSON.parse(headersInput.trim());
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed) ||
+          !Object.values(parsed).every((value) => typeof value === 'string')
+        ) {
+          throw new Error('Invalid headers');
+        }
+        headers = parsed as Record<string, string>;
+      } catch {
+        toast.error(t('chat.mcp.form.headersInvalid'));
         return;
       }
     }
 
-    if (serverType === 'stdio') {
-      toast.promise(
-        apiClient
-          .connectStdioMCP(sessionId, serverName, serverCommand)
-          .then(async (resp: any) => {
-            const { success, mcp, error } = resp;
-            if (!success) {
-              throw new Error(error || 'Could not connect to the MCP server');
-            }
-            if (mcp) {
-              setMcps((prev) => [...prev, { ...mcp, status: 'connected' }]);
-            }
-            resetForm();
-            onSuccess();
-          })
-          .finally(() => setIsLoading(false)),
-        {
-          loading: 'Adding MCP...',
-          success: () => 'MCP added!',
-          error: (err) => <span>{err.message}</span>
-        }
-      );
-    } else if (serverType === 'sse') {
-      toast.promise(
-        (apiClient as any)
-          .connectSseMCP(sessionId, serverName, serverUrl, headersObj)
-          .then(async (resp: any) => {
-            const { success, mcp, error } = resp;
-            if (!success) {
-              throw new Error(error || 'Could not connect to the MCP server');
-            }
-            if (mcp) {
-              setMcps((prev) => [...prev, { ...mcp, status: 'connected' }]);
-            }
-            resetForm();
-            onSuccess();
-          })
-          .finally(() => setIsLoading(false)),
-        {
-          loading: 'Adding MCP...',
-          success: () => 'MCP added!',
-          error: (err) => <span>{err.message}</span>
-        }
-      );
-    } else if (serverType === 'streamable-http') {
-      toast.promise(
-        (apiClient as any)
-          .connectStreamableHttpMCP(sessionId, serverName, httpUrl, headersObj)
-          .then(async (resp: any) => {
-            const { success, mcp, error } = resp;
-            if (!success) {
-              throw new Error(error || 'Could not connect to the MCP server');
-            }
-            if (mcp) {
-              setMcps((prev) => [...prev, { ...mcp, status: 'connected' }]);
-            }
-            resetForm();
-            onSuccess();
-          })
-          .finally(() => setIsLoading(false)),
-        {
-          loading: 'Adding MCP...',
-          success: () => 'MCP added!',
-          error: (err) => <span>{err.message}</span>
-        }
-      );
-    }
+    setIsLoading(true);
+    toast.promise(
+      apiClient
+        .connectUserMcp(
+          sessionId,
+          serverName.trim(),
+          serverType,
+          serverUrl.trim(),
+          headers
+        )
+        .then((resp: any) => {
+          if (!resp?.success) {
+            throw new Error(resp?.error || t('chat.mcp.errors.connect'));
+          }
+          upsertMcp({
+            ...resp.mcp,
+            status: 'connected',
+            isUserProvided: true,
+            clientType: serverType,
+            url: serverUrl.trim(),
+            headers
+          });
+          resetForm();
+          onSuccess();
+        })
+        .finally(() => setIsLoading(false)),
+      {
+        loading: t('chat.mcp.messages.adding'),
+        success: t('chat.mcp.messages.added'),
+        error: errorText
+      }
+    );
   };
 
   return (
     <>
-      <div className="flex flex-col gap-4">
-        <div className="flex gap-2 w-full">
-          <div className="flex flex-col flex-grow gap-2">
-            <Label htmlFor="server-name" className="text-foreground/70 text-sm">
-              Name *
-            </Label>
-            <Input
-              id="server-name"
-              placeholder="Example: Stripe"
-              className="w-full bg-background text-foreground border-input"
-              value={serverName}
-              onChange={(e) => setServerName(e.target.value)}
-              required
-              disabled={isLoading}
-            />
-          </div>
-
+      <div className="flex flex-col gap-6">
+        {servers.length > 0 && (
           <div className="flex flex-col gap-2">
-            <Label htmlFor="server-type" className="text-foreground/70 text-sm">
-              Type *
+            <Label className="text-foreground/70 text-sm">
+              {t('chat.mcp.configured.title')}
             </Label>
-            <Select
-              value={serverType}
-              onValueChange={setServerType as any}
-              disabled={isLoading}
-            >
-              <SelectTrigger
-                id="server-type"
-                className="w-full bg-background text-foreground border-input"
-              >
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
-              <SelectContent>
-                {allowSse ? <SelectItem value="sse">sse</SelectItem> : null}
-                {allowStdio ? (
-                  <SelectItem value="stdio">stdio</SelectItem>
-                ) : null}
-                {allowHttp ? (
-                  <SelectItem value="streamable-http">
-                    streamable-http
-                  </SelectItem>
-                ) : null}
-              </SelectContent>
-            </Select>
+            {servers.map((server) => {
+              const status = mcps.find(
+                (mcp) => mcp.name === server.name
+              )?.status;
+              return (
+                <div
+                  key={server.name}
+                  className="border rounded-lg p-3 flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{server.name}</span>
+                    <Badge variant="outline">{server.type}</Badge>
+                  </div>
+                  <Button
+                    size="sm"
+                    disabled={isLoading || status === 'connecting'}
+                    onClick={() => connectConfigured(server)}
+                  >
+                    {status === 'connected'
+                      ? t('chat.mcp.reconnect')
+                      : t('chat.mcp.connect')}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        )}
 
-        <div className="flex flex-col gap-2">
-          {serverType === 'stdio' && (
-            <>
-              <Label
-                htmlFor="server-command"
-                className="text-foreground/70 text-sm"
-              >
-                Command *
-              </Label>
-              <Input
-                id="server-command"
-                placeholder="Example: npx -y @stripe/mcp --tools=all --api-key=YOUR_STRIPE_SECRET_KEY"
-                className="w-full bg-background text-foreground border-input"
-                value={serverCommand}
-                onChange={(e) => setServerCommand(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-            </>
-          )}
-          {serverType === 'sse' && (
-            <>
+        {userServersEnabled && (
+          <div className="flex flex-col gap-4">
+            <Label className="text-foreground/70 text-sm">
+              {t('chat.mcp.add.title')}
+            </Label>
+            <div className="flex gap-2 w-full">
+              <div className="flex flex-col flex-grow gap-2">
+                <Label
+                  htmlFor="server-name"
+                  className="text-foreground/70 text-sm"
+                >
+                  {t('chat.mcp.form.name')} *
+                </Label>
+                <Input
+                  id="server-name"
+                  placeholder={t('chat.mcp.form.namePlaceholder')}
+                  className="w-full bg-background text-foreground border-input"
+                  value={serverName}
+                  onChange={(e) => setServerName(e.target.value)}
+                  required
+                  disabled={isLoading}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label
+                  htmlFor="server-type"
+                  className="text-foreground/70 text-sm"
+                >
+                  {t('chat.mcp.form.type')} *
+                </Label>
+                <Select
+                  value={serverType}
+                  onValueChange={(value) =>
+                    setServerType(value as 'sse' | 'streamable-http')
+                  }
+                  disabled={isLoading}
+                >
+                  <SelectTrigger
+                    id="server-type"
+                    className="w-full bg-background text-foreground border-input"
+                  >
+                    <SelectValue placeholder={t('chat.mcp.form.type')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sse">sse</SelectItem>
+                    <SelectItem value="streamable-http">
+                      streamable-http
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
               <Label
                 htmlFor="server-url"
                 className="text-foreground/70 text-sm"
               >
-                Server URL *
+                {t('chat.mcp.form.url')} *
               </Label>
               <Input
                 id="server-url"
-                placeholder="Example: http://localhost:5000"
+                placeholder={t('chat.mcp.form.urlPlaceholder')}
                 className="w-full bg-background text-foreground border-input"
                 value={serverUrl}
                 onChange={(e) => setServerUrl(e.target.value)}
                 required
                 disabled={isLoading}
               />
-            </>
-          )}
-          {serverType === 'streamable-http' && (
-            <>
-              <Label htmlFor="http-url" className="text-foreground/70 text-sm">
-                HTTP URL *
-              </Label>
-              <Input
-                id="http-url"
-                placeholder="Example: http://localhost:8000/mcp"
-                className="w-full bg-background text-foreground border-input"
-                value={httpUrl}
-                onChange={(e) => setHttpUrl(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-            </>
-          )}
-          {(serverType === 'sse' || serverType === 'streamable-http') && (
-            <>
+            </div>
+
+            <div className="flex flex-col gap-2">
               <Label htmlFor="headers" className="text-foreground/70 text-sm">
-                Headers (JSON, optional)
+                {t('chat.mcp.form.headers')}
               </Label>
               <Input
                 id="headers"
-                placeholder='Example: {"Authorization": "Bearer TOKEN"}'
+                placeholder={t('chat.mcp.form.headersPlaceholder')}
                 className="w-full bg-background text-foreground border-input font-mono"
                 value={headersInput}
                 onChange={(e) => setHeadersInput(e.target.value)}
                 disabled={isLoading}
               />
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="flex justify-end items-center gap-2 mt-auto">
-        <Button variant="outline" onClick={onCancel} disabled={isLoading}>
-          <Translator path="common.actions.cancel" />
-        </Button>
-        <Button
-          variant="default"
-          onClick={addMcp}
-          disabled={!isFormValid() || isLoading}
-        >
-          <Translator path="common.actions.confirm" />
-        </Button>
-      </div>
+      {userServersEnabled && (
+        <div className="flex justify-end items-center gap-2 mt-auto">
+          <Button variant="outline" onClick={onCancel} disabled={isLoading}>
+            {t('common.actions.cancel')}
+          </Button>
+          <Button
+            variant="default"
+            onClick={addUserMcp}
+            disabled={!isFormValid() || isLoading}
+          >
+            {t('chat.mcp.form.add')}
+          </Button>
+        </div>
+      )}
     </>
   );
 };

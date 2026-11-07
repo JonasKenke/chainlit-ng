@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 from dataclasses import field
 
 from dataclasses_json import DataClassJsonMixin
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.dataclasses import dataclass
 from typing_extensions import NotRequired
 
@@ -246,40 +246,40 @@ class CallActionRequest(BaseModel):
     sessionId: str
 
 
-class ConnectStdioMCPRequest(BaseModel):
-    sessionId: str
-    clientType: Literal["stdio"]
-    name: str
-    fullCommand: str
-    # OAuth only applies to streamable HTTP; stdio rejects this at runtime.
-    useOAuth: bool = False
+class ConnectMCPRequest(BaseModel):
+    """Request to connect an MCP server.
 
+    Configured server: provide sessionId + name only. The server's transport,
+    command and headers come from `[[features.mcp.servers]]` and are never
+    client-supplied.
 
-class ConnectSseMCPRequest(BaseModel):
+    User-provided server (SSE/HTTP only, when enabled): also provide
+    clientType + url.
+    """
+
+    # Reject unknown fields so a legacy client sending `fullCommand` (or any
+    # other attempt to describe a command) fails validation instead of having
+    # the field silently dropped on the way to a named-server lookup.
+    model_config = ConfigDict(extra="forbid")
+
     sessionId: str
-    clientType: Literal["sse"]
     name: str
-    url: str
-    # Optional HTTP headers to forward to the MCP transport (e.g. Authorization)
+    # Present only for user-provided connections:
+    clientType: Optional[Literal["sse", "streamable-http"]] = None
+    url: Optional[str] = None
     headers: Optional[Dict[str, str]] = None
-    # OAuth is not supported for SSE; the route rejects this at runtime.
+    # Opt in to the per-user OAuth flow for a user-provided connection.
     useOAuth: bool = False
 
-
-class ConnectStreamableHttpMCPRequest(BaseModel):
-    sessionId: str
-    clientType: Literal["streamable-http"]
-    name: str
-    url: str
-    # Optional HTTP headers to forward to the MCP transport (e.g. Authorization)
-    headers: Dict[str, str] | None = None
-    # Opt in to the per-user OAuth flow for this connection.
-    useOAuth: bool = False
-
-
-ConnectMCPRequest = Union[
-    ConnectStdioMCPRequest, ConnectSseMCPRequest, ConnectStreamableHttpMCPRequest
-]
+    @model_validator(mode="after")
+    def validate_user_provided_consistency(self) -> "ConnectMCPRequest":
+        has_url = self.url is not None
+        has_type = self.clientType is not None
+        if has_url != has_type:
+            raise ValueError(
+                "Both 'url' and 'clientType' must be provided together for user-provided connections"
+            )
+        return self
 
 
 class DisconnectMCPRequest(BaseModel):

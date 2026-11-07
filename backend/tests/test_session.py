@@ -14,6 +14,7 @@ from chainlit.session import (
     McpSession,
     WebsocketSession,
     clean_metadata,
+    stop_mcp_task,
 )
 
 
@@ -898,3 +899,71 @@ class TestMcpSession:
         await mcp.close()  # second call should be safe
 
         assert task.done()
+
+
+class TestStopMcpTask:
+    @pytest.mark.asyncio
+    async def test_already_failed_task_is_tolerated(self):
+        import asyncio
+
+        stop = asyncio.Event()
+
+        async def _boom():
+            raise RuntimeError("connect failed")
+
+        task = asyncio.create_task(_boom())
+        await asyncio.sleep(0)  # let the task raise
+
+        await stop_mcp_task(task, stop, "failed")
+
+        assert stop.is_set()
+        assert task.done()
+
+    @pytest.mark.asyncio
+    async def test_stuck_task_is_cancelled_within_the_bound(self):
+        import asyncio
+
+        import chainlit.session as session_mod
+
+        stop = asyncio.Event()
+
+        async def _stuck():
+            await asyncio.sleep(3600)
+
+        task = asyncio.create_task(_stuck())
+        original = session_mod._CLOSE_TIMEOUT
+        session_mod._CLOSE_TIMEOUT = 0.1
+        try:
+            await stop_mcp_task(task, stop, "stuck")
+        finally:
+            session_mod._CLOSE_TIMEOUT = original
+
+        assert task.cancelled()
+
+
+class TestSwapMcpSession:
+    def _session(self) -> WebsocketSession:
+        return WebsocketSession(
+            id="ws_id",
+            socket_id="socket_123",
+            emit=Mock(),
+            emit_call=Mock(),
+            user_env={},
+            client_type="webapp",
+        )
+
+    def test_swap_returns_the_displaced_session_and_stores_the_new_one(self):
+        session = self._session()
+        old = McpSession(name="weather", client=Mock(), task=Mock())
+        new = McpSession(name="weather", client=Mock(), task=Mock())
+        session.mcp_sessions["weather"] = old
+
+        assert session.swap_mcp_session("weather", new) is old
+        assert session.mcp_sessions == {"weather": new}
+
+    def test_swap_returns_none_when_no_session_exists(self):
+        session = self._session()
+        new = McpSession(name="weather", client=Mock(), task=Mock())
+
+        assert session.swap_mcp_session("weather", new) is None
+        assert session.mcp_sessions == {"weather": new}

@@ -10,6 +10,11 @@ import { IMode } from './types/mode';
 import type { ChainlitAPI } from './api';
 import { ChainlitContext } from './context';
 import {
+  MCP_STORAGE_KEY,
+  parseStoredMcps,
+  serializeStoredMcps
+} from './mcpStorage';
+import {
   IAction,
   IAsk,
   IAuthConfig,
@@ -76,15 +81,22 @@ type ChainlitStore = StoreApi<ChainlitState>;
 
 const stores = new WeakMap<ChainlitAPI, ChainlitStore>();
 const initialStates = new WeakMap<ChainlitStore, ChainlitState>();
-const MCP_STORAGE_KEY = 'mcp_storage_key';
-
 function readStoredMcps(): IMcp[] {
-  try {
-    const stored = localStorage.getItem(MCP_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
+  const raw = localStorage.getItem(MCP_STORAGE_KEY);
+  const mcps = parseStoredMcps(raw);
+  if (raw === null) return mcps;
+
+  // Rewrite a pre-upgrade payload immediately so stale headers or URL
+  // credentials do not sit at rest until the next mcps write or logout.
+  const sanitized = serializeStoredMcps(mcps);
+  if (sanitized === raw) return mcps;
+
+  if (mcps.length === 0) {
+    localStorage.removeItem(MCP_STORAGE_KEY);
+  } else {
+    localStorage.setItem(MCP_STORAGE_KEY, sanitized);
   }
+  return mcps;
 }
 
 function initialState(): ChainlitState {
@@ -166,7 +178,7 @@ function writeValue<K extends ChainlitStateKey>(
   } else if (key === 'threadHistory' && value) {
     nextState.threadHistory = withGroupedThreads(value as ThreadHistory);
   } else if (key === 'mcps') {
-    localStorage.setItem(MCP_STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(MCP_STORAGE_KEY, serializeStoredMcps(value as IMcp[]));
   }
 
   store.setState(nextState);
