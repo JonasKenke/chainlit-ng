@@ -134,6 +134,91 @@ describe('parseStoredMcps', () => {
     ]);
   });
 
+  it('keeps a boolean useOAuth and drops the authorization URL on rehydrate', () => {
+    const stored = JSON.stringify([
+      {
+        name: 'oauth',
+        status: 'connecting',
+        clientType: 'streamable-http',
+        isUserProvided: true,
+        url: 'https://mcp.example/mcp',
+        useOAuth: true,
+        authorizationUrl: 'https://as.example/authorize?state=secret',
+        detail: 'The MCP authorization failed.',
+        tools
+      },
+      {
+        name: 'plain',
+        status: 'connected',
+        clientType: 'streamable-http',
+        isUserProvided: true,
+        url: 'https://plain.example/mcp',
+        useOAuth: false
+      }
+    ]);
+
+    const mcps = parseStoredMcps(stored);
+
+    expect(mcps).toEqual([
+      {
+        name: 'oauth',
+        status: 'connecting',
+        tools: [],
+        clientType: 'streamable-http',
+        isUserProvided: true,
+        url: 'https://mcp.example/mcp',
+        useOAuth: true
+      },
+      {
+        name: 'plain',
+        status: 'connected',
+        tools: [],
+        clientType: 'streamable-http',
+        isUserProvided: true,
+        url: 'https://plain.example/mcp',
+        useOAuth: false
+      }
+    ]);
+    expect(JSON.stringify(mcps)).not.toContain('as.example');
+    expect(JSON.stringify(mcps)).not.toContain('state=secret');
+  });
+
+  it('drops a non-boolean useOAuth but keeps the entry', () => {
+    const stored = JSON.stringify([
+      {
+        name: 'string',
+        status: 'connected',
+        clientType: 'sse',
+        isUserProvided: true,
+        url: 'https://a.example/mcp',
+        useOAuth: 'yes'
+      },
+      {
+        name: 'number',
+        status: 'connected',
+        clientType: 'sse',
+        isUserProvided: true,
+        url: 'https://b.example/mcp',
+        useOAuth: 1
+      },
+      {
+        name: 'null',
+        status: 'connected',
+        clientType: 'sse',
+        isUserProvided: true,
+        url: 'https://c.example/mcp',
+        useOAuth: null
+      }
+    ]);
+
+    const mcps = parseStoredMcps(stored);
+
+    expect(mcps.map((mcp) => mcp.name)).toEqual(['string', 'number', 'null']);
+    for (const mcp of mcps) {
+      expect('useOAuth' in mcp).toBe(false);
+    }
+  });
+
   it('keeps only the first entry for a duplicated name', () => {
     const stored = JSON.stringify([
       { name: 'dup', status: 'connected', type: 'sse' },
@@ -171,6 +256,36 @@ describe('serializeStoredMcps', () => {
         isUserProvided: true,
         clientType: 'sse',
         url: 'https://example.com/mcp'
+      }
+    ]);
+  });
+
+  it('persists a boolean useOAuth but never the authorization URL or detail', () => {
+    const stored = serializeStoredMcps([
+      {
+        name: 'oauth',
+        status: 'connecting',
+        tools: [],
+        isUserProvided: true,
+        clientType: 'streamable-http',
+        url: 'https://mcp.example/mcp',
+        useOAuth: true,
+        authorizationUrl: 'https://as.example/authorize?state=secret',
+        detail: 'The MCP authorization failed.'
+      }
+    ]);
+
+    expect(stored).not.toContain('as.example');
+    expect(stored).not.toContain('state=secret');
+    expect(stored).not.toContain('authorization');
+    expect(JSON.parse(stored)).toEqual([
+      {
+        name: 'oauth',
+        status: 'connecting',
+        isUserProvided: true,
+        clientType: 'streamable-http',
+        url: 'https://mcp.example/mcp',
+        useOAuth: true
       }
     ]);
   });

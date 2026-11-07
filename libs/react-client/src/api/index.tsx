@@ -1,4 +1,4 @@
-import { IElement, IThread, IUser } from 'src/types';
+import { IElement, IMcpConnectResponse, IThread, IUser } from 'src/types';
 
 import { IAction } from 'src/types/action';
 import { IFeedback } from 'src/types/feedback';
@@ -322,7 +322,10 @@ export class ChainlitAPI extends APIBase {
     return res.json();
   }
 
-  async connectMcp(sessionId: string, name: string) {
+  async connectMcp(
+    sessionId: string,
+    name: string
+  ): Promise<IMcpConnectResponse> {
     const res = await this.post(`/mcp`, { sessionId, name });
     return res.json();
   }
@@ -332,14 +335,16 @@ export class ChainlitAPI extends APIBase {
     name: string,
     type: 'sse' | 'streamable-http',
     url: string,
-    headers?: Record<string, string>
-  ) {
+    headers?: Record<string, string>,
+    useOAuth?: boolean
+  ): Promise<IMcpConnectResponse> {
     const res = await this.post(`/mcp`, {
       sessionId,
       name,
       clientType: type,
       url,
-      ...(headers ? { headers } : {})
+      ...(headers ? { headers } : {}),
+      ...(useOAuth ? { useOAuth: true } : {})
     });
     return res.json();
   }
