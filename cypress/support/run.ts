@@ -38,6 +38,8 @@ export const runChainlit = async (
         '--ci'
       ],
       {
+        // Own process group so killChainlit() can kill the app and its children.
+        detached: true,
         env: {
           ...process.env,
           CHAINLIT_APP_ROOT: testDir
