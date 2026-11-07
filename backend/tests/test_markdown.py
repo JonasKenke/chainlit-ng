@@ -320,3 +320,28 @@ class TestMarkdownEdgeCases:
             with open(chainlit_md_path, encoding="utf-8") as f:
                 content = f.read()
             assert content == DEFAULT_MARKDOWN_STR
+
+
+class TestGetMarkdownStrTraversal:
+    """The language value must not select a file outside the app root."""
+
+    @pytest.mark.parametrize(
+        "language",
+        [
+            "../secret",
+            "../../secret",
+            "..\\..\\secret",
+            "/etc/passwd",
+            "en/../../secret",
+        ],
+    )
+    def test_language_cannot_escape_the_app_root(self, language, tmp_path):
+        app_root = tmp_path / "app"
+        app_root.mkdir()
+        (app_root / "chainlit.md").write_text("safe default", encoding="utf-8")
+        (tmp_path / "secret.md").write_text("do not serve", encoding="utf-8")
+
+        result = get_markdown_str(str(app_root), language)
+
+        assert result == "safe default"
+        assert result != "do not serve"
