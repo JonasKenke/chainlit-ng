@@ -11,6 +11,14 @@ vi.mock('@/components/i18n/Translator', () => ({
 const renderMarkdown = (children: string, latex?: boolean) =>
   render(<Markdown latex={latex}>{children}</Markdown>);
 
+const increasingDollarRuns = (size: number) => {
+  let payload = '';
+  for (let length = 1; payload.length < size; length++) {
+    payload += '$'.repeat(length) + ' a';
+  }
+  return payload;
+};
+
 describe('Markdown math', () => {
   it('leaves TeX delimiters and dollar math literal when latex is false', () => {
     const { container } = renderMarkdown(
@@ -90,6 +98,12 @@ describe('Markdown math', () => {
     expect(container.querySelector('.katex')).toBeNull();
   });
 
+  it('falls back to text when a dollar-math closer is beyond the lookahead', () => {
+    const { container } = renderMarkdown(`$${'x'.repeat(2000)}$`, true);
+
+    expect(container.querySelector('.katex')).toBeNull();
+  });
+
   it('bounds the parse cost of repeated unclosed delimiters', () => {
     const payload = '\\(x'.repeat(Math.floor((32 * 1024) / 3));
     const started = performance.now();
@@ -99,4 +113,14 @@ describe('Markdown math', () => {
     expect(container.querySelector('.katex')).toBeNull();
     expect(elapsed).toBeLessThan(20000);
   }, 60000);
+
+  it('bounds the parse cost of repeated unclosed dollar openers', () => {
+    const payload = increasingDollarRuns(512 * 1024);
+    const started = performance.now();
+    const { container } = renderMarkdown(payload, true);
+    const elapsed = performance.now() - started;
+
+    expect(container.querySelector('.katex')).toBeNull();
+    expect(elapsed).toBeLessThan(20000);
+  }, 120000);
 });

@@ -103,7 +103,9 @@ minimumReleaseAgeExclude:
   - '@storybook/react-vite@10.6.4'
   - '@storybook/react@10.6.4'
   - storybook@10.6.4
-# Bounds the inline `\(` scan in micromark-extension-math-extended to a
-# 256-character lookahead. Drop the patch once upstream ships the bound.
+# Bounds each inline math opener (`\(` and `$`) in
+# micromark-extension-math-extended to a 256-character lookahead, making
+# repeated openers linear. Closed spans longer than ~254 characters fall back
+# to literal text. Drop the patch once upstream ships the bound.
 patchedDependencies:
   micromark-extension-math-extended@3.2.2: patches/micromark-extension-math-extended@3.2.2.patch
