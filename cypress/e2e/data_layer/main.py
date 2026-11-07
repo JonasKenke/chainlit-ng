@@ -164,8 +164,11 @@ class TestDataLayer(cl_data.BaseDataLayer):
     async def list_threads(
         self, pagination: Pagination, filters: ThreadFilter
     ) -> PaginatedResponse[ThreadDict]:
+        threads = [t for t in thread_history if t["id"] not in deleted_thread_ids]
+        if filters.userId:
+            threads = [t for t in threads if t.get("userId") == filters.userId]
         return PaginatedResponse(
-            data=[t for t in thread_history if t["id"] not in deleted_thread_ids],
+            data=threads,
             pageInfo=PageInfo(hasNextPage=False, startCursor=None, endCursor=None),
         )
 
@@ -178,6 +181,12 @@ class TestDataLayer(cl_data.BaseDataLayer):
 
     async def delete_thread(self, thread_id: str):
         deleted_thread_ids.append(thread_id)
+
+    async def delete_all_threads(self, user_id: str) -> int:
+        owned = [t for t in thread_history if t.get("userId") == user_id]
+        # Remove them physically so get_thread (and shared links) return 404.
+        thread_history[:] = [t for t in thread_history if t.get("userId") != user_id]
+        return len(owned)
 
     async def delete_feedback(
         self,
