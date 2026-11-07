@@ -228,6 +228,14 @@
           "inProgress": "Gesprek hernoemen"
         }
       }
+    },
+    "clearAll": {
+      "title": "Alle chats verwijderen?",
+      "description": "Hiermee worden al je chats permanent verwijderd, inclusief berichten, elementen, geüploade bestanden en gedeelde links. Deze actie kan niet ongedaan worden gemaakt.",
+      "confirm": "Alle chats verwijderen",
+      "success": "Alle chats verwijderd",
+      "inProgress": "Alle chats verwijderen",
+      "error": "Alle chats verwijderen is mislukt"
     }
   },
   "navigation": {
@@ -253,7 +261,8 @@
         "settings": "Instellingen",
         "settingsKey": "I",
         "apiKeys": "API-sleutels",
-        "logout": "Uitloggen"
+        "logout": "Uitloggen",
+        "clearAll": "Alle chats verwijderen"
       }
     }
   },

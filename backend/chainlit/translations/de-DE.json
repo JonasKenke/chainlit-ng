@@ -316,6 +316,14 @@
           "inProgress": "Thread wird umbenannt"
         }
       }
+    },
+    "clearAll": {
+      "title": "Alle Chats löschen?",
+      "description": "Dadurch werden alle deine Chats dauerhaft gelöscht, einschließlich ihrer Nachrichten, Elemente, hochgeladenen Dateien und geteilten Links. Diese Aktion kann nicht rückgängig gemacht werden.",
+      "confirm": "Alle Chats löschen",
+      "success": "Alle Chats gelöscht",
+      "inProgress": "Alle Chats werden gelöscht",
+      "error": "Alle Chats konnten nicht gelöscht werden"
     }
   },
   "navigation": {
@@ -341,7 +349,8 @@
         "settings": "Einstellungen",
         "settingsKey": "S",
         "apiKeys": "API Schlüssel",
-        "logout": "Abmelden"
+        "logout": "Abmelden",
+        "clearAll": "Alle Chats löschen"
       }
     }
   },

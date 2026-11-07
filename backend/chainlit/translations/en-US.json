@@ -367,6 +367,14 @@
           "inProgress": "Renaming thread"
         }
       }
+    },
+    "clearAll": {
+      "title": "Delete all chats?",
+      "description": "This permanently deletes all your chats, including their messages, elements, uploaded files, and shared links. This action cannot be undone.",
+      "confirm": "Delete all chats",
+      "success": "All chats deleted",
+      "inProgress": "Deleting all chats",
+      "error": "Failed to delete all chats"
     }
   },
   "navigation": {
@@ -392,7 +400,8 @@
         "settings": "Settings",
         "settingsKey": "S",
         "apiKeys": "API Keys",
-        "logout": "Logout"
+        "logout": "Logout",
+        "clearAll": "Clear all chats"
       }
     }
   },

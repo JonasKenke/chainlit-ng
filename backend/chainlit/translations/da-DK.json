@@ -227,6 +227,14 @@
           "inProgress": "Omdøber tråd"
         }
       }
+    },
+    "clearAll": {
+      "title": "Slet alle chats?",
+      "description": "Dette sletter permanent alle dine chats, inklusive deres beskeder, elementer, uploadede filer og delte links. Denne handling kan ikke fortrydes.",
+      "confirm": "Slet alle chats",
+      "success": "Alle chats slettet",
+      "inProgress": "Sletter alle chats",
+      "error": "Kunne ikke slette alle chats"
     }
   },
   "navigation": {
@@ -252,7 +260,8 @@
         "settings": "Indstillinger",
         "settingsKey": "S",
         "apiKeys": "API-nøgler",
-        "logout": "Log ud"
+        "logout": "Log ud",
+        "clearAll": "Slet alle chats"
       }
     }
   },

@@ -228,6 +228,14 @@
           "inProgress": "Renommage du fil de discussion"
         }
       }
+    },
+    "clearAll": {
+      "title": "Effacer toutes les discussions ?",
+      "description": "Cela supprimera définitivement toutes vos discussions, y compris leurs messages, éléments, fichiers téléversés et liens partagés. Cette action est irréversible.",
+      "confirm": "Effacer toutes les discussions",
+      "success": "Toutes les discussions ont été effacées",
+      "inProgress": "Effacement de toutes les discussions",
+      "error": "Impossible d'effacer toutes les discussions"
     }
   },
   "navigation": {
@@ -253,7 +261,8 @@
         "settings": "Paramètres",
         "settingsKey": "S",
         "apiKeys": "Clés API",
-        "logout": "Se déconnecter"
+        "logout": "Se déconnecter",
+        "clearAll": "Effacer toutes les discussions"
       }
     }
   },

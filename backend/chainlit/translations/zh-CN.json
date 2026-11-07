@@ -228,6 +228,14 @@
           "inProgress": "正在重命名对话"
         }
       }
+    },
+    "clearAll": {
+      "title": "删除所有聊天？",
+      "description": "这将永久删除你的所有聊天，包括其中的消息、元素、上传的文件和共享链接。此操作无法撤销。",
+      "confirm": "删除所有聊天",
+      "success": "所有聊天已删除",
+      "inProgress": "正在删除所有聊天",
+      "error": "删除所有聊天失败"
     }
   },
   "navigation": {
@@ -253,7 +261,8 @@
         "settings": "设置",
         "settingsKey": "S",
         "apiKeys": "API密钥",
-        "logout": "退出登录"
+        "logout": "退出登录",
+        "clearAll": "清空所有聊天"
       }
     }
   },

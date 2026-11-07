@@ -228,6 +228,14 @@
           "inProgress": "Rinomina chat"
         }
       }
+    },
+    "clearAll": {
+      "title": "Cancellare tutte le chat?",
+      "description": "Questa operazione eliminerà definitivamente tutte le tue chat, inclusi messaggi, elementi, file caricati e link condivisi. Non può essere annullata.",
+      "confirm": "Cancella tutte le chat",
+      "success": "Tutte le chat eliminate",
+      "inProgress": "Eliminazione di tutte le chat",
+      "error": "Impossibile eliminare tutte le chat"
     }
   },
   "navigation": {
@@ -253,7 +261,8 @@
         "settings": "Impostazioni",
         "settingsKey": "S",
         "apiKeys": "Chiavi API",
-        "logout": "Disconnettiti"
+        "logout": "Disconnettiti",
+        "clearAll": "Cancella tutte le chat"
       }
     }
   },

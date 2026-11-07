@@ -228,6 +228,14 @@
           "inProgress": "스레드 이름 변경 중"
         }
       }
+    },
+    "clearAll": {
+      "title": "모든 채팅을 삭제하시겠습니까?",
+      "description": "모든 채팅과 해당 메시지, 요소, 업로드된 파일, 공유 링크가 영구적으로 삭제됩니다. 이 작업은 취소할 수 없습니다.",
+      "confirm": "모든 채팅 삭제",
+      "success": "모든 채팅이 삭제되었습니다",
+      "inProgress": "모든 채팅 삭제 중",
+      "error": "모든 채팅을 삭제하지 못했습니다"
     }
   },
   "navigation": {
@@ -253,7 +261,8 @@
         "settings": "설정",
         "settingsKey": "S",
         "apiKeys": "API 키",
-        "logout": "로그아웃"
+        "logout": "로그아웃",
+        "clearAll": "모든 채팅 삭제"
       }
     }
   },
