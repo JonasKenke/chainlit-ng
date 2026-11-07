@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from chainlit.auth import get_current_user
+from chainlit.context import context_var
 from chainlit.data.base import BaseDataLayer
 from chainlit.server import app
 from chainlit.session import WebsocketSession
@@ -21,6 +22,15 @@ ALICE = PersistedUser(
     id="alice-id", identifier="alice", createdAt="2026-01-01T00:00:00Z"
 )
 BOB = PersistedUser(id="bob-id", identifier="bob", createdAt="2026-01-01T00:00:00Z")
+
+
+@pytest.fixture(autouse=True)
+def isolate_context():
+    token = context_var.set(object())
+    try:
+        yield
+    finally:
+        context_var.reset(token)
 
 
 @pytest.fixture
