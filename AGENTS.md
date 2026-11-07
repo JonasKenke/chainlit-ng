@@ -8,7 +8,9 @@ All changes **MUST** be backward-compatible. If a refactor or breaking change is
 
 ## MCP-First Approach (CRITICAL)
 
-When available, **ALWAYS** prefer MCP servers over manual alternatives. Use **Context7** for docs/API references, **Serena** for code navigation/refactoring/memory, and **GitHub MCP** for issues/PRs/actions/commits/releases/code search. Fall back to CLI tools, direct file reads, or web searches **ONLY IF** the corresponding MCP is unavailable or cannot fulfill the request.
+When available, **ALWAYS** prefer MCP servers over manual alternatives. Use **Context7** for docs/API references and **Serena** for code navigation/refactoring/memory. Fall back to CLI tools, direct file reads, or web searches **ONLY IF** the corresponding MCP is unavailable or cannot fulfill the request.
+
+This repository is hosted on **OneDev**: for PR, issue, review, and merge operations use the OneDev REST API at `https://YOUR_GIT_HOST/~api` with `Authorization: Bearer $ONEDEV_API_TOKEN`, project ID **13**.
 
 ## Overview
 
