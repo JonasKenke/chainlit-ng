@@ -86,4 +86,51 @@ describe('MCP credential storage', () => {
     expect(localStorage.getItem(MCP_STORAGE_KEY)).toBeNull();
     expect(result.current.mcps[0]).toEqual([]);
   });
+
+  it('purges legacy credentials from the raw key on store init', () => {
+    localStorage.setItem(
+      MCP_STORAGE_KEY,
+      JSON.stringify([
+        {
+          name: 'legacy',
+          status: 'connected',
+          clientType: 'sse',
+          url: 'https://user:pass@example.com/mcp?token=query-secret',
+          headers: { Authorization: 'Bearer header-secret' },
+          tools: [{ name: 'search' }]
+        }
+      ])
+    );
+    const client = { logout: vi.fn() };
+
+    const { result } = renderHook(() => useChainlitState('mcps'), {
+      wrapper: createWrapper(client)
+    });
+
+    const stored = localStorage.getItem(MCP_STORAGE_KEY) || '';
+    expect(stored).not.toContain('header-secret');
+    expect(stored).not.toContain('query-secret');
+    expect(stored).not.toContain('pass@');
+    expect(JSON.parse(stored)).toEqual([
+      {
+        name: 'legacy',
+        status: 'connected',
+        isUserProvided: true,
+        clientType: 'sse',
+        url: 'https://example.com/mcp'
+      }
+    ]);
+    expect(result.current[0][0].url).toBe('https://example.com/mcp');
+  });
+
+  it('removes a corrupt raw key on store init', () => {
+    localStorage.setItem(MCP_STORAGE_KEY, '{"name":');
+    const client = { logout: vi.fn() };
+
+    renderHook(() => useChainlitState('mcps'), {
+      wrapper: createWrapper(client)
+    });
+
+    expect(localStorage.getItem(MCP_STORAGE_KEY)).toBeNull();
+  });
 });

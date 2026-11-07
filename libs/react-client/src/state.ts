@@ -82,7 +82,21 @@ type ChainlitStore = StoreApi<ChainlitState>;
 const stores = new WeakMap<ChainlitAPI, ChainlitStore>();
 const initialStates = new WeakMap<ChainlitStore, ChainlitState>();
 function readStoredMcps(): IMcp[] {
-  return parseStoredMcps(localStorage.getItem(MCP_STORAGE_KEY));
+  const raw = localStorage.getItem(MCP_STORAGE_KEY);
+  const mcps = parseStoredMcps(raw);
+  if (raw === null) return mcps;
+
+  // Rewrite a pre-upgrade payload immediately so stale headers or URL
+  // credentials do not sit at rest until the next mcps write or logout.
+  const sanitized = serializeStoredMcps(mcps);
+  if (sanitized === raw) return mcps;
+
+  if (mcps.length === 0) {
+    localStorage.removeItem(MCP_STORAGE_KEY);
+  } else {
+    localStorage.setItem(MCP_STORAGE_KEY, sanitized);
+  }
+  return mcps;
 }
 
 function initialState(): ChainlitState {
