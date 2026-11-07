@@ -1,6 +1,6 @@
 import type { ICustomElement } from '@chainlit/react-client';
 
-import CustomElement from '@/components/Elements/CustomElement';
+import { LazyCustomElement } from '@/components/Elements/LazyCustomElement';
 
 interface Props {
   items: ICustomElement[];
@@ -9,7 +9,9 @@ interface Props {
 const InlinedCustomElementList = ({ items }: Props) => (
   <div className="flex flex-col gap-2">
     {items.map((customElement) => {
-      return <CustomElement key={customElement.id} element={customElement} />;
+      return (
+        <LazyCustomElement key={customElement.id} element={customElement} />
+      );
     })}
   </div>
 );
