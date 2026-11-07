@@ -153,7 +153,8 @@
         "headers": "Headers (JSON, optional)",
         "headersPlaceholder": "Example: {\"Authorization\": \"Bearer TOKEN\"}",
         "headersInvalid": "Headers must be a JSON object of string values",
-        "add": "Add"
+        "add": "Add",
+        "useOAuth": "Sign in with OAuth (streamable HTTP only)"
       },
       "list": {
         "empty": "No MCP servers connected",
@@ -161,7 +162,9 @@
         "url": "URL",
         "tools": "Tools",
         "removeTitle": "Are you sure?",
-        "removeDescription": "This will disconnect the MCP server \"{{name}}\". This action cannot be undone."
+        "removeDescription": "This will disconnect the MCP server \"{{name}}\". This action cannot be undone.",
+        "signIn": "Sign in to {{host}}",
+        "remove": "Remove MCP server"
       },
       "messages": {
         "connecting": "Connecting MCP...",
@@ -171,7 +174,8 @@
         "reconnecting": "Reconnecting MCP...",
         "reconnected": "MCP reconnected!",
         "removing": "Removing MCP...",
-        "removed": "MCP removed!"
+        "removed": "MCP removed!",
+        "authorizationRequired": "Sign in to finish connecting"
       },
       "errors": {
         "connect": "Could not connect to the MCP server"

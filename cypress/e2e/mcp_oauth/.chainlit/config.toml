@@ -1,0 +1,25 @@
+[project]
+session_timeout = 3600
+cache = false
+allow_origins = ["*"]
+
+[features]
+unsafe_allow_html = false
+latex = false
+
+[features.mcp]
+enabled = true
+oauth_authorization_origins = ["https://auth.example.test"]
+
+[features.mcp.user_servers]
+enabled = true
+allowed_urls = ["https://mcp.example.test/mcp"]
+
+[features.mcp.user_oauth]
+enabled = true
+
+[UI]
+name = "MCP OAuth test"
+
+[meta]
+generated_by = "2.12.0"

@@ -41,7 +41,8 @@ function parseStatus(value: unknown): IMcp['status'] {
 
 /**
  * Parse the persisted MCP list, migrating entries written before named servers
- * existed. Headers and tools never survive a reload; URLs are sanitized.
+ * existed. Headers, tools and the authorization URL never survive a reload;
+ * URLs are sanitized and a non-boolean `useOAuth` is dropped.
  * Returns an empty list for corrupt or non-array payloads; never throws.
  */
 export function parseStoredMcps(raw: string | null): IMcp[] {
@@ -82,13 +83,15 @@ export function parseStoredMcps(raw: string | null): IMcp[] {
       ) {
         continue;
       }
+      const useOAuth = value.useOAuth;
       mcps.push({
         name,
         tools: [],
         status,
         clientType: clientType as IMcp['clientType'],
         isUserProvided: true,
-        url
+        url,
+        ...(typeof useOAuth === 'boolean' ? { useOAuth } : {})
       });
       seen.add(name);
       continue;
@@ -108,8 +111,9 @@ export function parseStoredMcps(raw: string | null): IMcp[] {
 }
 
 /**
- * Serialize the in-memory list without credentials. Headers, tools and
- * credential-bearing URL parts must never reach localStorage.
+ * Serialize the in-memory list without credentials. Headers, tools, the
+ * authorization URL, error details and credential-bearing URL parts must
+ * never reach localStorage.
  */
 export function serializeStoredMcps(mcps: IMcp[]): string {
   const seen = new Set<string>();
@@ -128,6 +132,7 @@ export function serializeStoredMcps(mcps: IMcp[]): string {
     if (mcp.isUserProvided) entry.isUserProvided = true;
     if (mcp.clientType) entry.clientType = mcp.clientType;
     if (url) entry.url = url;
+    if (typeof mcp.useOAuth === 'boolean') entry.useOAuth = mcp.useOAuth;
     return [entry];
   });
 

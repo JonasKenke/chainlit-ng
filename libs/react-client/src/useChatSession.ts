@@ -20,6 +20,12 @@ import {
   IThread
 } from 'src/types';
 import {
+  applyMcpConnectResponse,
+  markMcpAuthorizationRequired,
+  markMcpConnected,
+  markMcpFailed
+} from 'src/utils/mcp';
+import {
   addMessage,
   deleteMessageById,
   updateMessageById,
@@ -28,6 +34,7 @@ import {
 
 import { OutputAudioChunk } from './types/audio';
 
+import { ClientError } from './api';
 import { ChainlitContext } from './context';
 import type { IToken } from './useChatData';
 
@@ -148,36 +155,18 @@ const useChatSession = () => {
                     mcp.name,
                     mcp.clientType,
                     mcp.url,
-                    mcp.headers
+                    mcp.headers,
+                    mcp.useOAuth
                   )
                 : client.connectMcp(sessionId, mcp.name);
             promise
-              .then(async ({ success, mcp }) => {
+              .then((response) => {
                 setMcps((prev) =>
-                  prev.map((existingMcp) => {
-                    if (existingMcp.name === mcp.name) {
-                      return {
-                        ...existingMcp,
-                        status: success ? 'connected' : 'failed',
-                        tools: mcp ? mcp.tools : existingMcp.tools
-                      };
-                    }
-                    return existingMcp;
-                  })
+                  applyMcpConnectResponse(prev, mcp.name, response)
                 );
               })
-              .catch(() => {
-                setMcps((prev) =>
-                  prev.map((existingMcp) => {
-                    if (existingMcp.name === mcp.name) {
-                      return {
-                        ...existingMcp,
-                        status: 'failed'
-                      };
-                    }
-                    return existingMcp;
-                  })
-                );
+              .catch((error: ClientError) => {
+                setMcps((prev) => markMcpFailed(prev, mcp.name, error?.detail));
               });
           });
 
@@ -188,6 +177,24 @@ const useChatSession = () => {
       socket.on('connect_error', (_) => {
         setSession((s) => ({ ...s!, error: true }));
       });
+
+      socket.on(
+        'mcp_authorization_required',
+        ({ name, url }: { name: string; url: string }) => {
+          setMcps((prev) => markMcpAuthorizationRequired(prev, name, url));
+        }
+      );
+
+      socket.on('mcp_connected', ({ mcp }: { mcp: IMcp }) => {
+        setMcps((prev) => markMcpConnected(prev, mcp));
+      });
+
+      socket.on(
+        'mcp_connection_failed',
+        ({ name, detail }: { name: string; detail: string }) => {
+          setMcps((prev) => markMcpFailed(prev, name, detail));
+        }
+      );
 
       socket.on('task_start', () => {
         setLoading(true);

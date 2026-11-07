@@ -10,6 +10,7 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -50,6 +51,7 @@ export const McpAddForm = ({
   );
   const [serverUrl, setServerUrl] = useState('');
   const [headersInput, setHeadersInput] = useState('');
+  const [useOAuth, setUseOAuth] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const upsertMcp = (incoming: IMcp) => {
@@ -93,9 +95,12 @@ export const McpAddForm = ({
     setServerType('sse');
     setServerUrl('');
     setHeadersInput('');
+    setUseOAuth(false);
   };
 
   const addUserMcp = () => {
+    // OAuth is streamable-HTTP only; the backend rejects it on SSE and stdio.
+    const optInOAuth = useOAuth && serverType === 'streamable-http';
     let headers: Record<string, string> | undefined;
     if (headersInput.trim()) {
       try {
@@ -116,6 +121,7 @@ export const McpAddForm = ({
     }
 
     setIsLoading(true);
+    let authorizationRequired = false;
     toast.promise(
       apiClient
         .connectUserMcp(
@@ -123,28 +129,50 @@ export const McpAddForm = ({
           serverName.trim(),
           serverType,
           serverUrl.trim(),
-          headers
+          headers,
+          optInOAuth
         )
         .then((resp: any) => {
-          if (!resp?.success) {
-            throw new Error(resp?.error || t('chat.mcp.errors.connect'));
+          if (resp?.status === 'authorization_required') {
+            // A 202 is a pending sign-in, not a failure: keep the row so the
+            // user can open the authorization URL or remove the attempt.
+            authorizationRequired = true;
+            upsertMcp({
+              ...resp.mcp,
+              name: serverName.trim(),
+              status: 'connecting',
+              isUserProvided: true,
+              clientType: serverType,
+              url: serverUrl.trim(),
+              headers,
+              useOAuth: true,
+              authorizationUrl: resp.url
+            });
+          } else {
+            if (!resp?.success) {
+              throw new Error(resp?.error || t('chat.mcp.errors.connect'));
+            }
+            upsertMcp({
+              ...resp.mcp,
+              status: 'connected',
+              isUserProvided: true,
+              clientType: serverType,
+              url: serverUrl.trim(),
+              headers,
+              useOAuth: optInOAuth
+            });
           }
-          upsertMcp({
-            ...resp.mcp,
-            status: 'connected',
-            isUserProvided: true,
-            clientType: serverType,
-            url: serverUrl.trim(),
-            headers
-          });
           resetForm();
           onSuccess();
         })
         .finally(() => setIsLoading(false)),
       {
         loading: t('chat.mcp.messages.adding'),
-        success: t('chat.mcp.messages.added'),
-        error: errorText
+        success: () =>
+          authorizationRequired
+            ? t('chat.mcp.messages.authorizationRequired')
+            : t('chat.mcp.messages.added'),
+        error: (err: any) => err?.detail || err?.message || errorText()
       }
     );
   };
@@ -218,9 +246,11 @@ export const McpAddForm = ({
                 </Label>
                 <Select
                   value={serverType}
-                  onValueChange={(value) =>
-                    setServerType(value as 'sse' | 'streamable-http')
-                  }
+                  onValueChange={(value) => {
+                    const nextType = value as 'sse' | 'streamable-http';
+                    setServerType(nextType);
+                    if (nextType !== 'streamable-http') setUseOAuth(false);
+                  }}
                   disabled={isLoading}
                 >
                   <SelectTrigger
@@ -256,6 +286,23 @@ export const McpAddForm = ({
                 disabled={isLoading}
               />
             </div>
+
+            {serverType === 'streamable-http' && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="server-oauth"
+                  checked={useOAuth}
+                  onCheckedChange={(checked) => setUseOAuth(checked === true)}
+                  disabled={isLoading}
+                />
+                <Label
+                  htmlFor="server-oauth"
+                  className="text-foreground/70 text-sm"
+                >
+                  {t('chat.mcp.form.useOAuth')}
+                </Label>
+              </div>
+            )}
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="headers" className="text-foreground/70 text-sm">
