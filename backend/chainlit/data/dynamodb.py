@@ -16,7 +16,7 @@ from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from chainlit.context import context
 from chainlit.data.base import BaseDataLayer
 from chainlit.data.storage_clients.base import BaseStorageClient
-from chainlit.data.utils import queue_until_user_message
+from chainlit.data.utils import delete_storage_objects, queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
 from chainlit.step import StepDict
@@ -415,6 +415,7 @@ class DynamoDBDataLayer(BaseDataLayer):
             "KeyConditionExpression": "#pk = :pk",
             "ExpressionAttributeNames": {"#pk": "PK"},
             "ExpressionAttributeValues": {":pk": {"S": f"THREAD#{thread_id}"}},
+            "ConsistentRead": True,
         }
         while True:
             response = self.client.query(**query_args)  # type: ignore
@@ -422,23 +423,6 @@ class DynamoDBDataLayer(BaseDataLayer):
             if "LastEvaluatedKey" not in response:
                 return items
             query_args["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-
-    async def _delete_storage_objects(self, object_keys: List[str]):
-        if not self.storage_provider:
-            return
-
-        failed = [
-            object_key
-            for object_key in object_keys
-            if not await self.storage_provider.delete_file(object_key=object_key)
-        ]
-        if failed:
-            # Keep the DynamoDB items when the blobs survive, so a retry can still
-            # locate them and personal data is not left without a handle.
-            raise RuntimeError(
-                f"DynamoDB: failed to delete {len(failed)} storage object(s); "
-                "aborting thread deletion"
-            )
 
     async def _batch_delete_items(self, keys: List[Dict[str, Any]]):
         batch_item_size = 25
@@ -474,9 +458,28 @@ class DynamoDBDataLayer(BaseDataLayer):
             if item.get("SK", {}).get("S", "").startswith("ELEMENT#") and object_key:
                 object_keys.append(object_key)
 
-        await self._delete_storage_objects(object_keys)
-        await self._batch_delete_items(
-            [{"PK": item["PK"], "SK": item["SK"]} for item in items]
+        await delete_storage_objects(self.storage_provider, object_keys)
+
+        # Delete the thread's items first and the THREAD marker last, re-querying
+        # until the partition holds only the marker: a step or element written
+        # while deleting must not be orphaned.
+        while True:
+            keys = [
+                {"PK": item["PK"], "SK": item["SK"]}
+                for item in items
+                if item["SK"]["S"] != "THREAD"
+            ]
+            if not keys:
+                break
+            await self._batch_delete_items(keys)
+            items = await self._query_thread_items(thread_id)
+
+        self.client.delete_item(
+            TableName=self.table_name,
+            Key={
+                "PK": {"S": f"THREAD#{thread_id}"},
+                "SK": {"S": "THREAD"},
+            },
         )
 
     async def delete_all_threads(self, user_id: str) -> int:
@@ -517,7 +520,7 @@ class DynamoDBDataLayer(BaseDataLayer):
                 ):
                     object_keys.append(object_key)
 
-        await self._delete_storage_objects(object_keys)
+        await delete_storage_objects(self.storage_provider, object_keys)
         await self._batch_delete_items(keys)
 
         return len(thread_ids)
