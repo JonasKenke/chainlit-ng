@@ -166,6 +166,9 @@ overrides:
   braces@<3.0.3: '>=3.0.3'
   micromatch@<4.0.8: '>=4.0.8'
 
+patchedDependencies:
+  micromark-extension-math-extended@3.2.2: 90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b
+
 importers:
 
   .:

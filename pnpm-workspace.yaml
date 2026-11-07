@@ -25,9 +25,13 @@ packageConfigs:
     overrides:
       'vite@>=4.4.0 <4.4.12': '>=4.4.12'
       'vite@>=4.0.0 <=4.5.1': '>=4.5.2'
-      'katex@>=0.11.0 <0.16.10': '>=0.16.10'
-      'katex@>=0.15.4 <0.16.10': '>=0.16.10'
-      'katex@>=0.10.0-beta <0.16.10': '>=0.16.10'
+      # katex < 0.18.2 is affected by GHSA-238p-pmpm-9mq7 (low).
+      # rehype-katex@7 declares ^0.16.0, so stay on the latest 0.16.x and
+      # raise this override and the frontend/index.html stylesheet URL
+      # together once upstream allows 0.18.2.
+      'katex@>=0.11.0 <0.16.10': '0.16.47'
+      'katex@>=0.15.4 <0.16.10': '0.16.47'
+      'katex@>=0.10.0-beta <0.16.10': '0.16.47'
       'vite@>=4.0.0 <=4.5.2': '>=4.5.3'
       'braces@<3.0.3': '>=3.0.3'
       'ws@>=8.0.0 <8.17.1': '>=8.17.1'
@@ -99,3 +103,7 @@ minimumReleaseAgeExclude:
   - '@storybook/react-vite@10.6.4'
   - '@storybook/react@10.6.4'
   - storybook@10.6.4
+# Bounds the inline `\(` scan in micromark-extension-math-extended to a
+# 256-character lookahead. Drop the patch once upstream ships the bound.
+patchedDependencies:
+  micromark-extension-math-extended@3.2.2: patches/micromark-extension-math-extended@3.2.2.patch

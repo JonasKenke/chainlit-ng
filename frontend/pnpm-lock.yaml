@@ -7,9 +7,9 @@ settings:
 overrides:
   vite@>=4.4.0 <4.4.12: '>=4.4.12'
   vite@>=4.0.0 <=4.5.1: '>=4.5.2'
-  katex@>=0.11.0 <0.16.10: '>=0.16.10'
-  katex@>=0.15.4 <0.16.10: '>=0.16.10'
-  katex@>=0.10.0-beta <0.16.10: '>=0.16.10'
+  katex@>=0.11.0 <0.16.10: 0.16.47
+  katex@>=0.15.4 <0.16.10: 0.16.47
+  katex@>=0.10.0-beta <0.16.10: 0.16.47
   vite@>=4.0.0 <=4.5.2: '>=4.5.3'
   braces@<3.0.3: '>=3.0.3'
   ws@>=8.0.0 <8.17.1: '>=8.17.1'
@@ -21,6 +21,9 @@ overrides:
   cross-spawn@>=7.0.0 <7.0.5: '>=7.0.5'
   immutable@>=3.0.0 <3.8.4: '>=3.8.4 <4.0.0'
   immutable@>=4.0.0 <4.3.9: '>=4.3.9 <5.0.0'
+
+patchedDependencies:
+  micromark-extension-math-extended@3.2.2: 90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b
 
 importers:
 
@@ -185,9 +188,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
-      remark-math:
-        specifier: ^6.0.0
-        version: 6.0.0
+      remark-math-extended:
+        specifier: 6.1.1
+        version: 6.1.1
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -2120,16 +2123,16 @@ packages:
   comma-separated-tokens@2.0.3:
     resolution: {integrity: sha512-Fu4hJdvzeylCfQPp9SGWidpzrMs7tTrlu6Vb8XGaRGck8QSNZJJp538Wrb60Lax4fPwR64ViY468OIUTbRlGZg==}
 
-  commander@15.0.0:
-    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
-    engines: {node: '>=22.12.0'}
-
   commander@2.20.3:
     resolution: {integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==}
 
   commander@4.1.1:
     resolution: {integrity: sha512-NOKm8xhkzAjzFx8B2v5OAHT+u5pRQc2UCa2Vq9jYL/31o2wi9mxBA7LIFs3sV5VSC49z6pEhfbMULvShKj26WA==}
     engines: {node: '>= 6'}
+
+  commander@8.3.0:
+    resolution: {integrity: sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww==}
+    engines: {node: '>= 12'}
 
   concat-stream@1.6.2:
     resolution: {integrity: sha512-27HBghJxjiZtIk3Ycvn/4kbJk/1uZuJFfuPEns6LaEvpvG1f0hTea8lilrouyo9mVc2GWdcEZ8OLoGmSADlrCw==}
@@ -2789,8 +2792,8 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  katex@0.19.1:
-    resolution: {integrity: sha512-jG8uKntjSEcm2EpQOh0XturpPuuC9r3Sq5HLHdsFdWZT27E672SF19QEi+of0/YeOy15lDgRhKvr5614uRrEfA==}
+  katex@0.16.47:
+    resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
     hasBin: true
 
   kdbush@4.1.0:
@@ -3116,8 +3119,8 @@ packages:
   micromark-extension-gfm@3.0.0:
     resolution: {integrity: sha512-vsKArQsicm7t0z2GugkCKtZehqUm31oeGBV/KVSorWSy8ZlNAv7ytjFhvaryUiCUJYqs+NoE6AFhpQvBTM6Q4w==}
 
-  micromark-extension-math@3.1.0:
-    resolution: {integrity: sha512-lvEqd+fHjATVs+2v/8kg9i5Q0AP2k85H0WUOwpIVvUML8BapsMvh1XAogmQjOCsLpoKRCVQqEkQBB3NhVBcsOg==}
+  micromark-extension-math-extended@3.2.2:
+    resolution: {integrity: sha512-u0Mhvjz2c++9Gd6/rYIYEBrEvZeNa7hIH3roqis+sA9AuP4hKzvuMENMOF0shs44LJkqJv33rXRCCqLzhlBCsQ==}
 
   micromark-factory-destination@2.0.1:
     resolution: {integrity: sha512-Xe6rDdJlkmbFRExpTOmRj9N3MaWmbAgdpSrBQvCFqhezUn4AHqJHbaEnfbVYYiexVSs//tqOdY/DxhjdCiJnIA==}
@@ -3566,8 +3569,8 @@ packages:
   remark-gfm@4.0.1:
     resolution: {integrity: sha512-1quofZ2RQ9EWdeN34S79+KExV1764+wCUGop5CPL1WGdD0ocPpu91lzPGbwWMECpEpd42kJGQwzRfyov9j4yNg==}
 
-  remark-math@6.0.0:
-    resolution: {integrity: sha512-MMqgnP74Igy+S3WwnhQ7kqGlEerTETXMvJhrUzDikVZ2/uogJCb+WHUg97hK9/jcfc0dkD73s3LN8zU49cTEtA==}
+  remark-math-extended@6.1.1:
+    resolution: {integrity: sha512-nFEmFG2+PFtsAmZ2SjnAXslbn/Y0wazWiV8EzXbyF6WD8s7kxoCUvlb8OHmhDBnbMhCApEXNYRirZbGKSQE9Cg==}
 
   remark-parse@11.0.0:
     resolution: {integrity: sha512-FCxlKLNGknS5ba/1lmpYijMUzX2esxW5xQqjWxw2eHFfS2MSdaHVINFmhjo+qN1WhZhNimq0dZATN9pH0IDrpA==}
@@ -5721,11 +5724,11 @@ snapshots:
 
   comma-separated-tokens@2.0.3: {}
 
-  commander@15.0.0: {}
-
   commander@2.20.3: {}
 
   commander@4.1.1: {}
+
+  commander@8.3.0: {}
 
   concat-stream@1.6.2:
     dependencies:
@@ -6472,9 +6475,9 @@ snapshots:
 
   json5@2.2.3: {}
 
-  katex@0.19.1:
+  katex@0.16.47:
     dependencies:
-      commander: 15.0.0
+      commander: 8.3.0
 
   kdbush@4.1.0: {}
 
@@ -6943,11 +6946,11 @@ snapshots:
       micromark-util-combine-extensions: 2.0.1
       micromark-util-types: 2.0.3
 
-  micromark-extension-math@3.1.0:
+  micromark-extension-math-extended@3.2.2(patch_hash=90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b):
     dependencies:
       '@types/katex': 0.16.8
       devlop: 1.1.0
-      katex: 0.19.1
+      katex: 0.16.47
       micromark-factory-space: 2.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
@@ -7543,7 +7546,7 @@ snapshots:
       '@types/katex': 0.16.8
       hast-util-from-html-isomorphic: 2.0.0
       hast-util-to-text: 4.0.3
-      katex: 0.19.1
+      katex: 0.16.47
       unist-util-visit-parents: 6.1.0
       vfile: 6.0.3
 
@@ -7573,11 +7576,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  remark-math@6.0.0:
+  remark-math-extended@6.1.1:
     dependencies:
       '@types/mdast': 4.0.4
       mdast-util-math: 3.0.0
-      micromark-extension-math: 3.1.0
+      micromark-extension-math-extended: 3.2.2(patch_hash=90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b)
       unified: 11.0.5
     transitivePeerDependencies:
       - supports-color

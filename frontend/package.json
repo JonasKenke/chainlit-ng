@@ -64,7 +64,7 @@
     "rehype-raw": "^7.0.0",
     "remark-directive": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0",
+    "remark-math-extended": "6.1.1",
     "sonner": "^2.0.8",
     "swr": "^2.5.1",
     "tailwind-merge": "^3.7.0",

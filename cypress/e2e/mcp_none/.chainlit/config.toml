@@ -1,0 +1,17 @@
+[project]
+session_timeout = 3600
+cache = false
+allow_origins = ["*"]
+
+[features]
+unsafe_allow_html = false
+latex = false
+
+[features.mcp]
+enabled = true
+
+[UI]
+name = "MCP test"
+
+[meta]
+generated_by = "2.12.0"

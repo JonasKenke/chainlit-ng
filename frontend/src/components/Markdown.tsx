@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import remarkDirective from 'remark-directive';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
+import remarkMath from 'remark-math-extended';
 import { visit } from 'unist-util-visit';
 
 import { ChainlitContext, type IMessageElement } from '@chainlit/react-client';

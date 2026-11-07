@@ -1,0 +1,64 @@
+diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
+index 57254ca0a2e259e7eb4060a5c84992e50f3a7109..9cb98db11a977672dcfa3aaec20befa6d2cf5d0e 100644
+--- a/dev/lib/math-text.js
++++ b/dev/lib/math-text.js
+@@ -220,6 +220,7 @@ function createBackslashMathText(open, close) {
+   function tokenizeMathText(effects, ok, nok) {
+     const self = this
+     let sizeOpen = 0
++    let startOffset = 0
+     /** @type {number} */
+     let size
+     /** @type {Token} */
+@@ -235,6 +236,7 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function start(code) {
++      startOffset = self.now().offset
+       assert(code === codes.backslash, 'expected `\\`')
+       assert(
+         previousBackslash.call(self, self.previous),
+@@ -279,6 +281,11 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function between(code) {
++      // An unclosed opener must fall back to text after a fixed lookahead
++      // instead of scanning to end-of-input (O(n^2) across openers).
++      if (self.now().offset - startOffset > 256) {
++        return nok(code)
++      }
+       if (code === codes.eof) {
+         return nok(code)
+       }
+diff --git a/lib/math-text.js b/lib/math-text.js
+index 802e3d6f227d1c34b5192a9473685dd8cc563970..99531814d9dbd11b6735c9fb2154173627d97740 100644
+--- a/lib/math-text.js
++++ b/lib/math-text.js
+@@ -192,6 +192,7 @@ function createBackslashMathText(open, close) {
+   function tokenizeMathText(effects, ok, nok) {
+     const self = this;
+     let sizeOpen = 0;
++    let startOffset = 0;
+     /** @type {number} */
+     let size;
+     /** @type {Token} */
+@@ -206,6 +207,7 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function start(code) {
++      startOffset = self.now().offset;
+       effects.enter('mathText');
+       effects.enter('mathTextSequence');
+       return sequenceOpen(code);
+@@ -242,6 +244,11 @@ function createBackslashMathText(open, close) {
+      * @type {State}
+      */
+     function between(code) {
++      // An unclosed opener must fall back to text after a fixed lookahead
++      // instead of scanning to end-of-input (O(n^2) across openers).
++      if (self.now().offset - startOffset > 256) {
++        return nok(code);
++      }
+       if (code === null) {
+         return nok(code);
+       }

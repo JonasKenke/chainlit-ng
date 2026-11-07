@@ -1,0 +1,30 @@
+[project]
+session_timeout = 3600
+cache = false
+allow_origins = ["*"]
+
+[features]
+unsafe_allow_html = false
+latex = false
+
+[features.mcp]
+enabled = true
+
+[features.mcp.user_servers]
+enabled = false
+
+[[features.mcp.servers]]
+name = "named-sse"
+type = "sse"
+url = "http://127.0.0.1:9/mcp"
+
+[[features.mcp.servers]]
+name = "named-stdio"
+type = "stdio"
+command = "npx -y @modelcontextprotocol/server-everything"
+
+[UI]
+name = "MCP test"
+
+[meta]
+generated_by = "2.12.0"
