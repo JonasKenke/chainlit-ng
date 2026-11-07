@@ -732,3 +732,55 @@ class TestInputWidgetEdgeCases:
         assert text_input.initial == ""
         result = text_input.to_dict()
         assert result["initial"] == ""
+
+
+class TestDependentInputWidgets:
+    """Test suite for declarative dependencies between input widgets."""
+
+    @pytest.mark.parametrize("widget_type", [Select, RadioGroup, MultiSelect])
+    def test_widget_without_dependency_keeps_existing_key_set(self, widget_type):
+        widget = widget_type(
+            id="city", label="City", items={"New York": "ny", "Toronto": "toronto"}
+        )
+
+        result = widget.to_dict()
+
+        assert set(result) == {
+            "type",
+            "id",
+            "label",
+            "initial",
+            "items",
+            "tooltip",
+            "description",
+            "disabled",
+        }
+        assert result["items"] == [
+            {"label": "New York", "value": "ny"},
+            {"label": "Toronto", "value": "toronto"},
+        ]
+
+    @pytest.mark.parametrize("widget_type", [Select, RadioGroup, MultiSelect])
+    def test_dependent_items_serialization(self, widget_type):
+        widget = widget_type(
+            id="city",
+            label="City",
+            depends_on="country",
+            items={"Other": "other"},
+            dependent_items={
+                "US": {"New York": "ny", "San Francisco": "sf"},
+                "CA": {"Toronto": "toronto"},
+            },
+        )
+
+        result = widget.to_dict()
+
+        assert result["depends_on"] == "country"
+        assert result["dependent_items"] == {
+            "US": [
+                {"label": "New York", "value": "ny"},
+                {"label": "San Francisco", "value": "sf"},
+            ],
+            "CA": [{"label": "Toronto", "value": "toronto"}],
+        }
+        assert result["items"] == [{"label": "Other", "value": "other"}]
