@@ -124,6 +124,9 @@ def clean_metadata(metadata: Dict, max_size: int = 1048576):
 
 
 _SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_THREAD_ID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 
 def is_valid_session_id(session_id: Any) -> bool:
@@ -131,6 +134,11 @@ def is_valid_session_id(session_id: Any) -> bool:
     return isinstance(session_id, str) and bool(
         _SESSION_ID_PATTERN.fullmatch(session_id)
     )
+
+
+def is_valid_thread_id(thread_id: Any) -> bool:
+    """Whether the id is a canonical UUID thread id."""
+    return isinstance(thread_id, str) and bool(_THREAD_ID_PATTERN.fullmatch(thread_id))
 
 
 class BaseSession:

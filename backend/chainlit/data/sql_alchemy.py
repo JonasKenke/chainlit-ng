@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import aiofiles
 import aiohttp
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -76,9 +76,16 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
     ###### SQL Helpers ######
     async def execute_sql(
-        self, query: str, parameters: dict
+        self,
+        query: str,
+        parameters: dict,
+        expanding: Optional[List[str]] = None,
     ) -> Union[List[Dict[str, Any]], int, None]:
         parameterized_query = text(query)
+        if expanding:
+            parameterized_query = parameterized_query.bindparams(
+                *(bindparam(name, expanding=True) for name in expanding)
+            )
         async with self.async_session() as session:
             try:
                 await session.begin()
@@ -758,14 +765,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             return None
         if not user_threads:
             return []
-        else:
-            thread_ids = (
-                "('"
-                + "','".join(map(str, [thread["thread_id"] for thread in user_threads]))
-                + "')"
-            )
 
-        steps_feedbacks_query = f"""
+        thread_ids = [thread["thread_id"] for thread in user_threads]
+
+        steps_feedbacks_query = """
             SELECT
                 s."id" AS step_id,
                 s."name" AS step_name,
@@ -789,14 +792,16 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 f."comment" AS feedback_comment,
                 f."id" AS feedback_id
             FROM steps s LEFT JOIN feedbacks f ON s."id" = f."forId"
-            WHERE s."threadId" IN {thread_ids}
+            WHERE s."threadId" IN :thread_ids
             ORDER BY s."createdAt" ASC
         """
         steps_feedbacks = await self.execute_sql(
-            query=steps_feedbacks_query, parameters={}
+            query=steps_feedbacks_query,
+            parameters={"thread_ids": thread_ids},
+            expanding=["thread_ids"],
         )
 
-        elements_query = f"""
+        elements_query = """
             SELECT
                 e."id" AS element_id,
                 e."threadId" as element_threadid,
@@ -813,9 +818,13 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 e."mime" AS element_mime,
                 e."props" AS props
             FROM elements e
-            WHERE e."threadId" IN {thread_ids}
+            WHERE e."threadId" IN :thread_ids
         """
-        elements = await self.execute_sql(query=elements_query, parameters={})
+        elements = await self.execute_sql(
+            query=elements_query,
+            parameters={"thread_ids": thread_ids},
+            expanding=["thread_ids"],
+        )
 
         thread_dicts = {}
         for thread in user_threads:
