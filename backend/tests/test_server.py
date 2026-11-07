@@ -21,6 +21,7 @@ from chainlit.config import (
     ChainlitConfig,
     SpontaneousFileUploadFeature,
 )
+from chainlit.data.base import BaseDataLayer
 from chainlit.server import (
     _verify_azure_hf_id_token,
     app,
@@ -2082,3 +2083,152 @@ def test_get_html_template_keeps_external_assets(
     assert 'href="https://cdn.example.com/custom.css"' in html
     assert 'src="//cdn.example.com/custom.js"' in html
     assert 'content="https://cdn.example.com/banner.png"' in html
+
+
+# ---- Clear all threads ----
+
+
+class _BulkDeleteDataLayer:
+    """Minimal data layer stand-in for the clear-all-threads endpoint."""
+
+    def __init__(self, threads: dict[str, list[str]]):
+        self.threads = threads
+        self.calls: list[str] = []
+
+    async def delete_all_threads(self, user_id: str) -> int:
+        self.calls.append(user_id)
+        return len(self.threads.pop(user_id, []))
+
+
+class _NoBulkDeleteDataLayer:
+    """Layer that inherits, rather than overrides, the base bulk delete method."""
+
+    delete_all_threads = BaseDataLayer.delete_all_threads
+
+
+@pytest.fixture
+def as_user():
+    """Override the authenticated user for the duration of a test."""
+
+    def _as_user(user):
+        app.dependency_overrides[get_current_user] = lambda: user
+        return user
+
+    yield _as_user
+
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_supports_delete_all_threads_only_for_overrides():
+    from chainlit.server import _supports_delete_all_threads
+
+    assert _supports_delete_all_threads(None) is False
+    assert _supports_delete_all_threads(_NoBulkDeleteDataLayer()) is False
+    assert _supports_delete_all_threads(_BulkDeleteDataLayer({})) is True
+
+
+def test_delete_all_threads_requires_authentication(
+    test_client: TestClient,
+):
+    response = test_client.delete("/project/threads")
+
+    assert response.status_code == 401
+
+
+def test_delete_all_threads_requires_data_layer(
+    test_client: TestClient, as_user, monkeypatch: pytest.MonkeyPatch
+):
+    as_user(PersistedUser(id="user-a", identifier="a@example.com", createdAt="now"))
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: None)
+
+    response = test_client.delete("/project/threads")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Data persistence is not enabled"
+
+
+def test_delete_all_threads_unsupported_layer_returns_501(
+    test_client: TestClient, as_user, monkeypatch: pytest.MonkeyPatch
+):
+    class _UnsupportedLayer:
+        async def delete_all_threads(self, user_id: str) -> int:
+            raise NotImplementedError("Bulk thread deletion is not implemented")
+
+    as_user(PersistedUser(id="user-a", identifier="a@example.com", createdAt="now"))
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: _UnsupportedLayer())
+
+    response = test_client.delete("/project/threads")
+
+    assert response.status_code == 501
+
+
+def test_delete_all_threads_returns_deleted_count(
+    test_client: TestClient, as_user, monkeypatch: pytest.MonkeyPatch
+):
+    data_layer = _BulkDeleteDataLayer({"user-a": ["t1", "t2", "t3"]})
+    as_user(PersistedUser(id="user-a", identifier="a@example.com", createdAt="now"))
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: data_layer)
+
+    response = test_client.delete("/project/threads")
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "deleted": 3}
+    assert data_layer.calls == ["user-a"]
+
+
+def test_delete_all_threads_only_deletes_current_user_threads(
+    test_client: TestClient, as_user, monkeypatch: pytest.MonkeyPatch
+):
+    data_layer = _BulkDeleteDataLayer(
+        {"user-a": ["a-thread-1", "a-thread-2"], "user-b": ["b-thread-1"]}
+    )
+    as_user(PersistedUser(id="user-a", identifier="a@example.com", createdAt="now"))
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: data_layer)
+
+    response = test_client.request(
+        "DELETE",
+        "/project/threads",
+        json={"userId": "user-b", "threadIds": ["b-thread-1"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "deleted": 2}
+    # Only the authenticated user's id reaches the data layer.
+    assert data_layer.calls == ["user-a"]
+    assert data_layer.threads == {"user-b": ["b-thread-1"]}
+
+
+def test_delete_all_threads_logs_identifier_and_count_only(
+    test_client: TestClient,
+    as_user,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    data_layer = _BulkDeleteDataLayer({"user-a": ["secret-thread-name"]})
+    as_user(PersistedUser(id="user-a", identifier="a@example.com", createdAt="now"))
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: data_layer)
+
+    with caplog.at_level("INFO", logger="chainlit"):
+        response = test_client.delete("/project/threads")
+
+    assert response.status_code == 200
+    assert "Deleted 1 threads for user a@example.com" in caplog.text
+    assert "secret-thread-name" not in caplog.text
+
+
+def test_thread_clear_all_capability_flag(
+    test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        "chainlit.server.get_data_layer", lambda: _NoBulkDeleteDataLayer()
+    )
+    response = test_client.get("/project/settings")
+    assert response.status_code == 200
+    assert response.json()["threadClearAll"] is False
+
+    monkeypatch.setattr(
+        "chainlit.server.get_data_layer", lambda: _BulkDeleteDataLayer({})
+    )
+    response = test_client.get("/project/settings")
+    assert response.status_code == 200
+    assert response.json()["threadClearAll"] is True
