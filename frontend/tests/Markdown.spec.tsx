@@ -83,4 +83,20 @@ describe('Markdown math', () => {
     expect(container.querySelector('.katex')).not.toBeNull();
     expect(container.textContent).not.toContain('\\(');
   });
+
+  it('falls back to text when the closing delimiter is beyond the lookahead', () => {
+    const { container } = renderMarkdown(`\\(${'x'.repeat(2000)}\\)`, true);
+
+    expect(container.querySelector('.katex')).toBeNull();
+  });
+
+  it('bounds the parse cost of repeated unclosed delimiters', () => {
+    const payload = '\\(x'.repeat(Math.floor((32 * 1024) / 3));
+    const started = performance.now();
+    const { container } = renderMarkdown(payload, true);
+    const elapsed = performance.now() - started;
+
+    expect(container.querySelector('.katex')).toBeNull();
+    expect(elapsed).toBeLessThan(20000);
+  }, 60000);
 });

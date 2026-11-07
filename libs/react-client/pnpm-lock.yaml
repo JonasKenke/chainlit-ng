@@ -19,6 +19,9 @@ overrides:
   immutable@>=3.0.0 <3.8.4: '>=3.8.4 <4.0.0'
   immutable@>=4.0.0 <4.3.9: '>=4.3.9 <5.0.0'
 
+patchedDependencies:
+  micromark-extension-math-extended@3.2.2: 90156c1eeea60e4905c784794f633dfd68a29c3448ebdf26b75f5b8a702dc33b
+
 importers:
 
   .:
