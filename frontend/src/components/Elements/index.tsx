@@ -5,7 +5,7 @@ import CustomElement from './CustomElement';
 import { FileElement } from './File';
 import { ImageElement } from './Image';
 import { LazyDataframe } from './LazyDataframe';
-import { PDFElement } from './PDF';
+import { LazyPDF } from './LazyPDF';
 import { PlotlyElement } from './Plotly';
 import { TextElement } from './Text';
 import { VideoElement } from './Video';
@@ -25,7 +25,7 @@ const Element = ({
     case 'text':
       return <TextElement element={element} />;
     case 'pdf':
-      return <PDFElement element={element} />;
+      return <LazyPDF element={element} />;
     case 'audio':
       return <AudioElement element={element} />;
     case 'video':
