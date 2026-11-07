@@ -3231,8 +3231,6 @@ async def upload_file(
     session.files_dir.mkdir(exist_ok=True)
 
     try:
-        content = await file.read()
-
         assert file.filename, "No filename for uploaded file"
         assert file.content_type, "No content type for uploaded file"
 
@@ -3243,10 +3241,13 @@ async def upload_file(
                 detail="Parent message not found",
             )
 
+        # Validate before reading so an oversized upload is never buffered in memory.
         try:
             validate_file_upload(file, spec=spec)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+        content = await file.read()
 
         file_response = await session.persist_file(
             name=file.filename, content=content, mime=file.content_type

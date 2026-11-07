@@ -14,6 +14,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
+from starlette.datastructures import UploadFile
 
 from chainlit.auth import get_current_user
 from chainlit.config import (
@@ -680,6 +681,43 @@ def test_upload_file_size_check(
 
     # Verify the response
     assert response.status_code == expected_status
+
+
+def test_upload_file_size_rejected_before_read(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_session_get_by_id_patched: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Oversized uploads are rejected before the body is buffered in memory."""
+
+    monkeypatch.setattr(
+        test_config.features,
+        "spontaneous_file_upload",
+        SpontaneousFileUploadFeature(max_size_mb=1, enabled=True),
+    )
+
+    original_read = UploadFile.read
+    read_calls: list[int] = []
+
+    async def spy_read(self: UploadFile, size: int = -1):
+        read_calls.append(size)
+        return await original_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", spy_read)
+
+    response = test_client.post(
+        "/project/file",
+        files={
+            "file": ("too_large.txt", b"1" * (1024 * 1024 + 1), "text/plain"),
+        },
+        params={"session_id": mock_session_get_by_id_patched.id},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "File size too large"
+    assert read_calls == []
+    assert not mock_session_get_by_id_patched.persist_file.called
 
 
 @pytest.mark.parametrize(
