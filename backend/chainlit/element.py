@@ -1,5 +1,6 @@
 import json
 import mimetypes
+import re
 import uuid
 from enum import Enum
 from io import BytesIO
@@ -23,6 +24,8 @@ from syncer import asyncio
 from chainlit.context import context
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
+
+_VALID_MEDIA_TYPE = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*")
 
 mime_types = {
     "text": "text/plain",
@@ -223,6 +226,28 @@ class Element:
         renders media by element.type, so disposition follows type.
         """
         return "inline" if cls.type in cls._BROWSER_RENDERED_TYPES else None
+
+    @classmethod
+    def normalize_mime(cls, mime_type: str) -> str | None:
+        """Return the lowercase base type/subtype, or None if it is invalid."""
+        mime = mime_type.split(";", 1)[0].strip().lower()
+        return mime if _VALID_MEDIA_TYPE.fullmatch(mime) else None
+
+    @classmethod
+    def is_browser_rendered_mime(cls, mime_type: str) -> bool:
+        """Whether a file of this MIME type may be served inline.
+
+        Strict allowlist. SVG is excluded: a top-level SVG document can
+        execute script.
+        """
+        mime = cls.normalize_mime(mime_type)
+        if mime is None or mime == "image/svg+xml":
+            return False
+        return mime == "application/pdf" or mime.split("/", 1)[0] in {
+            "image",
+            "audio",
+            "video",
+        }
 
     async def _create(self, persist=True) -> bool:
         if self.persisted and not self.updatable:

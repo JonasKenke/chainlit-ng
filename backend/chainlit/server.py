@@ -3363,8 +3363,19 @@ async def get_file(
             )
 
     if file_id in session.files:
+        from chainlit.element import Element
+
         file = session.files[file_id]
-        return FileResponse(file["path"], media_type=file["type"])
+        mime = Element.normalize_mime(file["type"]) or "application/octet-stream"
+        return FileResponse(
+            file["path"],
+            media_type=mime,
+            filename=file.get("name"),
+            content_disposition_type=(
+                "inline" if Element.is_browser_rendered_mime(mime) else "attachment"
+            ),
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
     else:
         raise HTTPException(status_code=404, detail="File not found")
 
