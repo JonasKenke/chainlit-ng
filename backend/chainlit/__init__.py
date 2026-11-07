@@ -51,6 +51,7 @@ from chainlit.sidebar import ElementSidebar
 from chainlit.skill import (
     get_skill,
     list_skills,
+    load_user_skills,
     render_skill,
     skill_tool,
     skills_catalog,
@@ -193,6 +194,7 @@ __all__ = [
     "header_auth_callback",
     "input_widget",
     "list_skills",
+    "load_user_skills",
     "make_async",
     "oauth_callback",
     "on_app_shutdown",
