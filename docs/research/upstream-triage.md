@@ -86,8 +86,10 @@ model is in [security hardening](security-hardening.md).
 ### #3013 — per-user OAuth for HTTP MCP connections
 
 - Additive feature (part of issue #2197), 13 comments.
-- Uses the MCP SDK `OAuthClientProvider` with a per-session token store; large
-  but self-contained. Not a bug fix.
+- **Ported** as per-user OAuth for user-provided streamable-HTTP MCP servers;
+  see [MCP OAuth setup](../mcp-oauth.md). The fork follows the accepted design
+  note instead of the upstream diff: the MCP SDK owns PKCE, state and refresh,
+  and tokens are per-user and in-memory.
 
 ### #2954 / #3054 — CoT and side-element UX
 
