@@ -9,6 +9,7 @@ describe('Custom Element', () => {
     cy.get('.step').eq(0).find('.inline-custom').should('have.length', 1);
 
     getCustomElement().should('contain', 'Count: 1');
+    getCustomElement().find('#helper-icon').should('exist');
 
     getCustomElement().find('#increment').click();
     getCustomElement().should('contain', 'Count: 2');

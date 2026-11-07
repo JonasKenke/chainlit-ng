@@ -2,10 +2,12 @@ import { X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 
+import CountLabel from './CountLabel.jsx';
+
 export default function Counter() {
   return (
     <div id="custom-counter" className="mt-4 flex flex-col gap-2">
-      <div>Count: {props.count}</div>
+      <CountLabel count={props.count} />
       {props.loading ? 'Loading...' : null}
       <Button
         id="increment"

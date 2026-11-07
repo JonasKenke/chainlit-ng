@@ -24,6 +24,7 @@ import Alert from '@/components/Alert';
 
 import Imports from './Imports';
 import * as Renderer from './Renderer';
+import { type LoadedCustomElement, loadCustomElement } from './loader';
 
 const CustomElement = memo(function ({ element }: { element: ICustomElement }) {
   const apiClient = useContext(ChainlitContext);
@@ -32,13 +33,16 @@ const CustomElement = memo(function ({ element }: { element: ICustomElement }) {
   const { user } = useAuth();
   const { askUser } = useContext(MessageContext);
 
-  const [sourceCode, setSourceCode] = useState<string>();
+  const [loaded, setLoaded] = useState<LoadedCustomElement>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    apiClient
-      .get(`/public/elements/${element.name}.jsx`)
-      .then(async (res) => setSourceCode(await res.text()))
+    loadCustomElement({
+      name: element.name,
+      imports: { ...Imports, '@/components/renderer': Renderer },
+      apiClient
+    })
+      .then(setLoaded)
       .catch((err) => setError(String(err)));
   }, [element.name, apiClient]);
 
@@ -106,14 +110,14 @@ const CustomElement = memo(function ({ element }: { element: ICustomElement }) {
   }, [element.props]);
 
   if (error) return <Alert variant="error">{error}</Alert>;
-  if (!sourceCode) return null;
+  if (!loaded) return null;
 
   return (
     <div className={`${element.display}-custom flex flex-col flex-grow`}>
       <Runner
-        code={sourceCode}
+        code={loaded.code}
         scope={{
-          import: { ...Imports, '@/components/renderer': Renderer },
+          import: loaded.imports,
           props,
           apiClient,
           updateElement,
