@@ -165,10 +165,13 @@ class TestStepClass:
         async with mock_chainlit_context as ctx:
             test_step = Step(name="test_step")
 
-            result = await test_step.send()
+            # Patch out the data layer so an ambient DATABASE_URL or a cached
+            # layer from an earlier test cannot persist the step.
+            with patch("chainlit.step.get_data_layer", return_value=None):
+                result = await test_step.send()
 
             assert result == test_step
-            assert test_step.persisted is False  # No data layer configured
+            assert test_step.persisted is False
             ctx.emitter.send_step.assert_called_once()
 
     async def test_step_send_with_elements(self, mock_chainlit_context):
