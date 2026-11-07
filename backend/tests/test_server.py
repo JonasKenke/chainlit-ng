@@ -311,6 +311,9 @@ def test_get_file_success(
         ("text/html", "attachment"),
         ("text/plain; charset=utf-8", "attachment"),
         ("image/svg+xml", "attachment"),
+        ("image/svg+xml, text/html", "attachment"),
+        ("image/svg+xml , text/html", "attachment"),
+        ("text/html, image/svg+xml", "attachment"),
         ("image/png", "inline"),
         ("application/pdf", "inline"),
         ("audio/mpeg", "inline"),
@@ -346,6 +349,7 @@ def test_get_file_disposition_prevents_inline_execution(
 
     assert response.status_code == 200
     assert response.headers["x-content-type-options"] == "nosniff"
+    assert "," not in response.headers["content-type"]
     assert response.headers["content-disposition"].startswith(disposition)
     assert 'filename="test_file"' in response.headers["content-disposition"]
 

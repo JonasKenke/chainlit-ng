@@ -3366,7 +3366,7 @@ async def get_file(
         from chainlit.element import Element
 
         file = session.files[file_id]
-        mime = file["type"]
+        mime = Element.normalize_mime(file["type"]) or "application/octet-stream"
         return FileResponse(
             file["path"],
             media_type=mime,
