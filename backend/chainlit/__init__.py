@@ -48,6 +48,7 @@ from chainlit.message import (
 )
 from chainlit.mode import Mode, ModeOption
 from chainlit.sidebar import ElementSidebar
+from chainlit.skill import get_skill, list_skills, render_skill, skills_catalog
 from chainlit.step import Step, step
 from chainlit.sync import make_async, run_sync
 from chainlit.types import (
@@ -182,8 +183,10 @@ __all__ = [
     "chat_context",
     "context",
     "data_layer",
+    "get_skill",
     "header_auth_callback",
     "input_widget",
+    "list_skills",
     "make_async",
     "oauth_callback",
     "on_app_shutdown",
@@ -207,12 +210,14 @@ __all__ = [
     "on_stop",
     "on_window_message",
     "password_auth_callback",
+    "render_skill",
     "run_sync",
     "send_window_message",
     "set_chat_profiles",
     "set_scheduled_task_models",
     "set_starter_categories",
     "set_starters",
+    "skills_catalog",
     "sleep",
     "step",
     "user_session",
