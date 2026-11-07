@@ -58,10 +58,11 @@ async def test_delete_feedback_builds_the_key_from_the_full_identifiers():
 class FakeDynamoDB:
     """Minimal DynamoDB stand-in with the UserThread GSI and 25-item batching."""
 
-    def __init__(self, items, page_size=2, unprocessed_once=False):
+    def __init__(self, items, page_size=2, unprocessed_once=False, stale_gsi_items=()):
         self.items = [dict(item) for item in items]
         self.page_size = page_size
         self.unprocessed_once = unprocessed_once
+        self.stale_gsi_items = list(stale_gsi_items)
         self.batch_sizes = []
         self.query_kwargs = []
 
@@ -87,7 +88,7 @@ class FakeDynamoDB:
         if kwargs.get("IndexName") == "UserThread":
             matched = [
                 item
-                for item in self.items
+                for item in [*self.items, *self.stale_gsi_items]
                 if item.get("UserThreadPK", {}).get("S") == pk
             ]
         else:
@@ -129,6 +130,16 @@ def _thread_item(thread_id, user_id):
     }
 
 
+def _stale_gsi_item(thread_id, user_id):
+    """A UserThread row whose base-table partition is already gone."""
+    return {
+        "PK": {"S": f"THREAD#{thread_id}"},
+        "SK": {"S": "THREAD"},
+        "UserThreadPK": {"S": f"USER#{user_id}"},
+        "UserThreadSK": {"S": "TS#2026-01-01T00:00:00"},
+    }
+
+
 def _step_item(thread_id, step_id):
     return {"PK": {"S": f"THREAD#{thread_id}"}, "SK": {"S": f"STEP#{step_id}"}}
 
@@ -162,8 +173,15 @@ def _make_storage():
     return storage
 
 
-def _make_delete_layer(items, page_size=2, unprocessed_once=False, storage=None):
-    client = FakeDynamoDB(items, page_size=page_size, unprocessed_once=unprocessed_once)
+def _make_delete_layer(
+    items, page_size=2, unprocessed_once=False, storage=None, stale_gsi_items=()
+):
+    client = FakeDynamoDB(
+        items,
+        page_size=page_size,
+        unprocessed_once=unprocessed_once,
+        stale_gsi_items=stale_gsi_items,
+    )
     layer = DynamoDBDataLayer(
         table_name="test-table",
         client=client,
@@ -192,6 +210,28 @@ async def test_delete_all_threads_removes_only_the_target_users_items():
 
     assert await layer.delete_all_threads("user-1") == 0
     assert delete_file.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_ignores_a_stale_gsi_entry():
+    storage = _make_storage()
+    layer, client = _make_delete_layer(
+        [
+            _thread_item("live-thread", "user-1"),
+            _element_item("live-thread", "live-element", "live-object"),
+        ],
+        storage=storage,
+        stale_gsi_items=[_stale_gsi_item("already-deleted-thread", "user-1")],
+    )
+
+    assert await layer.delete_all_threads("user-1") == 1
+
+    assert client.items == []
+    delete_file = cast(AsyncMock, storage.delete_file)
+    assert [call.kwargs["object_key"] for call in delete_file.await_args_list] == [
+        "live-object"
+    ]
+    assert await layer.delete_all_threads("user-1") == 0
 
 
 @pytest.mark.asyncio

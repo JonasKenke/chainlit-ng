@@ -512,8 +512,14 @@ class DynamoDBDataLayer(BaseDataLayer):
 
         object_keys: List[str] = []
         keys: List[Dict[str, Any]] = []
+        deleted_threads = 0
         for thread_id in thread_ids:
-            for item in await self._query_thread_items(thread_id):
+            thread_items = await self._query_thread_items(thread_id)
+            # A stale GSI row can outlive its base-table partition; only count
+            # threads whose THREAD marker is still there.
+            if any(item.get("SK", {}).get("S") == "THREAD" for item in thread_items):
+                deleted_threads += 1
+            for item in thread_items:
                 keys.append({"PK": item["PK"], "SK": item["SK"]})
                 object_key = item.get("objectKey", {}).get("S")
                 if (
@@ -525,7 +531,7 @@ class DynamoDBDataLayer(BaseDataLayer):
         await delete_storage_objects(self.storage_provider, object_keys)
         await self._batch_delete_items(keys)
 
-        return len(thread_ids)
+        return deleted_threads
 
     async def list_threads(
         self, pagination: "Pagination", filters: "ThreadFilter"
