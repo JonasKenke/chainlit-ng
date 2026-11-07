@@ -6,11 +6,64 @@ import { runChainlit } from './cypress/support/run';
 
 export const CHAINLIT_APP_PORT = 8000;
 
-let chainlitProcess: Awaited<ReturnType<typeof runChainlit>> | undefined;
+// Chainlit removes FILES_DIRECTORY in its lifespan shutdown, after the port is
+// already closed. Wait for the process to exit so the next spec cannot start
+// inside that window and have its `.files` directory deleted by the old app.
+const CHAINLIT_EXIT_TIMEOUT_MS = 5_000;
+
+type ChainlitProcess = Awaited<ReturnType<typeof runChainlit>>;
+
+let chainlitProcess: ChainlitProcess | undefined;
+
+async function waitForExit(chainlit: ChainlitProcess | undefined) {
+  if (!chainlit || chainlit.exitCode !== null || chainlit.signalCode !== null) {
+    return true;
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => resolve(false), CHAINLIT_EXIT_TIMEOUT_MS);
+    chainlit.once('exit', () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+}
+
+async function forceKill(chainlit: ChainlitProcess) {
+  if (chainlit.pid === undefined) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    const { default: fkill } = await import('fkill');
+    await fkill(chainlit.pid, { force: true, tree: true, silent: true });
+    return;
+  }
+
+  try {
+    process.kill(-chainlit.pid, 'SIGKILL'); // the process group spawned by run.ts
+  } catch {
+    // Already gone.
+  }
+}
 
 async function killChainlit() {
-  chainlitProcess?.kill('SIGTERM');
+  const chainlit = chainlitProcess;
   chainlitProcess = undefined;
+
+  if (chainlit) {
+    chainlit.kill('SIGTERM');
+
+    if (!(await waitForExit(chainlit))) {
+      // Shutdown can wait indefinitely for in-flight connections, e.g. a
+      // socket.io long-poll. Kill the app before the next spec starts so it
+      // cannot rmtree `.files` from under the new process.
+      await forceKill(chainlit);
+      await waitForExit(chainlit);
+    }
+  }
+
+  // Fallback for an app that is not tracked here but still holds the port.
   const { default: fkill } = await import('fkill');
   await fkill(`:${CHAINLIT_APP_PORT}`, {
     force: true,
