@@ -4,10 +4,11 @@ A skill is a Markdown file with a small frontmatter header. Its description is s
 to show to a model; its body is inert text until the application chooses to render it.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import chainlit.config as chainlit_config
 
@@ -18,6 +19,7 @@ SKILLS_DIRNAME = "skills"
 MAX_SKILLS = 200
 MAX_BODY_BYTES = 64 * 1024
 MAX_DESCRIPTION_BYTES = 1024
+MAX_MARKDOWN_BYTES = MAX_BODY_BYTES + MAX_DESCRIPTION_BYTES + 4096
 CATALOG_MAX_CHARS = 8 * 1024
 SKILL_TOOL_NAME = "load_skill"
 
@@ -37,7 +39,12 @@ class Skill:
     license: Optional[str]
     metadata: Dict[str, str]
     body: str
-    path: Path
+    path: Optional[Path] = None
+    source: str = "app"
+    enabled: bool = True
+    imported_from: Optional[str] = None
+    imported_at: Optional[str] = None
+    content_hash: Optional[str] = None
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -163,7 +170,28 @@ def _load_skill(root: Path, relative: str) -> Skill:
     except (OSError, UnicodeDecodeError) as error:
         raise SkillError(f"{path}: cannot read skill file: {error}") from error
 
+    return _build_skill(path, text, skill_id=rel.as_posix())
+
+
+def _build_skill(
+    path: Path,
+    text: str,
+    *,
+    skill_id: str,
+    source: str = "app",
+    enabled: bool = True,
+    imported_from: Optional[str] = None,
+    imported_at: Optional[str] = None,
+    content_hash: Optional[str] = None,
+) -> Skill:
+    """Validate one Markdown payload; the single parser for app and user skills."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    markdown_size = len(text.encode("utf-8"))
+    if markdown_size > MAX_MARKDOWN_BYTES:
+        raise SkillError(
+            f"{path}: skill file is {markdown_size} bytes; "
+            f"maximum is {MAX_MARKDOWN_BYTES}"
+        )
     values, metadata, body = _parse_frontmatter(path, text)
 
     name = values.get("name", "")
@@ -191,14 +219,19 @@ def _load_skill(root: Path, relative: str) -> Skill:
         )
 
     return Skill(
-        id=rel.as_posix(),
+        id=skill_id,
         name=name,
         description=description,
         version=values.get("version") or None,
         license=values.get("license") or None,
         metadata=metadata,
         body=body,
-        path=path,
+        path=path if source == "app" else None,
+        source=source,
+        enabled=enabled,
+        imported_from=imported_from,
+        imported_at=imported_at,
+        content_hash=content_hash,
     )
 
 
@@ -252,8 +285,99 @@ def load_skills(force: bool = False) -> List[Skill]:
     return _cache
 
 
-def _find_skill(name: str) -> Skill:
-    for skill in load_skills():
+def parse_skill_markdown(text: str, origin: str = "imported skill") -> Skill:
+    """Validate a skill payload without writing it to disk (import path)."""
+    return _build_skill(Path(origin), text, skill_id="", source="user", enabled=False)
+
+
+def skill_to_markdown(skill: Skill) -> str:
+    """Serialize a skill in the app-directory Markdown format (export path)."""
+    return (
+        f"---\nname: {skill.name}\ndescription: {skill.description}\n---\n{skill.body}"
+    )
+
+
+def skill_content_hash(markdown: str) -> str:
+    """Hash an imported Markdown payload so provenance can be checked later."""
+    return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+
+
+def user_skill_from_prompt(prompt: Dict[str, Any]) -> Skill:
+    """Adapt a stored prompt row with ``kind='skill'`` to the shared resolver."""
+    imported_from = (prompt.get("importedFrom") or "").replace("\n", " ")
+    return Skill(
+        id=prompt["id"],
+        name=prompt["title"],
+        description=prompt.get("description", ""),
+        version=None,
+        license=None,
+        metadata={},
+        body=prompt["content"],
+        source="user",
+        enabled=bool(prompt.get("enabled", False)),
+        imported_from=imported_from.replace("\r", " ") or None,
+        imported_at=prompt.get("importedAt"),
+        content_hash=prompt.get("contentHash"),
+    )
+
+
+async def load_user_skills(user_id: Optional[str] = None) -> List[Skill]:
+    """Load a user's enabled skills for the shared catalog/render resolver.
+
+    Returns an empty list when the feature flag is off, the app has no data layer,
+    or the data layer does not implement skills. The caller's session user is used
+    when ``user_id`` is omitted.
+    """
+    features = getattr(chainlit_config.config, "features", None)
+    if not features or not getattr(features, "skills", False):
+        return []
+
+    from chainlit.context import context_var
+    from chainlit.data import get_data_layer
+
+    data_layer = get_data_layer()
+    if not data_layer:
+        return []
+
+    if user_id is None:
+        try:
+            user = context_var.get().session.user
+        except LookupError:
+            return []
+        user_id = getattr(user, "id", None)
+        identifier = getattr(user, "identifier", None)
+        if not user_id and identifier:
+            persisted = await data_layer.get_user(identifier=identifier)
+            user_id = getattr(persisted, "id", None)
+        if not user_id:
+            return []
+
+    try:
+        prompts = await data_layer.list_skills(user_id)
+    except NotImplementedError:
+        return []
+
+    return [
+        skill
+        for skill in (user_skill_from_prompt(prompt) for prompt in prompts)
+        if skill.enabled
+    ][:MAX_SKILLS]
+
+
+def _merged_skills(extra_skills: Iterable[Skill] = ()) -> List[Skill]:
+    """Merge app and user skills; app skills win a name collision."""
+    merged = list(load_skills())
+    seen = {skill.name for skill in merged}
+    for skill in extra_skills:
+        if not skill.enabled or skill.name in seen:
+            continue
+        seen.add(skill.name)
+        merged.append(skill)
+    return merged
+
+
+def _find_skill(name: str, extra_skills: Iterable[Skill] = ()) -> Skill:
+    for skill in _merged_skills(extra_skills):
         if skill.name == name:
             return skill
     raise KeyError(f"Unknown skill: {name!r}")
@@ -265,14 +389,18 @@ def list_skills() -> List[Dict[str, Any]]:
 
 
 def get_skill(name: str) -> Dict[str, Any]:
-    """Return one skill's metadata and body."""
+    """Return one app skill's metadata and body."""
     return _find_skill(name).to_dict()
 
 
-def skills_catalog() -> str:
-    """Return compact 'name: description' lines, capped for model context."""
+def skills_catalog(extra_skills: Iterable[Skill] = ()) -> str:
+    """Return compact 'name: description' lines, capped for model context.
+
+    Pass enabled per-user skills (``await cl.load_user_skills()``) to include
+    them; both sources go through this single resolver.
+    """
     catalog = ""
-    for skill in load_skills():
+    for skill in _merged_skills(extra_skills):
         line = f"{skill.name}: {skill.description}"
         candidate = f"{catalog}\n{line}" if catalog else line
         if len(candidate) <= CATALOG_MAX_CHARS:
@@ -287,29 +415,40 @@ def skills_catalog() -> str:
     return catalog
 
 
-def render_skill(name: str) -> str:
+def render_skill(name: str, extra_skills: Iterable[Skill] = ()) -> str:
     """Return a skill's body wrapped in provenance delimiters."""
-    skill = _find_skill(name)
+    skill = _find_skill(name, extra_skills)
+    source = str(skill.path) if skill.path else f"user:{skill.id}"
+    source = source.replace("\n", " ").replace("\r", " ")
+    imported = f", imported_from: {skill.imported_from}" if skill.imported_from else ""
     body = skill.body.strip("\n")
     return (
-        f"--- BEGIN SKILL {skill.name} (id: {skill.id}, source: {skill.path}) ---\n"
+        f"--- BEGIN SKILL {skill.name} (id: {skill.id}, source: {source}"
+        f"{imported}) ---\n"
         f"{body}\n"
         f"--- END SKILL {skill.name} ---"
     )
 
 
-def skill_tool() -> Dict[str, Any]:
+def skill_tool(extra_skills: Optional[Iterable[Skill]] = None) -> Dict[str, Any]:
     """Return a provider-neutral ``load_skill`` tool spec and async handler.
 
     The handler emits a Chainlit step named after the loaded skill, so the thread
-    shows which skill fired and the loaded body stays inspectable.
+    shows which skill fired and the loaded body stays inspectable. When
+    ``extra_skills`` is omitted, the current user's enabled skills are loaded from
+    the data layer; pass a list to control the set explicitly.
     """
 
     async def handler(name: str) -> str:
+        skills = (
+            list(extra_skills) if extra_skills is not None else await load_user_skills()
+        )
         try:
-            skill = _find_skill(name)
+            skill = _find_skill(name, skills)
         except KeyError:
-            available = ", ".join(item.name for item in load_skills()) or "none"
+            available = (
+                ", ".join(item.name for item in _merged_skills(skills)) or "none"
+            )
             return f"Unknown skill {name!r}. Available skills: {available}."
 
         # The loader rejects oversize bodies; re-check so a cached registry can
@@ -321,7 +460,7 @@ def skill_tool() -> Dict[str, Any]:
                 f"bytes; maximum is {MAX_BODY_BYTES}."
             )
 
-        rendered = render_skill(skill.name)
+        rendered = render_skill(skill.name, skills)
         async with Step(name=f"skill: {skill.name}", type="tool") as step:
             step.input = name
             step.output = rendered

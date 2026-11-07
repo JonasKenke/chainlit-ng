@@ -1071,6 +1071,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 updatedAt=row["updatedAt"],
             )
             for row in result
+            if row.get("kind", "prompt") == "prompt"
         ]
 
     async def get_prompt(self, prompt_id: str) -> Optional[PromptDict]:
@@ -1084,6 +1085,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if not isinstance(result, list) or not result:
             return None
         row = result[0]
+        if row.get("kind", "prompt") != "prompt":
+            return None
         return PromptDict(
             id=row["id"],
             userId=row["userId"],
@@ -1122,6 +1125,163 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         result = await self.execute_sql(
             'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id',
             {"id": prompt_id, "user_id": user_id},
+        )
+        return isinstance(result, int) and result > 0
+
+    # ---- Per-user skills (rows in the prompts table, kind='skill') ----
+
+    _skills_columns_checked: bool = False
+
+    async def _ensure_skills_columns(self) -> None:
+        """Add skill columns to an existing prompts table, keeping old rows intact."""
+        if self._skills_columns_checked:
+            return
+        await self._ensure_prompts_table()
+
+        if self.engine.dialect.name == "sqlite":
+            columns = await self.execute_sql("PRAGMA table_info(prompts)", {})
+            existing = (
+                {row.get("name") for row in columns}
+                if isinstance(columns, list)
+                else set()
+            )
+        else:
+            columns = await self.execute_sql(
+                """
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'prompts'
+                """,
+                {},
+            )
+            existing = (
+                {row.get("column_name") for row in columns}
+                if isinstance(columns, list)
+                else set()
+            )
+
+        for name, ddl in (
+            ("kind", "TEXT NOT NULL DEFAULT 'prompt'"),
+            ("description", "TEXT NOT NULL DEFAULT ''"),
+            ("enabled", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("importedFrom", "TEXT"),
+            ("importedAt", "TEXT"),
+            ("contentHash", "TEXT"),
+        ):
+            if name not in existing:
+                await self.execute_sql(
+                    f'ALTER TABLE prompts ADD COLUMN "{name}" {ddl}', {}
+                )
+
+        await self.execute_sql(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS prompts_skill_name
+            ON prompts ("userId", "title") WHERE "kind" = 'skill'
+            """,
+            {},
+        )
+        self._skills_columns_checked = True
+
+    @staticmethod
+    def _skill_from_row(row: Dict[str, Any]) -> PromptDict:
+        return PromptDict(
+            id=row["id"],
+            userId=row["userId"],
+            title=row["title"],
+            content=row["content"],
+            isShared=bool(row.get("isShared", False)),
+            createdAt=row["createdAt"],
+            updatedAt=row["updatedAt"],
+            kind="skill",
+            description=row.get("description") or "",
+            enabled=bool(row.get("enabled", False)),
+            importedFrom=row.get("importedFrom"),
+            importedAt=row.get("importedAt"),
+            contentHash=row.get("contentHash"),
+        )
+
+    async def create_skill(self, skill: PromptDict) -> PromptDict:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: create_skill, id={skill['id']}")
+        await self._ensure_skills_columns()
+        await self.execute_sql(
+            """
+            INSERT INTO prompts
+            ("id", "userId", "title", "content", "isShared", "kind", "description", "enabled", "importedFrom", "importedAt", "contentHash", "createdAt", "updatedAt")
+            VALUES (:id, :userId, :title, :content, :isShared, 'skill', :description, :enabled, :importedFrom, :importedAt, :contentHash, :createdAt, :updatedAt)
+            """,
+            {
+                "id": skill["id"],
+                "userId": skill["userId"],
+                "title": skill["title"],
+                "content": skill["content"],
+                "isShared": skill.get("isShared", False),
+                "description": skill.get("description", ""),
+                "enabled": skill.get("enabled", False),
+                "importedFrom": skill.get("importedFrom"),
+                "importedAt": skill.get("importedAt"),
+                "contentHash": skill.get("contentHash"),
+                "createdAt": skill["createdAt"],
+                "updatedAt": skill["updatedAt"],
+            },
+        )
+        return skill
+
+    async def list_skills(self, user_id: str) -> List[PromptDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: list_skills, user_id={user_id}")
+        await self._ensure_skills_columns()
+        result = await self.execute_sql(
+            'SELECT * FROM prompts WHERE "userId" = :user_id AND "kind" = \'skill\' ORDER BY "createdAt" DESC',
+            {"user_id": user_id},
+        )
+        return (
+            [self._skill_from_row(row) for row in result]
+            if isinstance(result, list)
+            else []
+        )
+
+    async def get_skill(self, skill_id: str, user_id: str) -> Optional[PromptDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: get_skill, id={skill_id}")
+        await self._ensure_skills_columns()
+        result = await self.execute_sql(
+            'SELECT * FROM prompts WHERE "id" = :id AND "userId" = :user_id AND "kind" = \'skill\'',
+            {"id": skill_id, "user_id": user_id},
+        )
+        if not isinstance(result, list) or not result:
+            return None
+        return self._skill_from_row(result[0])
+
+    async def update_skill(self, skill: PromptDict) -> PromptDict:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: update_skill, id={skill['id']}")
+        await self._ensure_skills_columns()
+        await self.execute_sql(
+            """
+            UPDATE prompts
+            SET "title" = :title, "description" = :description, "content" = :content,
+                "enabled" = :enabled, "updatedAt" = :updatedAt
+            WHERE "id" = :id AND "userId" = :userId AND "kind" = 'skill'
+            """,
+            {
+                "id": skill["id"],
+                "userId": skill["userId"],
+                "title": skill["title"],
+                "description": skill.get("description", ""),
+                "content": skill["content"],
+                "enabled": skill.get("enabled", False),
+                "updatedAt": skill["updatedAt"],
+            },
+        )
+        return skill
+
+    async def delete_skill(self, skill_id: str, user_id: str) -> bool:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: delete_skill, id={skill_id}")
+        await self._ensure_skills_columns()
+        result = await self.execute_sql(
+            'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id AND "kind" = \'skill\'',
+            {"id": skill_id, "user_id": user_id},
         )
         return isinstance(result, int) and result > 0
 

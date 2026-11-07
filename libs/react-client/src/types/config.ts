@@ -83,6 +83,7 @@ export interface IChainlitConfig {
     edit_message?: boolean;
     favorites?: boolean;
     prompt_gallery?: boolean;
+    skills?: boolean;
     mcp?: {
       enabled?: boolean;
       servers?: {
