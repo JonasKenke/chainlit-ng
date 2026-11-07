@@ -108,6 +108,7 @@ from ._utils import is_path_inside
 
 if TYPE_CHECKING:
     from chainlit.element import CustomElement, ElementDict
+    from chainlit.session import WebsocketSession
 
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("application/javascript", ".mjs")
@@ -1890,6 +1891,11 @@ async def update_thread_element(
                 detail="You are not authorized to update elements for this session",
             )
 
+    # The session thread is server-side state; the body's threadId is not
+    # trusted for authorization.
+    element.thread_id = context.session.thread_id
+    await _authorize_custom_element(session, element, current_user)
+
     await element.update()
 
     return {"success": True}
@@ -1926,6 +1932,11 @@ async def delete_thread_element(
                 detail="You are not authorized to remove elements for this session",
             )
 
+    # The session thread is server-side state; the body's threadId is not
+    # trusted for authorization.
+    element.thread_id = context.session.thread_id
+    await _authorize_custom_element(session, element, current_user)
+
     await element.remove()
 
     return {"success": True}
@@ -1943,6 +1954,27 @@ def _sanitize_custom_element(element_dict: "ElementDict") -> "CustomElement":
         display=element_dict["display"],
         auto_expand=element_dict.get("autoExpand", True),
     )
+
+
+async def _authorize_custom_element(
+    session: "WebsocketSession",
+    element: "CustomElement",
+    current_user: Optional[User],
+) -> None:
+    """Reject mutations of elements that are not in the caller's session thread."""
+    data_layer = get_data_layer()
+    if not data_layer or not current_user:
+        return
+
+    if not await data_layer.get_element(session.thread_id, element.id):
+        # Element writes are queued until the first user message, so a new
+        # element may not have a row yet. The data layer still scopes the
+        # write to the session thread.
+        if not session.has_first_interaction:
+            return
+        raise HTTPException(status_code=404, detail="Element not found")
+
+    await is_thread_author(current_user.identifier, session.thread_id)
 
 
 @router.put("/project/thread")
