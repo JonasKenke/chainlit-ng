@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from chainlit.data.base import BaseDataLayer
 from chainlit.data.storage_clients.base import BaseStorageClient
-from chainlit.data.utils import queue_until_user_message
+from chainlit.data.utils import delete_storage_objects, queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
 from chainlit.step import StepDict
@@ -304,8 +304,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         elements = await self.execute_sql(elements_query, {"id": thread_id})
 
         if self.storage_provider is not None and isinstance(elements, list):
-            for elem in filter(lambda x: x["objectKey"], elements):
-                await self.storage_provider.delete_file(object_key=elem["objectKey"])
+            await delete_storage_objects(
+                self.storage_provider,
+                (elem["objectKey"] for elem in elements if elem["objectKey"]),
+            )
 
         # Delete feedbacks/elements/steps/thread
         feedbacks_query = """DELETE FROM feedbacks WHERE "forId" IN (SELECT "id" FROM steps WHERE "threadId" = :id)"""
@@ -331,11 +333,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             raise RuntimeError("SQLAlchemy: delete_all_threads failed")
 
         if self.storage_provider is not None and isinstance(elements, list):
-            for elem in elements:
-                if elem["objectKey"]:
-                    await self.storage_provider.delete_file(
-                        object_key=elem["objectKey"]
-                    )
+            await delete_storage_objects(
+                self.storage_provider,
+                (elem["objectKey"] for elem in elements if elem["objectKey"]),
+            )
 
         # Delete feedbacks/elements/steps/threads owned by the user
         feedbacks_query = """

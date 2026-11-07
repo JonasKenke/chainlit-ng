@@ -9,7 +9,7 @@ import asyncpg  # type: ignore
 
 from chainlit.data.base import BaseDataLayer
 from chainlit.data.storage_clients.base import BaseStorageClient
-from chainlit.data.utils import queue_until_user_message
+from chainlit.data.utils import delete_storage_objects, queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
 from chainlit.step import StepDict
@@ -467,9 +467,10 @@ class ChainlitDataLayer(BaseDataLayer):
         )
 
         if self.storage_client is not None:
-            for elem in elements_results:
-                if elem["objectKey"]:
-                    await self.storage_client.delete_file(object_key=elem["objectKey"])
+            await delete_storage_objects(
+                self.storage_client,
+                (elem["objectKey"] for elem in elements_results if elem["objectKey"]),
+            )
 
         await self.execute_query(
             'DELETE FROM "Thread" WHERE id = $1', {"thread_id": thread_id}
@@ -493,9 +494,10 @@ class ChainlitDataLayer(BaseDataLayer):
         elements = await self.execute_query(elements_query, {"user_id": user_id})
 
         if self.storage_client is not None:
-            for elem in elements:
-                if elem["objectKey"]:
-                    await self.storage_client.delete_file(object_key=elem["objectKey"])
+            await delete_storage_objects(
+                self.storage_client,
+                (elem["objectKey"] for elem in elements if elem["objectKey"]),
+            )
 
         await self.execute_query(
             'DELETE FROM "Thread" WHERE "userId" = $1', {"user_id": user_id}

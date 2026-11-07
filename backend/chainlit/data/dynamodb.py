@@ -16,7 +16,7 @@ from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from chainlit.context import context
 from chainlit.data.base import BaseDataLayer
 from chainlit.data.storage_clients.base import BaseStorageClient
-from chainlit.data.utils import queue_until_user_message
+from chainlit.data.utils import delete_storage_objects, queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
 from chainlit.step import StepDict
@@ -408,30 +408,30 @@ class DynamoDBDataLayer(BaseDataLayer):
         item = self._deserialize_item(response["Item"])
         return item["userId"]
 
-    async def delete_thread(self, thread_id: str):
-        _logger.info("DynamoDB: delete_thread thread=%s", thread_id)
+    async def _query_thread_items(self, thread_id: str) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        query_args: Dict[str, Any] = {
+            "TableName": self.table_name,
+            "KeyConditionExpression": "#pk = :pk",
+            "ExpressionAttributeNames": {"#pk": "PK"},
+            "ExpressionAttributeValues": {":pk": {"S": f"THREAD#{thread_id}"}},
+            "ConsistentRead": True,
+        }
+        while True:
+            response = self.client.query(**query_args)  # type: ignore
+            items.extend(response.get("Items", []))
+            if "LastEvaluatedKey" not in response:
+                return items
+            query_args["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
-        thread = await self.get_thread(thread_id)
-        if not thread:
-            return
-
-        items: List[Any] = thread["steps"]
-        if thread["elements"]:
-            items.extend(thread["elements"])
-
-        delete_requests = []
-        for item in items:
-            key = self._serialize_item({"PK": item["PK"], "SK": item["SK"]})
-            req = {"DeleteRequest": {"Key": key}}
-            delete_requests.append(req)
-
-        BATCH_ITEM_SIZE = 25  # pylint: disable=invalid-name
-        for i in range(0, len(delete_requests), BATCH_ITEM_SIZE):
-            chunk = delete_requests[i : i + BATCH_ITEM_SIZE]
+    async def _batch_delete_items(self, keys: List[Dict[str, Any]]):
+        batch_item_size = 25
+        for i in range(0, len(keys), batch_item_size):
+            chunk = [
+                {"DeleteRequest": {"Key": key}} for key in keys[i : i + batch_item_size]
+            ]
             response = self.client.batch_write_item(
-                RequestItems={
-                    self.table_name: chunk,  # type: ignore
-                }
+                RequestItems={self.table_name: chunk}  # type: ignore
             )
 
             backoff_time = 1
@@ -445,6 +445,37 @@ class DynamoDBDataLayer(BaseDataLayer):
                     RequestItems=response["UnprocessedItems"]
                 )
 
+    async def delete_thread(self, thread_id: str):
+        _logger.info("DynamoDB: delete_thread thread=%s", thread_id)
+
+        items = await self._query_thread_items(thread_id)
+        if not items:
+            return
+
+        # Delete the thread's items first and the THREAD marker last, re-querying
+        # until the partition holds only the marker: a step or element written
+        # while deleting must not be orphaned.
+        while True:
+            keys = [
+                {"PK": item["PK"], "SK": item["SK"]}
+                for item in items
+                if item["SK"]["S"] != "THREAD"
+            ]
+            if not keys:
+                break
+            # Read the keys from every re-query: an element written during the
+            # deletion has a blob the initial query never saw, and deleting its
+            # row without the blob leaves personal data with no handle.
+            object_keys = [
+                item["objectKey"]["S"]
+                for item in items
+                if item.get("SK", {}).get("S", "").startswith("ELEMENT#")
+                and item.get("objectKey", {}).get("S")
+            ]
+            await delete_storage_objects(self.storage_provider, object_keys)
+            await self._batch_delete_items(keys)
+            items = await self._query_thread_items(thread_id)
+
         self.client.delete_item(
             TableName=self.table_name,
             Key={
@@ -452,6 +483,55 @@ class DynamoDBDataLayer(BaseDataLayer):
                 "SK": {"S": "THREAD"},
             },
         )
+
+    async def delete_all_threads(self, user_id: str) -> int:
+        _logger.info("DynamoDB: delete_all_threads user=%s", user_id)
+
+        # Collect every thread id before deleting anything: deleting while the GSI
+        # paginates would shift the result set under the cursor.
+        query_args: Dict[str, Any] = {
+            "TableName": self.table_name,
+            "IndexName": "UserThread",
+            "KeyConditionExpression": "#UserThreadPK = :pk",
+            "ExpressionAttributeNames": {"#UserThreadPK": "UserThreadPK"},
+            "ExpressionAttributeValues": {":pk": {"S": f"USER#{user_id}"}},
+        }
+        thread_ids: List[str] = []
+        while True:
+            response = self.client.query(**query_args)  # type: ignore
+            for item in response.get("Items", []):
+                pk = item.get("PK", {}).get("S")
+                if pk:
+                    thread_ids.append(pk.removeprefix("THREAD#"))
+            if "LastEvaluatedKey" not in response:
+                break
+            query_args["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+        if not thread_ids:
+            return 0
+
+        object_keys: List[str] = []
+        keys: List[Dict[str, Any]] = []
+        deleted_threads = 0
+        for thread_id in thread_ids:
+            thread_items = await self._query_thread_items(thread_id)
+            # A stale GSI row can outlive its base-table partition; only count
+            # threads whose THREAD marker is still there.
+            if any(item.get("SK", {}).get("S") == "THREAD" for item in thread_items):
+                deleted_threads += 1
+            for item in thread_items:
+                keys.append({"PK": item["PK"], "SK": item["SK"]})
+                object_key = item.get("objectKey", {}).get("S")
+                if (
+                    item.get("SK", {}).get("S", "").startswith("ELEMENT#")
+                    and object_key
+                ):
+                    object_keys.append(object_key)
+
+        await delete_storage_objects(self.storage_provider, object_keys)
+        await self._batch_delete_items(keys)
+
+        return deleted_threads
 
     async def list_threads(
         self, pagination: "Pagination", filters: "ThreadFilter"

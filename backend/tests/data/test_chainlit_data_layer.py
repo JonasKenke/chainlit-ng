@@ -466,6 +466,51 @@ def sqlite_chainlit_layer(
 
 
 @pytest.mark.asyncio
+async def test_delete_all_threads_keeps_rows_when_storage_delete_fails(
+    sqlite_chainlit_layer,
+    mock_storage_client: BaseStorageClient,
+):
+    layer, conn = sqlite_chainlit_layer
+    conn.execute(
+        'INSERT INTO "User" (id, identifier) VALUES (?, ?)',
+        ("target-user", "target"),
+    )
+    conn.execute(
+        'INSERT INTO "Thread" (id, "userId") VALUES (?, ?)',
+        ("target-thread", "target-user"),
+    )
+    conn.execute(
+        'INSERT INTO "Step" (id, "threadId") VALUES (?, ?)',
+        ("target-step", "target-thread"),
+    )
+    conn.execute(
+        'INSERT INTO "Element" (id, "threadId", "stepId", "objectKey") '
+        "VALUES (?, ?, ?, ?)",
+        ("target-element", "target-thread", "target-step", "target-object"),
+    )
+    conn.commit()
+
+    cast(AsyncMock, mock_storage_client.delete_file).return_value = False
+
+    with pytest.raises(RuntimeError, match="storage object"):
+        await layer.delete_all_threads("target-user")
+
+    assert (
+        conn.execute(
+            'SELECT COUNT(*) FROM "Thread" WHERE "userId" = ?', ("target-user",)
+        ).fetchone()[0]
+        == 1
+    )
+    assert (
+        conn.execute(
+            'SELECT COUNT(*) FROM "Element" WHERE "threadId" = ?',
+            ("target-thread",),
+        ).fetchone()[0]
+        == 1
+    )
+
+
+@pytest.mark.asyncio
 async def test_delete_all_threads_only_deletes_target_user(
     sqlite_chainlit_layer,
     mock_storage_client: BaseStorageClient,

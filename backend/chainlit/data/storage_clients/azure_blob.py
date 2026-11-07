@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Union
 
+from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobSasPermissions, ContentSettings, generate_blob_sas
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
 
@@ -88,6 +89,9 @@ class AzureBlobStorageClient(BaseStorageClient):
         try:
             blob_client = self.container_client.get_blob_client(blob=object_key)
             await blob_client.delete_blob()
+            return True
+        except ResourceNotFoundError:
+            # Already gone: an erasure retry must not fail on earlier progress.
             return True
         except Exception as e:
             logger.warning(f"AzureBlobStorageClient, delete_file error: {e}")
