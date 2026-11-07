@@ -5,7 +5,7 @@
 **CVE**: CVE-2026-45018 (SPL-2026-001) / CVE-2026-45019 (SPL-2026-002)
 **Severity**: Critical (CVSS v3.1: 9.8) / High (CVSS v3.1: 7.2)
 **Affected versions**: upstream `v2.4.0rc0` – `v2.11.x`; fork `2.12.0` builds before merge `3320cae9`. Both only with `features.mcp.enabled = true`.
-**Fixed in**: upstream `v2.12.0` (release tag `2.12.0`, commit `0565fd0e`); fork `2.12.0` port (PR #20, merge `3320cae9`)
+**Fixed in**: upstream `v2.12.0` (release tag `2.12.0`, commit `0565fd0e`); fork `main` since merge `3320cae9` (next release; see `CHANGELOG.md`)
 **Default**: MCP is off by default (`features.mcp.enabled = false`)
 
 > **Fork note.** This advisory is ported from the upstream Chainlit advisory. The fork
@@ -294,7 +294,7 @@ last argument. See [Per-user OAuth for MCP connections](mcp-oauth.md).
 
 ### 5. Client library changes
 
-`@chainlit/react-client` `0.6.0` is replaced by `0.7.0` for this port.
+The next `@chainlit/react-client` release ships `0.7.0` for this port (the manifest is still `0.6.0`).
 
 | 2.11 method                                                             | 2.12.0 replacement                                                                |
 | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
