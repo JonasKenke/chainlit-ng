@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
@@ -418,6 +419,69 @@ class TestStepDecorator:
             step_dict = call_args[0][0]
             assert "status" in step_dict["output"]
             assert "success" in step_dict["output"]
+
+    @pytest.mark.parametrize(
+        ("return_value", "expected"),
+        [(0, "0"), (False, "False"), ([], "[]"), ("", "")],
+        ids=["zero", "false", "empty-list", "empty-string"],
+    )
+    async def test_step_decorator_keeps_falsy_output_async(
+        self, mock_chainlit_context, return_value, expected
+    ):
+        """Falsy non-None return values are kept as step output (async path)."""
+        async with mock_chainlit_context as ctx:
+
+            @step(name="test_step")
+            async def returns_falsy():
+                return return_value
+
+            assert await returns_falsy() == return_value
+
+            step_dict = ctx.emitter.update_step.call_args[0][0]
+            assert step_dict["output"] == expected
+
+    @pytest.mark.parametrize(
+        ("return_value", "expected"),
+        [(0, "0"), (False, "False"), ([], "[]"), ("", "")],
+        ids=["zero", "false", "empty-list", "empty-string"],
+    )
+    async def test_step_decorator_keeps_falsy_output_sync(
+        self, mock_chainlit_context, return_value, expected
+    ):
+        """Falsy non-None return values are kept as step output (sync path)."""
+        async with mock_chainlit_context as ctx:
+
+            @step(name="test_step")
+            def returns_falsy():
+                return return_value
+
+            assert returns_falsy() == return_value
+            # The sync wrapper sends the step update from a scheduled task.
+            await asyncio.sleep(0)
+
+            step_dict = ctx.emitter.update_step.call_args[0][0]
+            assert step_dict["output"] == expected
+
+    async def test_step_decorator_leaves_output_unset_for_none(
+        self, mock_chainlit_context
+    ):
+        """A None return value leaves step output unset on both paths."""
+        async with mock_chainlit_context as ctx:
+
+            @step(name="async_step")
+            async def returns_none_async():
+                return None
+
+            @step(name="sync_step")
+            def returns_none_sync():
+                return None
+
+            await returns_none_async()
+            assert ctx.emitter.update_step.call_args[0][0]["output"] == ""
+
+            returns_none_sync()
+            await asyncio.sleep(0)
+            assert ctx.emitter.update_step.call_args[0][0]["output"] == ""
 
     async def test_step_decorator_handles_exception(self, mock_chainlit_context):
         """Test that decorator handles exceptions in wrapped function."""
