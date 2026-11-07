@@ -295,6 +295,16 @@ class TestMcpConnectionEdgeCases:
         assert "Development" in http_conn.name
 
 
+def test_validate_mcp_url_rejects_wildcards_outside_host_and_path():
+    for entry in (
+        "*://api.example.com/mcp",
+        "https://api.example.com:*/mcp",
+        "https://user:*@api.example.com/mcp",
+    ):
+        with pytest.raises(ValueError, match="invalid entry"):
+            validate_mcp_url("https://api.example.com/mcp", [entry])
+
+
 @pytest.mark.parametrize(
     ("url", "allowed_urls", "should_raise"),
     [
@@ -319,6 +329,84 @@ class TestMcpConnectionEdgeCases:
         ("https://api.example.com/v1-evil", ["https://api.example.com/v1"], True),
         ("https://api.example.com/v1beta", ["https://api.example.com/v1"], True),
         ("file:///etc/passwd", ["https://allowed.com/api"], True),
+        # Host wildcard: one or more subdomain labels, never the apex and never
+        # a lookalike or a different registrable domain.
+        ("https://tenant.example.com/mcp", ["https://*.example.com"], False),
+        ("https://a.b.example.com/mcp", ["https://*.example.com"], False),
+        ("https://tenant.example.com", ["https://*.example.com"], False),
+        (
+            "https://tenant.example.com:443/mcp",
+            ["https://*.example.com"],
+            False,
+        ),
+        ("https://example.com/mcp", ["https://*.example.com"], True),
+        ("https://example.com.evil.com/mcp", ["https://*.example.com"], True),
+        ("https://tenant.example.com.evil.com/mcp", ["https://*.example.com"], True),
+        ("https://xexample.com/mcp", ["https://*.example.com"], True),
+        ("https://127.0.0.1/mcp", ["https://*.0.0.1"], True),
+        ("http://tenant.example.com/mcp", ["https://*.example.com"], True),
+        (
+            "https://tenant.example.com:8443/mcp",
+            ["https://*.example.com"],
+            True,
+        ),
+        # Path wildcard: one segment per '*', then the matched segment's
+        # sub-tree as for any other allowed path.
+        (
+            "https://mcp.example.com/tenant/alice",
+            ["https://mcp.example.com/tenant/*"],
+            False,
+        ),
+        (
+            "https://mcp.example.com/tenant/alice/mcp",
+            ["https://mcp.example.com/tenant/*"],
+            False,
+        ),
+        (
+            "https://mcp.example.com/tenant/name-1/messages",
+            ["https://mcp.example.com/tenant/name-*"],
+            False,
+        ),
+        (
+            "https://mcp.example.com/tenant/alice/mcp/tools",
+            ["https://mcp.example.com/tenant/*/mcp"],
+            False,
+        ),
+        (
+            "https://tenant.example.com/tenant/alice",
+            ["https://*.example.com/tenant/*"],
+            False,
+        ),
+        (
+            "https://mcp.example.com/other/alice",
+            ["https://mcp.example.com/tenant/*"],
+            True,
+        ),
+        (
+            "https://mcp.example.com/tenant-evil/alice",
+            ["https://mcp.example.com/tenant/*"],
+            True,
+        ),
+        (
+            "https://mcp.example.com/tenant/alice/other/mcp",
+            ["https://mcp.example.com/tenant/*/mcp"],
+            True,
+        ),
+        (
+            "https://mcp.example.com/tenant/../../admin",
+            ["https://mcp.example.com/tenant/*"],
+            True,
+        ),
+        (
+            "https://mcp.example.com/tenant/%2e%2e/admin",
+            ["https://mcp.example.com/tenant/*"],
+            True,
+        ),
+        ("https://mcp.example.com/tenant", ["https://mcp.example.com/tenant/*"], True),
+        ("https://mcp.example.com/tenant/", ["https://mcp.example.com/tenant/*"], True),
+        # A wildcard in the request scheme is rejected like any other
+        # non-http(s) scheme.
+        ("*://api.example.com/mcp", ["https://api.example.com/mcp"], True),
         # Ambiguous paths must be rejected, never normalised.
         ("https://allowed.com/api/../../admin", ["https://allowed.com/api"], True),
         ("https://allowed.com/api/./../admin", ["https://allowed.com/api"], True),
@@ -489,6 +577,24 @@ class TestDestinationGrants:
             await hook(
                 httpx2.Request("POST", "https://allowed.com/mcp/users/alice/messages")
             )
+        finally:
+            await client.aclose()
+
+    async def test_allowlist_hook_uses_wildcards(self):
+        client = make_mcp_http_client_factory(
+            _destination_in_allowlist(["https://*.example.com/tenant/*"])
+        )()
+        try:
+            hook = client.event_hooks["request"][0]
+            await hook(httpx2.Request("POST", "https://a.example.com/tenant/alice/mcp"))
+            with pytest.raises(McpDestinationError):
+                await hook(
+                    httpx2.Request("POST", "https://example.com/tenant/alice/mcp")
+                )
+            with pytest.raises(McpDestinationError):
+                await hook(
+                    httpx2.Request("POST", "https://a.example.com/other/alice/mcp")
+                )
         finally:
             await client.aclose()
 
@@ -2097,6 +2203,48 @@ def test_oauth_origins_are_validated_at_config_load():
 
     configured = McpFeature(oauth_authorization_origins=["https://as.example"])
     assert configured.oauth_authorization_origins == ["https://as.example"]
+
+
+def test_user_server_allowed_urls_are_validated_at_config_load():
+    from chainlit.config import McpUserServersFeature
+
+    for entry in (
+        "*://example.com",
+        "ht*tp://example.com",
+        "https://example.com:*/mcp",
+        "https://*:secret@example.com",
+        "https://mcp.*.example.com",
+        "https://example.*",
+        "https://ex*.example.com",
+        "https://*/mcp",
+        "https://*../mcp",
+        "https://*./mcp",
+        "https://*.example.com./mcp",
+        "https://example.com/mcp?tenant=*",
+        "https://example.com/mcp#*",
+        "https://example.com/api/%2A",
+        "https://example.com/api/*/../admin",
+    ):
+        with pytest.raises(ValidationError):
+            McpUserServersFeature(allowed_urls=[entry])
+
+    with pytest.raises(ValidationError, match=r"allowed_urls\[0\].*single leading"):
+        McpUserServersFeature(allowed_urls=["https://mcp.*.example.com"])
+
+    configured = McpUserServersFeature(
+        allowed_urls=[
+            "https://*.example.com",
+            "https://mcp.example.com/tenant/*",
+            "https://mcp.example.com/tenant/*x",
+            "https://plain.example.com/api",
+        ]
+    )
+    assert configured.allowed_urls == [
+        "https://*.example.com",
+        "https://mcp.example.com/tenant/*",
+        "https://mcp.example.com/tenant/*x",
+        "https://plain.example.com/api",
+    ]
 
 
 class TestUserProvidedMcpServers:

@@ -273,7 +273,11 @@ allowed_urls = ["https://mcp.example.com"]
 
 - An empty `allowed_urls` denies every user-provided server.
 - Entries match scheme, hostname and effective port, plus an optional path subtree
-  (`https://mcp.example.com/team` allows only that subtree).
+  (`https://mcp.example.com/team` allows only that subtree). A leading `*.` host
+  label matches subdomains (not the apex), and `*` in a path stays within one
+  segment, though the matched segment's sub-tree is still allowed as for a
+  literal path; wildcards in scheme, port, credentials, query or fragment are
+  config errors.
 - Only `http`/`https` schemes are accepted; prefer `https` for remote servers.
 - Per-user OAuth (streamable HTTP only) requires `https` outside loopback; see
   [Per-user OAuth for MCP connections](mcp-oauth.md).
