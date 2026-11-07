@@ -128,7 +128,7 @@ def step(
                         logger.exception(e)
                     result = await func(*args, **kwargs)
                     try:
-                        if result and not step.output:
+                        if result is not None and not step.output:
                             step.output = result
                     except Exception as e:
                         step.is_error = True
@@ -160,7 +160,7 @@ def step(
                         logger.exception(e)
                     result = func(*args, **kwargs)
                     try:
-                        if result and not step.output:
+                        if result is not None and not step.output:
                             step.output = result
                     except Exception as e:
                         step.is_error = True
