@@ -21,6 +21,10 @@ class BaseStorageClient(ABC):
 
     @abstractmethod
     async def delete_file(self, object_key: str) -> bool:
+        """Delete an object, returning True when it is gone.
+
+        An object that never existed also counts as gone.
+        """
         pass
 
     @abstractmethod

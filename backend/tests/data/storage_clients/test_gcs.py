@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google.api_core.exceptions import NotFound
 
 from chainlit.data.storage_clients.base import storage_expiry_time
 from chainlit.data.storage_clients.gcs import GCSStorageClient
@@ -291,6 +292,19 @@ class TestGCSStorageClient:
         mock_gcs_client["bucket"].blob.assert_called_once_with("test/path/file.txt")
         mock_gcs_client["blob"].delete.assert_called_once()
         assert result is True
+
+    def test_sync_delete_file_not_found(self, mock_gcs_client):
+        """Deleting an already-missing object counts as success."""
+        client = GCSStorageClient(
+            bucket_name="test-bucket",
+            project_id="test-project",
+            client_email="test@example.com",
+            private_key="test-key",
+        )
+
+        mock_gcs_client["blob"].delete.side_effect = NotFound("missing")
+
+        assert client.sync_delete_file("test/path/file.txt") is True
 
     def test_sync_delete_file_error(self, mock_gcs_client):
         """Test error handling during file deletion."""

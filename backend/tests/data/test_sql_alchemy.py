@@ -484,6 +484,42 @@ async def test_delete_all_threads_only_deletes_target_user(
         assert len(other_rows) == 2
 
 
+async def test_delete_thread_keeps_rows_when_storage_delete_fails(
+    data_layer: SQLAlchemyDataLayer, mock_storage_client: BaseStorageClient
+):
+    target = await data_layer.create_user(User(identifier="delete_thread_failure"))
+    assert target
+
+    await _seed_thread_with_children(data_layer, target.id, "target")
+    cast(AsyncMock, mock_storage_client.delete_file).return_value = False
+
+    with pytest.raises(RuntimeError, match="storage object"):
+        await data_layer.delete_thread("target_thread_0")
+
+    thread = await data_layer.get_thread("target_thread_0")
+    assert thread is not None
+
+
+async def test_delete_all_threads_keeps_rows_when_storage_delete_fails(
+    data_layer: SQLAlchemyDataLayer, mock_storage_client: BaseStorageClient
+):
+    target = await data_layer.create_user(User(identifier="delete_all_failure"))
+    assert target
+
+    await _seed_thread_with_children(data_layer, target.id, "target")
+    cast(AsyncMock, mock_storage_client.delete_file).return_value = False
+
+    with pytest.raises(RuntimeError, match="storage object"):
+        await data_layer.delete_all_threads(target.id)
+
+    rows = await data_layer.execute_sql(
+        query='SELECT "id" FROM threads WHERE "userId" = :user_id',
+        parameters={"user_id": target.id},
+    )
+    assert isinstance(rows, list)
+    assert len(rows) == 2
+
+
 async def test_delete_all_threads_raises_when_sql_fails(
     data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
 ):

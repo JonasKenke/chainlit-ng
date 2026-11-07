@@ -63,6 +63,7 @@ class FakeDynamoDB:
         self.page_size = page_size
         self.unprocessed_once = unprocessed_once
         self.batch_sizes = []
+        self.query_kwargs = []
 
     def _page(self, matched, exclusive_start_key):
         start = 0
@@ -81,6 +82,7 @@ class FakeDynamoDB:
         return response
 
     def query(self, **kwargs):
+        self.query_kwargs.append(kwargs)
         pk = kwargs["ExpressionAttributeValues"][":pk"]["S"]
         if kwargs.get("IndexName") == "UserThread":
             matched = [
@@ -107,6 +109,14 @@ class FakeDynamoDB:
                 if not (item["PK"] == key["PK"] and item["SK"] == key["SK"])
             ]
         return {"UnprocessedItems": {table: unprocessed}} if unprocessed else {}
+
+    def delete_item(self, TableName, Key):
+        self.items = [
+            item
+            for item in self.items
+            if not (item["PK"] == Key["PK"] and item["SK"] == Key["SK"])
+        ]
+        return {}
 
 
 def _thread_item(thread_id, user_id):
@@ -214,6 +224,63 @@ async def test_delete_all_threads_batches_at_25_and_retries_unprocessed(monkeypa
     assert client.items == []
     assert max(client.batch_sizes) == 25
     assert len(client.batch_sizes) > 2
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_retries_after_a_partial_storage_failure():
+    storage = _make_storage()
+    storage.delete_file.side_effect = [True, False, True, True]
+    items = [
+        _thread_item("target-thread", "user-1"),
+        _element_item("target-thread", "element-a", "object-a"),
+        _element_item("target-thread", "element-b", "object-b"),
+    ]
+    layer, client = _make_delete_layer(items, storage=storage)
+
+    with pytest.raises(RuntimeError, match="storage object"):
+        await layer.delete_thread("target-thread")
+    assert client.items != []
+
+    await layer.delete_thread("target-thread")
+
+    assert client.items == []
+    assert cast(AsyncMock, storage.delete_file).await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_retries_after_a_partial_storage_failure():
+    storage = _make_storage()
+    storage.delete_file.side_effect = [True, False, True, True]
+    items = [
+        _thread_item("thread-a", "user-1"),
+        _element_item("thread-a", "element-a", "object-a"),
+        _thread_item("thread-b", "user-1"),
+        _element_item("thread-b", "element-b", "object-b"),
+    ]
+    layer, client = _make_delete_layer(items, storage=storage)
+
+    with pytest.raises(RuntimeError, match="storage object"):
+        await layer.delete_all_threads("user-1")
+    assert client.items != []
+
+    assert await layer.delete_all_threads("user-1") == 2
+    assert client.items == []
+    assert cast(AsyncMock, storage.delete_file).await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_queries_the_partition_with_consistent_read():
+    layer, client = _make_delete_layer(
+        [
+            _thread_item("target-thread", "user-1"),
+            _step_item("target-thread", "step-0"),
+        ]
+    )
+
+    await layer.delete_thread("target-thread")
+
+    assert client.query_kwargs
+    assert all(kwargs.get("ConsistentRead") is True for kwargs in client.query_kwargs)
 
 
 @pytest.mark.asyncio

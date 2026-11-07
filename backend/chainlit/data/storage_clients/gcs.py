@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Union
 
+from google.api_core.exceptions import NotFound
 from google.auth import default
 from google.cloud import storage  # type: ignore
 from google.oauth2 import service_account
@@ -92,6 +93,9 @@ class GCSStorageClient(BaseStorageClient):
     def sync_delete_file(self, object_key: str) -> bool:
         try:
             self.bucket.blob(object_key).delete()
+            return True
+        except NotFound:
+            # Already gone: an erasure retry must not fail on earlier progress.
             return True
         except Exception as e:
             logger.warning(f"GCSStorageClient, delete_file error: {e}")
