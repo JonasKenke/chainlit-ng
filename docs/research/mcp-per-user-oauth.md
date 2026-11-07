@@ -47,7 +47,7 @@ AC.
 | H1.3 second opt-in | New default-off `[features.mcp.user_oauth]` with `enabled` + start rate limit and pending cap (§5.4, §5.6).                                                                                                                                                                 |
 | H1.4 normalization | `normalize_origin()` compares `(scheme, host, port)` exactly, rejects userinfo/non-http(s)/plain-http-off-loopback (§5.1). DNS rebinding stays a stated residual (§6, R13).                                                                                                 |
 | H1.5 guard tests   | Enumerated in S4a-3…S4a-7 and S4b-1/S4b-2/S4b-11, including both second-review bypass variants (§9).                                                                                                                                                                        |
-| H1.6 T5/R2         | T5 and R2 rewritten: the guard closes OAuth-path steering only; the plain MCP path keeps its pre-existing SSRF surface (§6, §10).                                                                                                                                           |
+| H1.6 T5/R2         | T5 and R2 rewritten: the guard closes OAuth-path steering only; the plain MCP path kept its pre-existing SSRF surface at design time, and the 2.12.0 port added the user-server allowlist and destination checks (§6, R2).                                                  |
 | M1 deadlines       | `asyncio.wait_for` on both waits, monotonic TTL, a timer task that actually wakes the waiter, caps, cancel paths, exactly one event (§5.6, S2).                                                                                                                             |
 | M2 growth          | Per-user/global entry caps with LRU eviction, DCR info deleted on abandon/failure when no token was written, client-info TTL, start rate limit (§5.3, §5.6, S1).                                                                                                            |
 | M3 headers         | With `useOAuth`, `authorization`/`proxy-authorization`/`cookie` are rejected `400` (§5.2 step 2g, S4b-5).                                                                                                                                                                   |
@@ -87,25 +87,26 @@ explicitly listed origin.
 
 ## 1. Problem and constraints
 
-HTTP MCP connections in this fork authenticate with static headers declared in
-the connection form (`ConnectStreamableHttpMCPRequest.headers`). There is no way
-for an individual user to sign in to an MCP server, so every deployment either
+At design time, HTTP MCP connections in this fork authenticated with static
+headers declared in the connection form
+(`ConnectStreamableHttpMCPRequest.headers`). There was no way for an individual
+user to sign in to an MCP server, so every deployment either
 shares one credential or has none.
 
 Constraints that shape the design:
 
-| #   | Constraint                                                                          | Consequence                                                                                                                                   |
-| --- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1  | Chainlit is one multi-user server, not a desktop client                             | Every token has an owner; no process-global "the user".                                                                                       |
-| C2  | The SDK's `TokenStorage` interface takes no arguments                               | Isolation must be provided by handing the SDK a pre-scoped view, not by the SDK keying anything.                                              |
-| C3  | The authorization redirect leaves Chainlit and returns on a route every user shares | `state` is the only correlation handle, and it must be bound to the authenticated caller.                                                     |
-| C4  | Deployments sit behind proxies and at sub-paths (`CHAINLIT_ROOT_PATH`)              | The callback URL and the route must be derived from the same source as the login callback; no request may be held open across the round-trip. |
-| C5  | Authentication is optional in Chainlit                                              | OAuth is refused when there is no authenticated user.                                                                                         |
-| C6  | All changes must be backward compatible (`AGENTS.md`)                               | New behaviour only behind new opt-in inputs; existing request/response shapes untouched.                                                      |
-| C7  | The fork has no persistence layer guarantee                                         | Tokens stay in memory; a restart forces re-authorization.                                                                                     |
-| C8  | The fork is on `mcp>=2.0.0,<3.0.0`, venv 2.3.0                                      | The SDK surface differs from what PR #3013 was written against (see §3).                                                                      |
-| C9  | `POST /mcp` takes **arbitrary user URLs**; this fork has no `allowed_urls`          | The OAuth flow starts from an attacker-chosen origin, so the AS allowlist must be a hard gate and must not trust that origin (H1).            |
-| C10 | The store is per process                                                            | Single-worker deployments only; multi-worker needs a shared store (L3, documented).                                                           |
+| #   | Constraint                                                                                                                                   | Consequence                                                                                                                                   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | Chainlit is one multi-user server, not a desktop client                                                                                      | Every token has an owner; no process-global "the user".                                                                                       |
+| C2  | The SDK's `TokenStorage` interface takes no arguments                                                                                        | Isolation must be provided by handing the SDK a pre-scoped view, not by the SDK keying anything.                                              |
+| C3  | The authorization redirect leaves Chainlit and returns on a route every user shares                                                          | `state` is the only correlation handle, and it must be bound to the authenticated caller.                                                     |
+| C4  | Deployments sit behind proxies and at sub-paths (`CHAINLIT_ROOT_PATH`)                                                                       | The callback URL and the route must be derived from the same source as the login callback; no request may be held open across the round-trip. |
+| C5  | Authentication is optional in Chainlit                                                                                                       | OAuth is refused when there is no authenticated user.                                                                                         |
+| C6  | All changes must be backward compatible (`AGENTS.md`)                                                                                        | New behaviour only behind new opt-in inputs; existing request/response shapes untouched.                                                      |
+| C7  | The fork has no persistence layer guarantee                                                                                                  | Tokens stay in memory; a restart forces re-authorization.                                                                                     |
+| C8  | The fork is on `mcp>=2.0.0,<3.0.0`, venv 2.3.0                                                                                               | The SDK surface differs from what PR #3013 was written against (see §3).                                                                      |
+| C9  | `POST /mcp` took **arbitrary user URLs** when this design was written (no `allowed_urls`); the 2.12.0 port added `user_servers.allowed_urls` | The OAuth flow starts from an attacker-chosen origin, so the AS allowlist must be a hard gate and must not trust that origin (H1).            |
+| C10 | The store is per process                                                                                                                     | Single-worker deployments only; multi-worker needs a shared store (L3, documented).                                                           |
 
 ## 2. What upstream #3013 does, and why it cannot be cherry-picked
 
@@ -115,7 +116,7 @@ It was written against an upstream MCP integration this fork did not have when t
 | #3013 depends on                                                                                                                                                            | In this fork at design time                                                                                                                                            |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Named developer servers `[[features.mcp.servers]]`, `SseMcpServer` / `StreamableHttpMcpServer` config models, `McpServerOAuth`, `oauth = { authorization_origins = [...] }` | **Absent.** `McpFeature` (`backend/chainlit/config.py:323-329`) has only `enabled` + per-transport toggles.                                                            |
-| `features.mcp.user_servers` opt-in and `allowed_urls` allowlist                                                                                                             | **Absent.** `POST /mcp` accepts any user-supplied URL.                                                                                                                 |
+| `features.mcp.user_servers` opt-in and `allowed_urls` allowlist                                                                                                             | **Absent at design time.** `POST /mcp` accepted any user-supplied URL.                                                                                                 |
 | Destination pinning: `_destination_on_origin`, `McpDestinationError`, `make_mcp_http_client_factory`, `validate_mcp_url`, `validate_mcp_headers`                            | **Absent.** `backend/chainlit/mcp.py` is 99 lines: four Pydantic models plus `validate_mcp_command`.                                                                   |
 | `stop_mcp_task`, `swap_mcp_session`, `_MCP_CONNECT_TIMEOUT_HTTP`, `_mcp_connects_awaiting_authorization`                                                                    | **Absent.** `backend/chainlit/server.py:2137` awaits `ready_event.wait()` with no timeout at all.                                                                      |
 | Socket events `mcp_connected` / `mcp_connection_failed`; `isUserProvided`; `migrateStoredMcps`; `libs/react-client/src/utils/mcp.ts`; named-server UI                       | **Absent.** `IMcp` is 10 lines and `readStoredMcps()` (`state.ts:80`) is an unvalidated `JSON.parse`.                                                                  |
@@ -341,8 +342,8 @@ Why this closes both second-review bypasses:
 
 H1's two reported bypasses are closed; the server origin grants no
 authorization-server capability. Remaining network residuals are DNS rebinding
-of a listed AS (§6, R13), the pre-existing plain-path SSRF (§6, R2), and the
-custom-PRM availability limitation above (R10). None of them lets a
+of a listed AS (§6, R13), plain-path SSRF inside the user-server allowlist
+(§6, R2), and the custom-PRM availability limitation above (R10). None of them lets a
 user-chosen server act as an authorization server.
 
 **M4 — key derivation.** `canonical_server_key` must not merge two tenants.
@@ -503,8 +504,8 @@ oauth_authorization_origins = []
 
 [features.mcp.user_oauth]
 # Second, independent opt-in for OAuth against user-supplied MCP servers.
-# POST /mcp accepts arbitrary URLs in this fork (no allowed_urls), so an
-# authenticated user chooses the server and therefore the authorization server.
+# User-provided servers are allowed only under user_servers.allowed_urls;
+# within that list, the user chooses the server and therefore the AS.
 enabled = false
 max_starts_per_user_per_minute = 5
 max_pending_per_user = 3
@@ -534,9 +535,11 @@ max_pending_per_user = 3
   - Single process only: a callback that lands on another worker cannot see the
     pending flow or the token (L3).
 
-No per-server `oauth` table: this fork has no named servers. When named servers
-land, the same store and provider take a config-derived flag and allowlist
-instead of a request field — a wiring change, not a redesign.
+No per-server `oauth` table: named servers now exist, but they do not use
+per-user OAuth (only user-provided streamable-HTTP servers do). Named-server
+OAuth would reuse the same store and provider with a config-derived flag and
+allowlist instead of a request field — a wiring change, not a redesign (upstream
+#3013 follow-up).
 
 ### 5.5 Logout and expiry
 
@@ -636,10 +639,12 @@ Out of scope, and stated so nobody assumes otherwise:
 
 - TLS termination, the MCP server's own authorization decisions, and malicious
   _developers_ (they own the config and the process).
-- **Plain-path SSRF.** `POST /mcp` accepts any URL and this fork has no
-  `allowed_urls`; that is a pre-existing gap. The OAuth guard closes
-  **OAuth-path** steering only — it does not close, and must not be described as
-  closing, SSRF through the plain (non-OAuth) transport (H1.6, R2).
+- **Plain-path SSRF within an allowed origin.** Plain user-provided MCP
+  connections were not allowlisted when this design was written; the 2.12.0 port
+  added `user_servers.enabled` and `allowed_urls` plus destination checks. The
+  OAuth guard closes **OAuth-path** steering only — it does not close, and must
+  not be described as closing, SSRF through the plain (non-OAuth) transport
+  (H1.6, R2).
 - **DNS rebinding.** Even with an exact-origin allowlist, a listed hostname can
   resolve to a private address at request time. Accepted residual for v1; a
   follow-up may resolve and block private/link-local addresses at connect time.
@@ -975,7 +980,7 @@ second review's ACs in without changing the architecture.
 | #   | Risk                                                                                                                                                            | Impact                                                                                                                           | Handling                                                                                                                                                                                                                                                                  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R1  | SDK 2.x adaptation: `AuthorizationCodeResult`, `application_type="web"`, `auth=` on the client not the transport                                                | A wrong port yields a flow that never completes silently                                                                         | S2 pins it with a test; the factory is the only place touching the SDK                                                                                                                                                                                                    |
-| R2  | No SSRF allowlist for **plain** MCP URLs already exists in this fork                                                                                            | The OAuth path inherits the user-chosen server origin; the guard must not be credited with closing the plain path                | The guard bounds OAuth-path requests to listed origins; the plain path keeps its pre-existing gap and needs its own ticket (out of scope, flagged in §6)                                                                                                                  |
+| R2  | No SSRF allowlist for **plain** MCP URLs existed when this design was written (the 2.12.0 port added `user_servers.allowed_urls`)                               | The OAuth path inherits the user-chosen server origin; the guard must not be credited with closing the plain path                | The guard bounds OAuth-path requests to listed origins; plain user-provided URLs are enforced by the 2.12.0 allowlist and destination checks, not by this guard                                                                                                           |
 | R3  | Authorization servers that do not support dynamic client registration                                                                                           | Connection fails with a clear error; no workaround in this fork or upstream                                                      | Documented in S6; a manual `client_id` escape hatch is a follow-up if users hit it                                                                                                                                                                                        |
 | R4  | Popup blocking: browsers block `window.open` outside a user gesture                                                                                             | Automatic redirect after the 202 would be blocked                                                                                | Design mandates a user click ("Sign in" action); no automatic open                                                                                                                                                                                                        |
 | R5  | Reload during sign-in abandons the flow server-side until TTL                                                                                                   | User must retry; a stale `connecting` entry may show briefly                                                                     | TTL 300 s, `mcp_connection_failed` on abandonment, entry removable                                                                                                                                                                                                        |
@@ -999,12 +1004,14 @@ second review's ACs in without changing the architecture.
 - **Named developer-configured servers** added first (upstream parity) →
   **done in the 2.12.0 port** (PR #20, `3320cae9`). `useOAuth` remains the
   user-server flow; per-server OAuth for named servers is still an upstream
-  #3013 follow-up, and the store, guard and provider are unchanged.
+  #3013 follow-up. The store and provider are unchanged; the OAuth guard was
+  extended in `1029ff61` to re-check transport-role requests against
+  `user_servers.allowed_urls`.
 - **No-proxy deployment guaranteed** → Option B becomes acceptable and saves two
   socket events and the frontend 202 path, but M1's deadlines still apply.
-- **Security requires per-server allowlists** → needs a server-identity config
-  table this fork lacks; that is upstream's `McpServerOAuth` model and would make
-  S4b depend on a named-servers ticket.
+- **Security requires per-server allowlists** → named servers now exist, but
+  they have no per-server `oauth` table; that is upstream's `McpServerOAuth`
+  model and would make S4b depend on a named-server OAuth ticket.
 - **A real need for per-user OAuth over SSE** → add the custom
   `httpx_client_factory` (auth + guard) and a second guarded client path; the
   cost is stated in §5.2 step 2c.
