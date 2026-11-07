@@ -1,4 +1,7 @@
 import json
+import re
+import sqlite3
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import cast
 from unittest.mock import AsyncMock
@@ -399,3 +402,153 @@ async def test_get_element_preserves_none_fields():
     assert result["url"] is None
     assert result["objectKey"] is None
     assert result["mime"] is None
+
+
+class _SqliteFetchConnection:
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    async def fetch(self, query: str, *params):
+        cursor = self._conn.execute(re.sub(r"\$(\d+)", "?", query), params)
+        if cursor.description is None:
+            return []
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+class _SqlitePool:
+    def __init__(self, conn: sqlite3.Connection):
+        self._connection = _SqliteFetchConnection(conn)
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self._connection
+
+
+@pytest.fixture
+def sqlite_chainlit_layer(
+    monkeypatch: pytest.MonkeyPatch, mock_storage_client: BaseStorageClient
+):
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(
+        """
+        CREATE TABLE "User" (
+            id TEXT PRIMARY KEY,
+            identifier TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE "Thread" (
+            id TEXT PRIMARY KEY,
+            "userId" TEXT REFERENCES "User"(id) ON DELETE CASCADE
+        );
+        CREATE TABLE "Step" (
+            id TEXT PRIMARY KEY,
+            "threadId" TEXT REFERENCES "Thread"(id) ON DELETE CASCADE
+        );
+        CREATE TABLE "Element" (
+            id TEXT PRIMARY KEY,
+            "threadId" TEXT REFERENCES "Thread"(id) ON DELETE CASCADE,
+            "stepId" TEXT REFERENCES "Step"(id) ON DELETE CASCADE,
+            "objectKey" TEXT
+        );
+        CREATE TABLE "Feedback" (
+            id TEXT PRIMARY KEY,
+            "stepId" TEXT REFERENCES "Step"(id) ON DELETE CASCADE
+        );
+        """
+    )
+    layer = ChainlitDataLayer(
+        database_url="postgresql://test", storage_client=mock_storage_client
+    )
+    monkeypatch.setattr(layer, "pool", _SqlitePool(conn))
+    yield layer, conn
+    conn.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_only_deletes_target_user(
+    sqlite_chainlit_layer,
+    mock_storage_client: BaseStorageClient,
+):
+    layer, conn = sqlite_chainlit_layer
+    conn.executemany(
+        'INSERT INTO "User" (id, identifier) VALUES (?, ?)',
+        [("target-user", "target"), ("other-user", "other")],
+    )
+    conn.executemany(
+        'INSERT INTO "Thread" (id, "userId") VALUES (?, ?)',
+        [
+            ("target-thread-0", "target-user"),
+            ("target-thread-1", "target-user"),
+            ("other-thread-0", "other-user"),
+            ("other-thread-1", "other-user"),
+        ],
+    )
+    conn.executemany(
+        'INSERT INTO "Step" (id, "threadId") VALUES (?, ?)',
+        [
+            ("target-step-0", "target-thread-0"),
+            ("target-step-1", "target-thread-1"),
+            ("other-step-0", "other-thread-0"),
+            ("other-step-1", "other-thread-1"),
+        ],
+    )
+    conn.executemany(
+        'INSERT INTO "Element" (id, "threadId", "stepId", "objectKey") '
+        "VALUES (?, ?, ?, ?)",
+        [
+            ("target-element-0", "target-thread-0", "target-step-0", "target-object-0"),
+            ("target-element-1", "target-thread-1", "target-step-1", "target-object-1"),
+            ("other-element-0", "other-thread-0", "other-step-0", "other-object-0"),
+            ("other-element-1", "other-thread-1", "other-step-1", "other-object-1"),
+        ],
+    )
+    conn.executemany(
+        'INSERT INTO "Feedback" (id, "stepId") VALUES (?, ?)',
+        [
+            ("target-feedback-0", "target-step-0"),
+            ("target-feedback-1", "target-step-1"),
+            ("other-feedback-0", "other-step-0"),
+            ("other-feedback-1", "other-step-1"),
+        ],
+    )
+    conn.commit()
+
+    deleted = await layer.delete_all_threads("target-user")
+
+    delete_file = cast(AsyncMock, mock_storage_client.delete_file)
+    assert deleted == 2
+    assert {call.kwargs["object_key"] for call in delete_file.await_args_list} == {
+        "target-object-0",
+        "target-object-1",
+    }
+
+    assert await layer.delete_all_threads("target-user") == 0
+    assert delete_file.await_count == 2
+
+    assert (
+        conn.execute(
+            'SELECT COUNT(*) FROM "Thread" WHERE "userId" = ?', ("target-user",)
+        ).fetchone()[0]
+        == 0
+    )
+    assert (
+        conn.execute(
+            'SELECT COUNT(*) FROM "Thread" WHERE "userId" = ?', ("other-user",)
+        ).fetchone()[0]
+        == 2
+    )
+
+    for table, column in (
+        ("Step", "threadId"),
+        ("Element", "threadId"),
+        ("Feedback", "stepId"),
+    ):
+        target_count = conn.execute(
+            f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" LIKE ?', ("target-%",)
+        ).fetchone()[0]
+        other_count = conn.execute(
+            f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" LIKE ?', ("other-%",)
+        ).fetchone()[0]
+        assert target_count == 0
+        assert other_count == 2

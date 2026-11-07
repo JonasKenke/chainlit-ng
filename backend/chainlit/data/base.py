@@ -84,6 +84,18 @@ class BaseDataLayer(ABC):
     async def delete_thread(self, thread_id: str):
         pass
 
+    async def delete_all_threads(self, user_id: str) -> int:
+        """Delete all threads owned by ``user_id``.
+
+        Implementations must scope the deletion strictly to the persisted
+        ``userId``, delete storage objects owned by the deleted threads, and
+        return the number of deleted threads. The operation must be
+        idempotent: a second call returns 0.
+        """
+        raise NotImplementedError(
+            "Bulk thread deletion is not implemented for this data layer"
+        )
+
     @abstractmethod
     async def list_threads(
         self, pagination: "Pagination", filters: "ThreadFilter"
