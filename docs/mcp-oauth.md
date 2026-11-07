@@ -76,14 +76,14 @@ explicitly in `oauth_authorization_origins`.
 
 1. Open the MCP menu, choose to add a user-provided server, and select the
    **streamable-http** transport.
-2. Enter a name and the MCP server URL, and select the OAuth option (the
-   checkbox is shown only for streamable HTTP).
+2. Enter a name and the MCP server URL, and tick **Sign in with OAuth
+   (streamable HTTP only)**.
 3. Connect. The server answers `202 authorization_required` and emits
-   `mcp_authorization_required` with an authorization URL. Follow the sign-in
-   link, approve access at the authorization server, and return to the chat; the
-   connection completes when Chainlit receives `mcp_connected`.
-4. If the entry is still pending, the list offers a sign-in action. You can also
-   remove the entry to cancel the flow.
+   `mcp_authorization_required` with an authorization URL; the pending entry
+   shows **Sign in to <host>**. Follow that link, approve access at the
+   authorization server, and return to the chat; the connection completes when
+   Chainlit receives `mcp_connected`.
+4. You can remove a pending entry to cancel the flow.
 
 With `@chainlit/react-client`, the same request is:
 
