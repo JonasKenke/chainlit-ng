@@ -475,6 +475,33 @@ class ChainlitDataLayer(BaseDataLayer):
             'DELETE FROM "Thread" WHERE id = $1', {"thread_id": thread_id}
         )
 
+    async def delete_all_threads(self, user_id: str) -> int:
+        threads_query = """
+        SELECT id FROM "Thread"
+        WHERE "userId" = $1
+        """
+        threads = await self.execute_query(threads_query, {"user_id": user_id})
+        if not threads:
+            return 0
+
+        elements_query = """
+        SELECT "objectKey" FROM "Element"
+        WHERE "threadId" IN (
+            SELECT id FROM "Thread" WHERE "userId" = $1
+        )
+        """
+        elements = await self.execute_query(elements_query, {"user_id": user_id})
+
+        if self.storage_client is not None:
+            for elem in elements:
+                if elem["objectKey"]:
+                    await self.storage_client.delete_file(object_key=elem["objectKey"])
+
+        await self.execute_query(
+            'DELETE FROM "Thread" WHERE "userId" = $1', {"user_id": user_id}
+        )
+        return len(threads)
+
     async def list_threads(
         self, pagination: Pagination, filters: ThreadFilter
     ) -> PaginatedResponse[ThreadDict]:

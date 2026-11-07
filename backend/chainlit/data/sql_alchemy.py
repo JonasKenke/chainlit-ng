@@ -318,6 +318,54 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         await self.execute_sql(query=steps_query, parameters=parameters)
         await self.execute_sql(query=thread_query, parameters=parameters)
 
+    async def delete_all_threads(self, user_id: str) -> int:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: delete_all_threads, user_id={user_id}")
+
+        elements_query = """
+            SELECT "objectKey" FROM elements
+            WHERE "threadId" IN (SELECT "id" FROM threads WHERE "userId" = :user_id)
+        """
+        elements = await self.execute_sql(elements_query, {"user_id": user_id})
+        if elements is None:
+            raise RuntimeError("SQLAlchemy: delete_all_threads failed")
+
+        if self.storage_provider is not None and isinstance(elements, list):
+            for elem in elements:
+                if elem["objectKey"]:
+                    await self.storage_provider.delete_file(
+                        object_key=elem["objectKey"]
+                    )
+
+        # Delete feedbacks/elements/steps/threads owned by the user
+        feedbacks_query = """
+            DELETE FROM feedbacks WHERE "forId" IN (
+                SELECT "id" FROM steps WHERE "threadId" IN (
+                    SELECT "id" FROM threads WHERE "userId" = :user_id
+                )
+            )
+        """
+        elements_query = """
+            DELETE FROM elements WHERE "threadId" IN (
+                SELECT "id" FROM threads WHERE "userId" = :user_id
+            )
+        """
+        steps_query = """
+            DELETE FROM steps WHERE "threadId" IN (
+                SELECT "id" FROM threads WHERE "userId" = :user_id
+            )
+        """
+        thread_query = """DELETE FROM threads WHERE "userId" = :user_id"""
+        parameters = {"user_id": user_id}
+        deleted_threads = 0
+        for query in (feedbacks_query, elements_query, steps_query, thread_query):
+            result = await self.execute_sql(query=query, parameters=parameters)
+            if not isinstance(result, int):
+                raise RuntimeError("SQLAlchemy: delete_all_threads failed")
+            deleted_threads = result
+
+        return deleted_threads
+
     async def list_threads(
         self, pagination: Pagination, filters: ThreadFilter
     ) -> PaginatedResponse:

@@ -1,7 +1,8 @@
 import json
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import text
@@ -384,3 +385,112 @@ async def test_update_thread_name_update_preserves_metadata(
     assert isinstance(result, list)
     assert result
     assert result[0]["name"] == "New Name"
+
+
+async def _seed_thread_with_children(
+    data_layer: SQLAlchemyDataLayer, user_id: str, prefix: str
+):
+    for index in range(2):
+        thread_id = f"{prefix}_thread_{index}"
+        step_id = f"{prefix}_step_{index}"
+        await data_layer.update_thread(thread_id, user_id=user_id)
+        await data_layer.execute_sql(
+            query="""
+                INSERT INTO steps (
+                    "id", "threadId", "name", "type", "disableFeedback", "streaming"
+                ) VALUES (
+                    :id, :thread_id, :name, :type, :disable_feedback, :streaming
+                )
+            """,
+            parameters={
+                "id": step_id,
+                "thread_id": thread_id,
+                "name": "Assistant",
+                "type": "assistant_message",
+                "disable_feedback": False,
+                "streaming": False,
+            },
+        )
+        await data_layer.execute_sql(
+            query="""
+                INSERT INTO elements ("id", "threadId", "forId", "name", "objectKey")
+                VALUES (:id, :thread_id, :for_id, :name, :object_key)
+            """,
+            parameters={
+                "id": f"{prefix}_element_{index}",
+                "thread_id": thread_id,
+                "for_id": step_id,
+                "name": "attachment.txt",
+                "object_key": f"{prefix}-object-{index}",
+            },
+        )
+        await data_layer.upsert_feedback(
+            Feedback(forId=step_id, threadId=thread_id, value=1)
+        )
+
+
+async def test_delete_all_threads_only_deletes_target_user(
+    data_layer: SQLAlchemyDataLayer, mock_storage_client: BaseStorageClient
+):
+    target = await data_layer.create_user(User(identifier="delete_all_target"))
+    other = await data_layer.create_user(User(identifier="delete_all_other"))
+    assert target
+    assert other
+
+    await _seed_thread_with_children(data_layer, target.id, "target")
+    await _seed_thread_with_children(data_layer, other.id, "other")
+
+    deleted = await data_layer.delete_all_threads(target.id)
+
+    delete_file = cast(AsyncMock, mock_storage_client.delete_file)
+    assert deleted == 2
+    assert {call.kwargs["object_key"] for call in delete_file.await_args_list} == {
+        "target-object-0",
+        "target-object-1",
+    }
+
+    assert await data_layer.delete_all_threads(target.id) == 0
+    assert delete_file.await_count == 2
+
+    target_threads = await data_layer.execute_sql(
+        query='SELECT "id" FROM threads WHERE "userId" = :user_id',
+        parameters={"user_id": target.id},
+    )
+    assert target_threads == []
+
+    other_threads = await data_layer.execute_sql(
+        query='SELECT "id" FROM threads WHERE "userId" = :user_id',
+        parameters={"user_id": other.id},
+    )
+    assert isinstance(other_threads, list)
+    assert sorted(thread["id"] for thread in other_threads) == [
+        "other_thread_0",
+        "other_thread_1",
+    ]
+
+    for table in ("steps", "elements", "feedbacks"):
+        column = "forId" if table == "feedbacks" else "threadId"
+        target_rows = await data_layer.execute_sql(
+            query=f'SELECT "id" FROM {table} WHERE "{column}" LIKE :prefix',
+            parameters={"prefix": "target%"},
+        )
+        assert target_rows == []
+
+        other_rows = await data_layer.execute_sql(
+            query=f'SELECT "id" FROM {table} WHERE "{column}" LIKE :prefix',
+            parameters={"prefix": "other%"},
+        )
+        assert isinstance(other_rows, list)
+        assert len(other_rows) == 2
+
+
+async def test_delete_all_threads_raises_when_sql_fails(
+    data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    async def failing_execute_sql(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(data_layer, "execute_sql", failing_execute_sql)
+
+    with pytest.raises(RuntimeError, match="delete_all_threads failed"):
+        await data_layer.delete_all_threads("some-user")
