@@ -24,6 +24,7 @@ from chainlit.config import (
 )
 from chainlit.data.base import BaseDataLayer
 from chainlit.server import (
+    _cleanup_files_directory,
     _verify_azure_hf_id_token,
     app,
     get_html_template,
@@ -2349,3 +2350,34 @@ def test_thread_clear_all_capability_flag(
     response = test_client.get("/project/settings")
     assert response.status_code == 200
     assert response.json()["threadClearAll"] is True
+
+
+def test_cleanup_files_directory_removes_uploads_under_app_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    app_root = tmp_path / "app"
+    uploads = app_root / ".files"
+    (uploads / "session-1").mkdir(parents=True)
+    monkeypatch.setattr("chainlit.server.APP_ROOT", str(app_root))
+    monkeypatch.setattr("chainlit.server.FILES_DIRECTORY", uploads)
+
+    _cleanup_files_directory()
+
+    assert not uploads.exists()
+
+
+def test_cleanup_files_directory_keeps_external_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    uploads = tmp_path / "mnt" / "uploads"
+    uploads.mkdir(parents=True)
+    marker = uploads / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr("chainlit.server.APP_ROOT", str(app_root))
+    monkeypatch.setattr("chainlit.server.FILES_DIRECTORY", uploads)
+
+    _cleanup_files_directory()
+
+    assert marker.read_text(encoding="utf-8") == "keep"
