@@ -14,6 +14,7 @@ import filetype
 import httpx
 from discord.ui import Button, View
 
+from chainlit.approval import guard_pending_approval
 from chainlit.config import config
 from chainlit.context import ChainlitContext, HTTPSession, context, context_var
 from chainlit.data import get_data_layer
@@ -235,6 +236,7 @@ async def process_discord_message(
     channel: "MessageableChannel",
     bind_thread_to_user=False,
 ):
+    guard_pending_approval(thread_id)
     user = await get_user(message.author)
 
     text = clean_content(message)

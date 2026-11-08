@@ -11,6 +11,7 @@ from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 from slack_sdk.errors import SlackApiError
 
+from chainlit.approval import guard_pending_approval
 from chainlit.config import config
 from chainlit.context import ChainlitContext, HTTPSession, context, context_var
 from chainlit.data import get_data_layer
@@ -315,6 +316,7 @@ async def process_slack_message(
     bind_thread_to_user=False,
     thread_ts: Optional[str] = None,
 ):
+    guard_pending_approval(thread_id)
     await add_reaction_if_enabled(event)
 
     slack_user_id = event.get("user")

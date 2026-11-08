@@ -29,6 +29,7 @@ from botbuilder.schema import (
     HeroCard,
 )
 
+from chainlit.approval import guard_pending_approval
 from chainlit.config import config
 from chainlit.context import ChainlitContext, HTTPSession, context, context_var
 from chainlit.data import get_data_layer
@@ -235,8 +236,6 @@ async def process_teams_message(
     turn_context: TurnContext,
     thread_name: str,
 ):
-    user = await get_user(turn_context.activity.from_property)
-
     thread_id = str(
         uuid.uuid5(
             uuid.NAMESPACE_DNS,
@@ -246,6 +245,9 @@ async def process_teams_message(
             ),
         )
     )
+    guard_pending_approval(thread_id)
+
+    user = await get_user(turn_context.activity.from_property)
 
     text = clean_content(turn_context.activity)
     teams_files = turn_context.activity.attachments

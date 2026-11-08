@@ -529,7 +529,7 @@ class ChainlitDataLayer(BaseDataLayer):
         # Do not rely on the database cascade: a schema without it must not
         # keep step rows (including approval records) after a delete.
         await self.execute_query(
-            'DELETE FROM "Feedback" WHERE "forId" IN '
+            'DELETE FROM "Feedback" WHERE "stepId" IN '
             '(SELECT id FROM "Step" WHERE "threadId" = $1)',
             {"thread_id": thread_id},
         )
@@ -567,7 +567,7 @@ class ChainlitDataLayer(BaseDataLayer):
             )
 
         await self.execute_query(
-            'DELETE FROM "Feedback" WHERE "forId" IN ('
+            'DELETE FROM "Feedback" WHERE "stepId" IN ('
             'SELECT id FROM "Step" WHERE "threadId" IN '
             '(SELECT id FROM "Thread" WHERE "userId" = $1))',
             {"user_id": user_id},

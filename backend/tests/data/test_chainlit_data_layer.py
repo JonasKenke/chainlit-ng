@@ -453,7 +453,7 @@ def sqlite_chainlit_layer(
         );
         CREATE TABLE "Feedback" (
             id TEXT PRIMARY KEY,
-            "forId" TEXT REFERENCES "Step"(id) ON DELETE CASCADE
+            "stepId" TEXT REFERENCES "Step"(id) ON DELETE CASCADE
         );
         """
     )
@@ -549,7 +549,7 @@ async def test_delete_all_threads_only_deletes_target_user(
         ],
     )
     conn.executemany(
-        'INSERT INTO "Feedback" (id, "forId") VALUES (?, ?)',
+        'INSERT INTO "Feedback" (id, "stepId") VALUES (?, ?)',
         [
             ("target-feedback-0", "target-step-0"),
             ("target-feedback-1", "target-step-1"),
@@ -587,7 +587,7 @@ async def test_delete_all_threads_only_deletes_target_user(
     for table, column in (
         ("Step", "threadId"),
         ("Element", "threadId"),
-        ("Feedback", "forId"),
+        ("Feedback", "stepId"),
     ):
         target_count = conn.execute(
             f'SELECT COUNT(*) FROM "{table}" WHERE "{column}" LIKE ?', ("target-%",)
@@ -622,7 +622,7 @@ async def test_delete_thread_removes_step_rows_without_a_cascade(
         ("element-1", "thread-1", "step-1"),
     )
     conn.execute(
-        'INSERT INTO "Feedback" (id, "forId") VALUES (?, ?)',
+        'INSERT INTO "Feedback" (id, "stepId") VALUES (?, ?)',
         ("feedback-1", "step-1"),
     )
     conn.commit()
