@@ -131,3 +131,35 @@ describe('Markdown math', () => {
     expect(elapsed).toBeLessThan(20000);
   }, 120000);
 });
+
+describe('Markdown remote media and links', () => {
+  it('does not send a referrer for remote images', () => {
+    const { getByAltText } = renderMarkdown(
+      '![diagram](https://example.com/diagram.png)'
+    );
+
+    const image = getByAltText('diagram');
+    expect(image).toHaveAttribute('src', 'https://example.com/diagram.png');
+    expect(image).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('does not send a referrer for remote videos', () => {
+    const { container } = renderMarkdown(
+      '![clip](https://example.com/clip.mp4)'
+    );
+
+    const video = container.querySelector('video');
+    expect(video).not.toBeNull();
+    expect(video).toHaveAttribute('src', 'https://example.com/clip.mp4');
+    expect(video).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('opens links without an opener or referrer', () => {
+    const { getByRole } = renderMarkdown('[docs](https://example.com/docs)');
+
+    const link = getByRole('link', { name: 'docs' });
+    expect(link).toHaveAttribute('href', 'https://example.com/docs');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+});
