@@ -8,7 +8,11 @@ async def is_thread_author(username: str, thread_id: str):
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data layer not initialized")
 
-    thread_author = await data_layer.get_thread_author(thread_id)
+    try:
+        thread_author = await data_layer.get_thread_author(thread_id)
+    except ValueError:
+        # Built-in data layers raise ValueError for an unknown thread.
+        thread_author = None
 
     if not thread_author:
         raise HTTPException(status_code=404, detail="Thread not found")

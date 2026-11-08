@@ -196,16 +196,16 @@ def test_thread_endpoints_require_data_layer(api, no_data_layer, method, path, b
 
 
 @pytest.mark.parametrize(("method", "path", "body"), THREAD_ROUTES)
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F1: built-in data layers raise ValueError for a missing "
-    "thread; is_thread_author() only maps falsy values to 404, so these "
-    "routes return 500 instead of 404.",
-)
 def test_missing_thread_returns_404(api, layer, method, path, body):
     layer.get_thread_author.side_effect = ValueError("Author not found")
     response = _call(api, method, path, body)
     assert response.status_code == 404, response.text
+
+
+def test_unexpected_thread_author_error_returns_500(api, layer):
+    layer.get_thread_author.side_effect = RuntimeError("database unavailable")
+    response = api.get("/project/thread/t1")
+    assert response.status_code == 500, response.text
 
 
 def test_get_thread_rejects_non_author(api, layer):
@@ -220,10 +220,6 @@ def test_get_element_rejects_non_author(api, layer):
     assert response.status_code == 401
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F5: missing element returns 200 with a JSON null body.",
-)
 def test_get_missing_element_returns_404(api, layer):
     layer.get_thread_author.return_value = USER.identifier
     layer.get_element.return_value = None
