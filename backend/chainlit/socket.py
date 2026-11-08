@@ -19,7 +19,12 @@ from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
 from chainlit.mode import MODE_PREFERENCES_METADATA_KEY
 from chainlit.server import sio
-from chainlit.session import ClientType, WebsocketSession, is_valid_session_id
+from chainlit.session import (
+    ClientType,
+    WebsocketSession,
+    is_valid_session_id,
+    is_valid_thread_id,
+)
 from chainlit.types import (
     InputAudioChunk,
     InputAudioChunkPayload,
@@ -203,6 +208,10 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         raise ConnectionRefusedError("invalid session id")
 
     thread_id = auth.get("threadId", None)
+
+    if thread_id and not is_valid_thread_id(thread_id):
+        logger.error("Invalid thread id in websocket connect.")
+        raise ConnectionRefusedError("invalid thread id")
 
     if require_login():
         try:

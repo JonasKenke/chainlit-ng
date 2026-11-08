@@ -13,6 +13,7 @@ from chainlit.data import get_data_layer
 from chainlit.element import CustomElement, ElementBased
 from chainlit.logger import logger
 from chainlit.step import MessageStepType, StepDict
+from chainlit.task_refs import create_persistence_task
 from chainlit.types import (
     AskActionResponse,
     AskActionSpec,
@@ -112,7 +113,7 @@ class MessageBase(ABC):
         data_layer = get_data_layer()
         if data_layer:
             try:
-                asyncio.create_task(data_layer.update_step(step_dict))
+                create_persistence_task(data_layer.update_step(step_dict))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
@@ -131,7 +132,7 @@ class MessageBase(ABC):
         data_layer = get_data_layer()
         if data_layer:
             try:
-                asyncio.create_task(data_layer.delete_step(step_dict["id"]))
+                create_persistence_task(data_layer.delete_step(step_dict["id"]))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
@@ -197,7 +198,7 @@ class MessageBase(ABC):
         data_layer = get_data_layer()
         if data_layer and not self.persisted:
             try:
-                asyncio.create_task(data_layer.create_step(step_dict))
+                create_persistence_task(data_layer.create_step(step_dict))
                 self.persisted = True
             except Exception as e:
                 if self.fail_on_persist_error:

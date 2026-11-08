@@ -122,6 +122,9 @@ favorites = false
 # Enable the prompt gallery (store, edit, share reusable prompts)
 prompt_gallery = false
 
+# Enable per-user skills (Markdown instruction packages stored in the data layer)
+skills = false
+
 # Enable recurring prompt scheduling for authenticated users
 prompt_scheduling = false
 
@@ -484,6 +487,7 @@ class FeaturesSettings(BaseModel):
     favorites: bool = False
     prompt_gallery: bool = False
     prompt_scheduling: bool = False
+    skills: bool = False
 
 
 class HeaderLink(BaseModel):

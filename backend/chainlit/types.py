@@ -376,6 +376,14 @@ class PromptDict(TypedDict):
     isShared: bool
     createdAt: str
     updatedAt: str
+    # Skills share the prompts table; these fields stay optional so existing
+    # data layers and prompt rows remain valid without changes.
+    kind: NotRequired[str]
+    description: NotRequired[str]
+    enabled: NotRequired[bool]
+    importedFrom: NotRequired[Optional[str]]
+    importedAt: NotRequired[Optional[str]]
+    contentHash: NotRequired[Optional[str]]
 
 
 class CreatePromptRequest(BaseModel):
@@ -390,6 +398,25 @@ class UpdatePromptRequest(BaseModel):
 
 class SharePromptRequest(BaseModel):
     isShared: bool
+
+
+class CreateSkillRequest(BaseModel):
+    name: str
+    description: str
+    content: str
+    enabled: bool = False
+
+
+class UpdateSkillRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class ImportSkillRequest(BaseModel):
+    markdown: str
+    imported_from: str = Field(min_length=1, max_length=2048)
 
 
 class ScheduledTaskDict(TypedDict):

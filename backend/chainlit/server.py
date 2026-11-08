@@ -80,6 +80,15 @@ from chainlit.scheduled_task import (
 )
 from chainlit.scheduler import ScheduledTaskWorker
 from chainlit.secret import random_secret
+from chainlit.skill import (
+    MAX_SKILLS,
+    Skill,
+    SkillError,
+    load_skills,
+    parse_skill_markdown,
+    skill_content_hash,
+    skill_to_markdown,
+)
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AskFileSpec,
@@ -87,11 +96,14 @@ from chainlit.types import (
     ConnectMCPRequest,
     CreatePromptRequest,
     CreateScheduledTaskRequest,
+    CreateSkillRequest,
     DeleteFeedbackRequest,
     DeleteThreadRequest,
     DisconnectMCPRequest,
     ElementRequest,
     GetThreadsRequest,
+    ImportSkillRequest,
+    PromptDict,
     ScheduledTaskDict,
     SharePromptRequest,
     ShareThreadRequest,
@@ -99,6 +111,7 @@ from chainlit.types import (
     UpdateFeedbackRequest,
     UpdatePromptRequest,
     UpdateScheduledTaskRequest,
+    UpdateSkillRequest,
     UpdateThreadRequest,
 )
 from chainlit.user import PersistedUser, User
@@ -118,6 +131,8 @@ mimetypes.add_type("text/css", ".css")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Context manager to handle app start and shutdown."""
+    load_skills()
+
     if config.code.on_app_startup:
         await config.code.on_app_startup()
 
@@ -1838,6 +1853,275 @@ async def add_shared_prompt(
     return JSONResponse(content=created)
 
 
+# ---- Per-user skills endpoints (router registered only when the flag is on) ----
+
+skills_router = APIRouter(prefix=config.run.root_path)
+
+
+def _skills_data_layer() -> BaseDataLayer:
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    return data_layer
+
+
+async def _dl_skill(coro: Any) -> Any:
+    """Await a skills data-layer call; map NotImplementedError to HTTP 501."""
+    try:
+        return await coro
+    except NotImplementedError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail=str(exc) or "Skills are not supported by this data layer",
+        ) from exc
+
+
+def _skill_markdown(name: str, description: str, content: str) -> str:
+    if "\n" in description or "\r" in description:
+        raise HTTPException(
+            status_code=400, detail="Skill description must be a single line"
+        )
+    return f"---\nname: {name}\ndescription: {description}\n---\n{content}"
+
+
+def _validate_skill(name: str, description: str, content: str) -> Skill:
+    try:
+        return parse_skill_markdown(
+            _skill_markdown(name, description, content), origin="skill"
+        )
+    except SkillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _check_skill_name(
+    name: str,
+    existing: List[Dict[str, Any]],
+    skill_id: Optional[str] = None,
+) -> None:
+    if name in {skill.name for skill in load_skills()}:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Skill name {name!r} is reserved by an app skill",
+        )
+    if any(item["title"] == name and item["id"] != skill_id for item in existing):
+        raise HTTPException(
+            status_code=409, detail=f"Skill name {name!r} already exists"
+        )
+
+
+def _skill_row(
+    skill_id: str,
+    user_id: str,
+    name: str,
+    description: str,
+    content: str,
+    enabled: bool,
+    imported_from: Optional[str] = None,
+    imported_at: Optional[str] = None,
+    content_hash: Optional[str] = None,
+) -> PromptDict:
+    now = utc_now()
+    return {
+        "id": skill_id,
+        "userId": user_id,
+        "title": name,
+        "content": content,
+        "isShared": False,
+        "kind": "skill",
+        "description": description,
+        "enabled": enabled,
+        "importedFrom": imported_from,
+        "importedAt": imported_at,
+        "contentHash": content_hash,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+@skills_router.get("/project/skills")
+async def list_user_skills(
+    request: Request,
+    current_user: UserParam,
+):
+    """List the current user's skills, including disabled ones."""
+    data_layer = _skills_data_layer()
+    user_id = await _get_user_id(current_user, data_layer)
+    skills = await _dl_skill(data_layer.list_skills(user_id))
+    return JSONResponse(content=skills)
+
+
+@skills_router.post("/project/skills")
+async def create_user_skill(
+    request: Request,
+    payload: CreateSkillRequest,
+    current_user: UserParam,
+):
+    """Create a skill owned by the current user."""
+    data_layer = _skills_data_layer()
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = _validate_skill(payload.name, payload.description, payload.content)
+    existing = await _dl_skill(data_layer.list_skills(user_id))
+    if len(existing) >= MAX_SKILLS:
+        raise HTTPException(
+            status_code=400, detail=f"At most {MAX_SKILLS} skills per user"
+        )
+    _check_skill_name(skill.name, existing)
+
+    import uuid as _uuid
+
+    created = await _dl_skill(
+        data_layer.create_skill(
+            _skill_row(
+                str(_uuid.uuid4()),
+                user_id,
+                skill.name,
+                skill.description,
+                skill.body,
+                payload.enabled,
+            )
+        )
+    )
+    return JSONResponse(status_code=201, content=created)
+
+
+@skills_router.post("/project/skills/import")
+async def import_user_skill(
+    request: Request,
+    payload: ImportSkillRequest,
+    current_user: UserParam,
+):
+    """Import exported Markdown as a disabled, provenance-tagged skill."""
+    data_layer = _skills_data_layer()
+    user_id = await _get_user_id(current_user, data_layer)
+    if "\n" in payload.imported_from or "\r" in payload.imported_from:
+        raise HTTPException(
+            status_code=400, detail="imported_from must be a single line"
+        )
+    try:
+        skill = parse_skill_markdown(payload.markdown, origin="imported skill")
+    except SkillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    existing = await _dl_skill(data_layer.list_skills(user_id))
+    if len(existing) >= MAX_SKILLS:
+        raise HTTPException(
+            status_code=400, detail=f"At most {MAX_SKILLS} skills per user"
+        )
+    _check_skill_name(skill.name, existing)
+
+    import uuid as _uuid
+
+    created = await _dl_skill(
+        data_layer.create_skill(
+            _skill_row(
+                str(_uuid.uuid4()),
+                user_id,
+                skill.name,
+                skill.description,
+                skill.body,
+                False,
+                imported_from=payload.imported_from,
+                imported_at=utc_now(),
+                content_hash=skill_content_hash(skill_to_markdown(skill)),
+            )
+        )
+    )
+    return JSONResponse(status_code=201, content=created)
+
+
+@skills_router.get("/project/skills/{skill_id}")
+async def get_user_skill(
+    request: Request,
+    skill_id: str,
+    current_user: UserParam,
+):
+    """Return one of the current user's skills."""
+    data_layer = _skills_data_layer()
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return JSONResponse(content=skill)
+
+
+@skills_router.get("/project/skills/{skill_id}/export")
+async def export_user_skill(
+    request: Request,
+    skill_id: str,
+    current_user: UserParam,
+):
+    """Export one of the current user's skills as Markdown."""
+    data_layer = _skills_data_layer()
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    markdown = _skill_markdown(
+        skill["title"], skill.get("description", ""), skill["content"]
+    )
+    return Response(
+        content=markdown,
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="{skill["title"]}.md"',
+            "X-Skill-Content-Hash": skill_content_hash(markdown),
+        },
+    )
+
+
+@skills_router.put("/project/skills/{skill_id}")
+async def update_user_skill(
+    request: Request,
+    skill_id: str,
+    payload: UpdateSkillRequest,
+    current_user: UserParam,
+):
+    """Edit or enable one of the current user's skills."""
+    data_layer = _skills_data_layer()
+    user_id = await _get_user_id(current_user, data_layer)
+    existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not existing:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    updated = dict(existing)
+    if payload.name is not None:
+        updated["title"] = payload.name
+    if payload.description is not None:
+        updated["description"] = payload.description
+    if payload.content is not None:
+        updated["content"] = payload.content
+    skill = _validate_skill(
+        updated["title"], updated.get("description", ""), updated["content"]
+    )
+    if skill.name != existing["title"]:
+        all_skills = await _dl_skill(data_layer.list_skills(user_id))
+        _check_skill_name(skill.name, all_skills, skill_id)
+    updated["title"] = skill.name
+    updated["description"] = skill.description
+    updated["content"] = skill.body
+    if payload.enabled is not None:
+        updated["enabled"] = payload.enabled
+    updated["updatedAt"] = utc_now()
+
+    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+    return JSONResponse(content=result)
+
+
+@skills_router.delete("/project/skills/{skill_id}")
+async def delete_user_skill(
+    request: Request,
+    skill_id: str,
+    current_user: UserParam,
+):
+    """Delete one of the current user's skills."""
+    data_layer = _skills_data_layer()
+    user_id = await _get_user_id(current_user, data_layer)
+    deleted = await _dl_skill(data_layer.delete_skill(skill_id, user_id))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return JSONResponse(content={"success": True})
+
+
 @router.get("/project/thread/{thread_id}/element/{element_id}")
 async def get_thread_element(
     request: Request,
@@ -3260,8 +3544,6 @@ async def upload_file(
     session.files_dir.mkdir(exist_ok=True)
 
     try:
-        content = await file.read()
-
         assert file.filename, "No filename for uploaded file"
         assert file.content_type, "No content type for uploaded file"
 
@@ -3272,10 +3554,13 @@ async def upload_file(
                 detail="Parent message not found",
             )
 
+        # Validate before reading so an oversized upload is never buffered in memory.
         try:
             validate_file_upload(file, spec=spec)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+        content = await file.read()
 
         file_response = await session.persist_file(
             name=file.filename, content=content, mime=file.content_type
@@ -3392,8 +3677,19 @@ async def get_file(
             )
 
     if file_id in session.files:
+        from chainlit.element import Element
+
         file = session.files[file_id]
-        return FileResponse(file["path"], media_type=file["type"])
+        mime = Element.normalize_mime(file["type"]) or "application/octet-stream"
+        return FileResponse(
+            file["path"],
+            media_type=mime,
+            filename=file.get("name"),
+            content_disposition_type=(
+                "inline" if Element.is_browser_rendered_mime(mime) else "attachment"
+            ),
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
     else:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -3493,6 +3789,18 @@ async def serve(request: Request):
 
     return response
 
+
+# Register skills routes only when the flag is on: the flag is startup-time so a
+# disabled app has no route, no data-layer call and no schema change.
+def _register_skills_routes(target: FastAPI) -> bool:
+    """Mount the skills router when the flag is on; return whether it mounted."""
+    if not config.features.skills:
+        return False
+    target.include_router(skills_router)
+    return True
+
+
+_SKILLS_ROUTES_MOUNTED = _register_skills_routes(app)
 
 app.include_router(router)
 

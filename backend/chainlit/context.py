@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Union
 from lazify import LazyProxy
 
 from chainlit.session import ClientType, HTTPSession, WebsocketSession
+from chainlit.task_refs import create_persistence_task
 
 if TYPE_CHECKING:
     from chainlit.emitter import BaseChainlitEmitter
@@ -98,7 +99,7 @@ def init_http_context(
 
     if persist_thread and (data_layer := get_data_layer()):
         if user_id := getattr(user, "id", None):
-            asyncio.create_task(
+            create_persistence_task(
                 data_layer.update_thread(thread_id=thread_id, user_id=user_id)
             )
 

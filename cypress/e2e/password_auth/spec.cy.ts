@@ -52,8 +52,12 @@ describe('Password Auth', () => {
               expect(interception.response.headers).to.have.property(
                 'set-cookie'
               );
-              const cookie = interception.response.headers['set-cookie'][0];
-              expect(cookie).to.contain('access_token');
+              const cookies = Array.isArray(
+                interception.response.headers['set-cookie']
+              )
+                ? interception.response.headers['set-cookie']
+                : [interception.response.headers['set-cookie']];
+              expect(cookies[0]).to.contain('access_token');
             });
           });
 

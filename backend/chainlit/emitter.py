@@ -15,6 +15,7 @@ from chainlit.message import Message
 from chainlit.mode import MODE_PREFERENCES_METADATA_KEY, Mode
 from chainlit.session import BaseSession, WebsocketSession
 from chainlit.step import StepDict
+from chainlit.task_refs import create_persistence_task
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AskActionResponse,
@@ -307,7 +308,7 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 )
             except Exception as e:
                 logger.error(f"Error updating thread: {e}")
-            asyncio.create_task(self.session.flush_method_queue())
+            create_persistence_task(self.session.flush_method_queue())
 
     async def init_thread(self, interaction: str):
         await self.flush_thread_queues(interaction)
@@ -330,11 +331,11 @@ class ChainlitEmitter(BaseChainlitEmitter):
         message.created_at = utc_now()
         chat_context.add(message)
 
-        asyncio.create_task(message._create())
+        create_persistence_task(message._create())
 
         if not self.session.has_first_interaction:
             self.session.has_first_interaction = True
-            asyncio.create_task(self.init_thread(message.content))
+            create_persistence_task(self.init_thread(message.content))
 
         if file_refs:
             files = [
@@ -364,7 +365,7 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 for element in message.elements:
                     await element.send(for_id=message.id)
 
-            asyncio.create_task(send_elements())
+            create_persistence_task(send_elements())
 
         return message
 

@@ -75,7 +75,7 @@ export function ThreadList({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { idToResume } = useChatSession();
-  const { clear } = useChatInteract();
+  const { clear, setIdToResume } = useChatInteract();
   const { threadId: currentThreadId } = useChatMessages();
   const [threadIdToDelete, setThreadIdToDelete] = useState<string>();
   const [threadIdToRename, setThreadIdToRename] = useState<string>();
@@ -232,6 +232,11 @@ export function ThreadList({
       },
       error: (err) => {
         if (isActiveThread) {
+          // The route change to '/' may not have rendered yet, so a route
+          // effect cannot be relied on to re-request the resume. Reset the
+          // session here and ask for the thread explicitly.
+          clear();
+          setIdToResume(threadId);
           // The thread still exists, so restore the view the user left.
           navigate(`/thread/${threadId}`);
         }

@@ -670,14 +670,26 @@ async def test_prompts_are_scoped_to_their_owner(data_layer: SQLAlchemyDataLayer
     assert await data_layer.delete_prompt("alice-prompt", alice.id) is True
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "F1 in docs/research/security-threat-model.md: get_all_user_threads "
-        "interpolates stored thread ids into SQL instead of binding them"
-    ),
+@pytest.mark.parametrize(
+    "payload_template",
+    [
+        # UNION read of another user's steps (the original F1 repro).
+        (
+            "x') UNION SELECT 'inj-step','Injected','assistant_message',t.\"id\","
+            "NULL,0,NULL,0,'{}',NULL,'',v.\"output\",NULL,NULL,NULL,NULL,NULL,"
+            "NULL,NULL,NULL,NULL FROM threads t, steps v "
+            'WHERE t."id" = (SELECT "id" FROM threads WHERE "userId" = '
+            "'__ATTACKER_ID__') AND v.\"threadId\" = 'victim_thread' --"
+        ),
+        # Make every step match.
+        "x') OR 1=1 --",
+        # Stacked statement attempt.
+        "x'; DROP TABLE steps; --",
+    ],
 )
-async def test_thread_id_cannot_inject_sql(data_layer: SQLAlchemyDataLayer):
+async def test_thread_id_cannot_inject_sql(
+    data_layer: SQLAlchemyDataLayer, payload_template: str
+):
     attacker = await data_layer.create_user(User(identifier="sqli_attacker"))
     victim = await data_layer.create_user(User(identifier="sqli_victim"))
     assert attacker
@@ -698,14 +710,7 @@ async def test_thread_id_cannot_inject_sql(data_layer: SQLAlchemyDataLayer):
             "output": "VICTIM-SECRET",
         },
     )
-    payload = (
-        "x') UNION SELECT 'inj-step','Injected','assistant_message',t.\"id\","
-        "NULL,0,NULL,0,'{}',NULL,'',v.\"output\",NULL,NULL,NULL,NULL,NULL,"
-        "NULL,NULL,NULL,NULL FROM threads t, steps v "
-        'WHERE t."id" = (SELECT "id" FROM threads WHERE "userId" = \''
-        + attacker.id
-        + "') AND v.\"threadId\" = 'victim_thread' --"
-    )
+    payload = payload_template.replace("__ATTACKER_ID__", attacker.id)
     await data_layer.update_thread(payload, user_id=attacker.id)
 
     threads = await data_layer.get_all_user_threads(user_id=attacker.id)
@@ -717,6 +722,12 @@ async def test_thread_id_cannot_inject_sql(data_layer: SQLAlchemyDataLayer):
         if step.get("output") == "VICTIM-SECRET"
     ]
     assert leaked == []
+
+    victim_steps = await data_layer.execute_sql(
+        query='SELECT COUNT(*) AS count FROM steps WHERE "threadId" = :thread_id',
+        parameters={"thread_id": "victim_thread"},
+    )
+    assert victim_steps == [{"count": 1}]
 
 
 async def test_element_storage_key_stays_under_the_thread_owner(

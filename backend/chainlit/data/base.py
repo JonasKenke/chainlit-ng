@@ -161,6 +161,23 @@ class BaseDataLayer(ABC):
             "Prompt gallery is not implemented for this data layer"
         )
 
+    # ---- Per-user skills (opt-in; share the prompts table in SQLAlchemy) ----
+
+    async def create_skill(self, skill: PromptDict) -> PromptDict:
+        raise NotImplementedError("Skills are not implemented for this data layer")
+
+    async def list_skills(self, user_id: str) -> List[PromptDict]:
+        raise NotImplementedError("Skills are not implemented for this data layer")
+
+    async def get_skill(self, skill_id: str, user_id: str) -> Optional[PromptDict]:
+        raise NotImplementedError("Skills are not implemented for this data layer")
+
+    async def update_skill(self, skill: PromptDict) -> PromptDict:
+        raise NotImplementedError("Skills are not implemented for this data layer")
+
+    async def delete_skill(self, skill_id: str, user_id: str) -> bool:
+        raise NotImplementedError("Skills are not implemented for this data layer")
+
     # ---- Prompt scheduling (opt-in; non-abstract for compatibility) ----
 
     async def create_scheduled_task(self, task: ScheduledTaskDict) -> ScheduledTaskDict:

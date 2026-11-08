@@ -17,6 +17,11 @@ export default mergeConfig(
         // The workspace keeps per-package node_modules, so force the app's
         // copies to avoid loading a second React instance.
         swr: path.resolve(import.meta.dirname, './node_modules/swr'),
+        // Unit tests must not open real websockets.
+        'socket.io-client': path.resolve(
+          import.meta.dirname,
+          './tests/mocks/socket.io-client.ts'
+        ),
         zustand: path.resolve(import.meta.dirname, './node_modules/zustand')
       }
     },

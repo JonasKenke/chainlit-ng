@@ -14,6 +14,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
+from starlette.datastructures import UploadFile
 
 from chainlit.auth import get_current_user
 from chainlit.config import (
@@ -303,6 +304,85 @@ def test_get_file_success(
     assert response.status_code == 200
     assert response.content == test_content
     assert response.headers["content-type"].startswith("text/plain")
+
+
+@pytest.mark.parametrize(
+    ("mime", "disposition"),
+    [
+        ("text/html", "attachment"),
+        ("text/plain; charset=utf-8", "attachment"),
+        ("image/svg+xml", "attachment"),
+        ("image/svg+xml, text/html", "attachment"),
+        ("image/svg+xml , text/html", "attachment"),
+        ("text/html, image/svg+xml", "attachment"),
+        ("image/png", "inline"),
+        ("application/pdf", "inline"),
+        ("audio/mpeg", "inline"),
+        ("video/mp4", "inline"),
+    ],
+)
+def test_get_file_disposition_prevents_inline_execution(
+    test_client: TestClient,
+    mock_session_get_by_id_patched: Mock,
+    tmp_path: pathlib.Path,
+    mock_get_current_user: Mock,
+    mime: str,
+    disposition: str,
+):
+    """Non-media attachments must download; media elements stay inline."""
+    mock_get_current_user.return_value = mock_session_get_by_id_patched.user
+
+    test_file = tmp_path / "test_file"
+    test_file.write_bytes(b"payload")
+    mock_session_get_by_id_patched.files = {
+        "test_file_id": {
+            "id": "test_file_id",
+            "path": test_file,
+            "name": "test_file",
+            "type": mime,
+            "size": 7,
+        }
+    }
+
+    response = test_client.get(
+        f"/project/file/test_file_id?session_id={mock_session_get_by_id_patched.id}"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "," not in response.headers["content-type"]
+    assert response.headers["content-disposition"].startswith(disposition)
+    assert 'filename="test_file"' in response.headers["content-disposition"]
+
+
+def test_get_file_does_not_reflect_hostile_filename(
+    test_client: TestClient,
+    mock_session_get_by_id_patched: Mock,
+    tmp_path: pathlib.Path,
+    mock_get_current_user: Mock,
+):
+    """The client-controlled name must not inject response headers."""
+    mock_get_current_user.return_value = mock_session_get_by_id_patched.user
+
+    test_file = tmp_path / "test_file"
+    test_file.write_bytes(b"payload")
+    mock_session_get_by_id_patched.files = {
+        "test_file_id": {
+            "id": "test_file_id",
+            "path": test_file,
+            "name": 'x"\r\nX-Injected: yes',
+            "type": "text/html",
+            "size": 7,
+        }
+    }
+
+    response = test_client.get(
+        f"/project/file/test_file_id?session_id={mock_session_get_by_id_patched.id}"
+    )
+
+    assert response.status_code == 200
+    assert "x-injected" not in {key.lower() for key in response.headers}
+    assert response.headers["content-disposition"].startswith("attachment")
 
 
 def test_get_file_not_existent_file(
@@ -680,6 +760,43 @@ def test_upload_file_size_check(
 
     # Verify the response
     assert response.status_code == expected_status
+
+
+def test_upload_file_size_rejected_before_read(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    mock_session_get_by_id_patched: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Oversized uploads are rejected before the body is buffered in memory."""
+
+    monkeypatch.setattr(
+        test_config.features,
+        "spontaneous_file_upload",
+        SpontaneousFileUploadFeature(max_size_mb=1, enabled=True),
+    )
+
+    original_read = UploadFile.read
+    read_calls: list[int] = []
+
+    async def spy_read(self: UploadFile, size: int = -1):
+        read_calls.append(size)
+        return await original_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", spy_read)
+
+    response = test_client.post(
+        "/project/file",
+        files={
+            "file": ("too_large.txt", b"1" * (1024 * 1024 + 1), "text/plain"),
+        },
+        params={"session_id": mock_session_get_by_id_patched.id},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "File size too large"
+    assert read_calls == []
+    assert not mock_session_get_by_id_patched.persist_file.called
 
 
 @pytest.mark.parametrize(
