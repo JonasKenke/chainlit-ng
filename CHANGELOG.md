@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Add `[features.spontaneous_file_upload] directory` to store uploaded files outside `APP_ROOT`. Relative paths resolve against `APP_ROOT`, absolute paths are used as-is, and startup fails with an actionable error when the directory is not writable.
+
 ### Changed
 
 - **Breaking (MCP):** Configure MCP servers by name under `[[features.mcp.servers]]`; the client no longer supplies stdio commands or named-server URLs. User-provided SSE/streamable-HTTP servers require `[features.mcp.user_servers]` with `enabled = true` and `allowed_urls`. Legacy `[features.mcp.sse|stdio|streamable-http]` keys (including `allowed_executables`) abort startup only when `features.mcp.enabled = true`; MCP remains off by default. See the [2.12.0 MCP advisory and migration guide](docs/security-advisory-2026-mcp.md#migrating-a-211-config).

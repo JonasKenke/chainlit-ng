@@ -2,6 +2,7 @@ import json
 import os
 import site
 import sys
+import tempfile
 from importlib import util
 from pathlib import Path
 from typing import (
@@ -56,10 +57,6 @@ TRANSLATIONS_DIR = os.path.join(BACKEND_ROOT, "translations")
 
 # Get the directory the script is running from
 APP_ROOT = os.getenv("CHAINLIT_APP_ROOT", os.getcwd())
-
-# Create the directory to store the uploaded files
-FILES_DIRECTORY = Path(APP_ROOT) / ".files"
-FILES_DIRECTORY.mkdir(exist_ok=True)
 
 config_dir = os.path.join(APP_ROOT, ".chainlit")
 public_dir = os.path.join(APP_ROOT, "public")
@@ -135,6 +132,9 @@ reaction_on_message_received = false
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
     enabled = true
+    # Directory for uploaded files. Relative paths resolve against APP_ROOT;
+    # absolute paths are used as-is. Defaults to .files under APP_ROOT.
+    # directory = ".files"
     # Define accepted file types using MIME types
     # Examples:
     # 1. For specific file types:
@@ -343,6 +343,9 @@ class SpontaneousFileUploadFeature(BaseModel):
     accept: Optional[Union[List[str], Dict[str, List[str]]]] = None
     max_files: Optional[int] = None
     max_size_mb: Optional[int] = None
+    # Startup-only. Excluded from client-facing dumps so the server's
+    # filesystem layout is not disclosed.
+    directory: Optional[str] = Field(default=None, exclude=True)
 
 
 class AudioFeature(BaseModel):
@@ -712,6 +715,34 @@ class ChainlitConfig(BaseSettings):
         return type(self).model_validate(merged)
 
 
+def resolve_files_directory(
+    upload_feature: Optional[SpontaneousFileUploadFeature],
+) -> Path:
+    """Resolve, create, and verify the upload directory once at startup."""
+    configured = upload_feature.directory if upload_feature else None
+    if configured:
+        path = Path(configured)
+        if not path.is_absolute():
+            path = Path(APP_ROOT) / path
+    else:
+        path = Path(APP_ROOT) / ".files"
+
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        # A write probe catches read-only mounts and permissions that mkdir
+        # alone cannot, without leaving a file behind.
+        with tempfile.TemporaryFile(dir=path):
+            pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot use upload directory '{path}': {exc}. "
+            "Set [features.spontaneous_file_upload] directory to a writable "
+            "directory (relative paths resolve against APP_ROOT)."
+        ) from exc
+
+    return path
+
+
 def init_config(log: bool = False):
     """Initialize the configuration file if it doesn't exist."""
     if not os.path.exists(config_file):
@@ -969,3 +1000,7 @@ def lint_translations():
 
 
 config = load_config()
+
+# Resolve once at startup so every session uses the same directory and an
+# unusable path fails before the server accepts uploads.
+FILES_DIRECTORY = resolve_files_directory(config.features.spontaneous_file_upload)

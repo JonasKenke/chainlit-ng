@@ -9,10 +9,12 @@ from chainlit.config import (
     DEFAULT_CONFIG_STR,
     ChainlitConfig,
     McpFeature,
+    SpontaneousFileUploadFeature,
     SseMcpServer,
     StdioMcpServer,
     UISettings,
     _check_legacy_mcp_config,
+    resolve_files_directory,
 )
 
 
@@ -159,6 +161,90 @@ class TestUISettings:
 
     def test_config_template_documents_cot_display(self):
         assert '# cot_display = "list"' in DEFAULT_CONFIG_STR
+
+
+class TestSpontaneousFileUploadDirectory:
+    def test_default_is_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(chainlit_config, "APP_ROOT", str(tmp_path))
+        existing = tmp_path / ".files"
+        existing.mkdir()
+        marker = existing / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+
+        assert SpontaneousFileUploadFeature().directory is None
+        assert resolve_files_directory(None) == existing
+        assert marker.read_text(encoding="utf-8") == "keep"
+
+    def test_relative_path_resolves_against_app_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        app_root = tmp_path / "app"
+        monkeypatch.setattr(chainlit_config, "APP_ROOT", str(app_root))
+
+        path = resolve_files_directory(
+            SpontaneousFileUploadFeature(directory="data/uploads")
+        )
+
+        assert path == app_root / "data" / "uploads"
+        assert path.is_dir()
+
+    def test_absolute_path_outside_app_root_is_used_as_is(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        app_root = tmp_path / "app"
+        app_root.mkdir()
+        monkeypatch.setattr(chainlit_config, "APP_ROOT", str(app_root))
+        target = tmp_path / "mnt" / "uploads"
+
+        path = resolve_files_directory(
+            SpontaneousFileUploadFeature(directory=str(target))
+        )
+
+        assert path == target
+        assert path.is_dir()
+        assert not path.is_relative_to(app_root)
+
+    def test_directory_is_not_exposed_to_clients(self):
+        feature = SpontaneousFileUploadFeature(directory="/mnt/uploads")
+
+        assert feature.directory == "/mnt/uploads"
+        assert "directory" not in feature.model_dump()
+
+    def test_template_documents_commented_default(self):
+        assert '# directory = ".files"' in DEFAULT_CONFIG_STR
+
+    def test_uncreatable_path_fails_with_actionable_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(chainlit_config, "APP_ROOT", str(tmp_path))
+        occupied = tmp_path / "occupied"
+        occupied.write_text("not a directory", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="Cannot use upload directory") as exc:
+            resolve_files_directory(
+                SpontaneousFileUploadFeature(directory=str(occupied))
+            )
+
+        assert str(occupied) in str(exc.value)
+        assert "spontaneous_file_upload" in str(exc.value)
+
+    def test_unwritable_directory_fails_with_actionable_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(chainlit_config, "APP_ROOT", str(tmp_path))
+
+        def deny_write(*args, **kwargs):
+            raise PermissionError("read-only filesystem")
+
+        monkeypatch.setattr(chainlit_config.tempfile, "TemporaryFile", deny_write)
+
+        with pytest.raises(RuntimeError, match="Cannot use upload directory") as exc:
+            resolve_files_directory(None)
+
+        assert "read-only filesystem" in str(exc.value)
+        assert "spontaneous_file_upload" in str(exc.value)
 
 
 class TestCompactStepsTranslations:
