@@ -10,22 +10,25 @@ can be removed.
 No production code is changed by this module.
 """
 
+import io
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
+from starlette.datastructures import Headers
 
 import chainlit.data as data_mod
 import chainlit.socket as socket
 from chainlit.auth import get_current_user
-from chainlit.config import config
+from chainlit.config import SpontaneousFileUploadFeature, config
 from chainlit.context import ChainlitContext, context_var
 from chainlit.data.base import BaseDataLayer
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.emitter import ChainlitEmitter
-from chainlit.server import app
+from chainlit.server import app, upload_file
 from chainlit.session import WebsocketSession, ws_sessions_id, ws_sessions_sid
 from chainlit.types import AskFileSpec, PageInfo, PaginatedResponse
 from chainlit.user import PersistedUser
@@ -85,6 +88,7 @@ def session(monkeypatch):
     session.user = USER
     session.files = {}
     session.files_spec = {}
+    session.uploaded_file_counts = {}
     session.files_dir = Mock()
     session.persist_file = AsyncMock(
         return_value={"id": "file-1", "name": "a", "type": "text/plain", "size": 1}
@@ -399,11 +403,21 @@ def test_upload_accepts_zero_byte_file(api, session):
     assert session.persist_file.await_args.kwargs["content"] == b""
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F3: missing multipart Content-Type trips "
-    "assert file.content_type and returns 500 instead of 400.",
-)
+async def test_upload_without_filename_returns_400(session):
+    file = UploadFile(
+        file=io.BytesIO(b"x"),
+        filename="",
+        headers=Headers({"content-type": "text/plain"}),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_file(USER, session.id, file)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "No filename for uploaded file"
+    assert not session.persist_file.called
+
+
 def test_upload_without_content_type_returns_400(api, session):
     response = api.post(
         "/project/file",
@@ -411,14 +425,41 @@ def test_upload_without_content_type_returns_400(api, session):
         params={"session_id": session.id},
     )
     assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "No content type for uploaded file"
+    assert not session.persist_file.called
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F11: AskFileSpec.max_files is sent to the client but the "
-    "server never enforces it; both uploads are accepted.",
-)
 def test_upload_enforces_ask_max_files(api, session):
+    session.files_spec = {
+        ask_id: AskFileSpec(
+            type="file",
+            step_id=ask_id,
+            timeout=90,
+            accept=["text/plain"],
+            max_files=1,
+            max_size_mb=2,
+        )
+        for ask_id in ("ask-1", "ask-2")
+    }
+
+    def upload(ask_parent_id, name):
+        return api.post(
+            "/project/file",
+            files={"file": (name, b"x", "text/plain")},
+            params={"session_id": session.id, "ask_parent_id": ask_parent_id},
+        )
+
+    assert upload("ask-1", "first.txt").status_code == 200
+    over_limit = upload("ask-1", "second.txt")
+    assert over_limit.status_code == 400, over_limit.text
+    assert over_limit.json()["detail"] == "File upload limit reached"
+
+    # The limit is per ask, not per session.
+    assert upload("ask-2", "other-ask.txt").status_code == 200
+    assert session.persist_file.await_count == 2
+
+
+def test_upload_persist_failure_does_not_consume_limit(api, session):
     session.files_spec = {
         "ask-1": AskFileSpec(
             type="file",
@@ -429,14 +470,46 @@ def test_upload_enforces_ask_max_files(api, session):
             max_size_mb=2,
         )
     }
-    for index in range(2):
-        response = api.post(
+    session.persist_file.side_effect = RuntimeError("disk full")
+
+    failed = api.post(
+        "/project/file",
+        files={"file": ("first.txt", b"x", "text/plain")},
+        params={"session_id": session.id, "ask_parent_id": "ask-1"},
+    )
+    assert failed.status_code == 500
+
+    session.persist_file.side_effect = None
+    retried = api.post(
+        "/project/file",
+        files={"file": ("retry.txt", b"x", "text/plain")},
+        params={"session_id": session.id, "ask_parent_id": "ask-1"},
+    )
+    assert retried.status_code == 200, retried.text
+
+
+def test_upload_enforces_spontaneous_max_files(api, session, monkeypatch):
+    monkeypatch.setattr(
+        config.features,
+        "spontaneous_file_upload",
+        SpontaneousFileUploadFeature(enabled=True, accept=["text/plain"], max_files=1),
+    )
+
+    def upload(name, mime):
+        return api.post(
             "/project/file",
-            files={"file": (f"f{index}.txt", b"x", "text/plain")},
-            params={"session_id": session.id, "ask_parent_id": "ask-1"},
+            files={"file": (name, b"x", mime)},
+            params={"session_id": session.id},
         )
-        if index == 1:
-            assert response.status_code == 400, response.text
+
+    # A rejected MIME type must not consume the upload budget.
+    assert upload("image.png", "image/png").status_code == 400
+    assert upload("first.txt", "text/plain").status_code == 200
+
+    over_limit = upload("second.txt", "text/plain")
+    assert over_limit.status_code == 400, over_limit.text
+    assert over_limit.json()["detail"] == "File upload limit reached"
+    assert session.persist_file.await_count == 1
 
 
 def test_upload_unknown_ask_parent_returns_404(api, session):

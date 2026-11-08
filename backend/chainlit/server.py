@@ -3573,8 +3573,17 @@ async def upload_file(
     session.files_dir.mkdir(exist_ok=True)
 
     try:
-        assert file.filename, "No filename for uploaded file"
-        assert file.content_type, "No content type for uploaded file"
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="No filename for uploaded file",
+            )
+
+        if not file.content_type:
+            raise HTTPException(
+                status_code=400,
+                detail="No content type for uploaded file",
+            )
 
         spec: AskFileSpec = session.files_spec.get(ask_parent_id, None)
         if not spec and ask_parent_id:
@@ -3589,15 +3598,39 @@ async def upload_file(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        content = await file.read()
+        max_files = get_max_upload_files(spec)
+        uploaded = session.uploaded_file_counts.get(ask_parent_id, 0)
+        if max_files is not None and uploaded >= max_files:
+            raise HTTPException(
+                status_code=400,
+                detail="File upload limit reached",
+            )
 
-        file_response = await session.persist_file(
-            name=file.filename, content=content, mime=file.content_type
-        )
+        # Reserve the slot before awaiting so concurrent uploads cannot race past
+        # the limit; rejected MIME/size uploads never reach this point.
+        session.uploaded_file_counts[ask_parent_id] = uploaded + 1
+        try:
+            content = await file.read()
+
+            file_response = await session.persist_file(
+                name=file.filename, content=content, mime=file.content_type
+            )
+        except BaseException:
+            session.uploaded_file_counts[ask_parent_id] -= 1
+            raise
 
         return JSONResponse(content=file_response)
     finally:
         await file.close()
+
+
+def get_max_upload_files(spec: Optional[AskFileSpec]) -> Optional[int]:
+    """Return the upload limit for an ask, or for spontaneous uploads."""
+    if spec is not None:
+        return spec.max_files
+
+    spontaneous = config.features.spontaneous_file_upload
+    return spontaneous.max_files if spontaneous else None
 
 
 def validate_file_upload(file: UploadFile, spec: Optional[AskFileSpec] = None):
