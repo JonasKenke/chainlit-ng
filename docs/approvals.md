@@ -74,12 +74,19 @@ For an approval step, the decorator writes only a redacted preview to
 }
 ```
 
-The raw arguments live in the in-process waiter and in the transient approval
-event. They are never written to `steps.input` by the decorated path. If an app
-sets `step.input` itself, it owns that persistence decision.
+The server snapshots the arguments, normalizes them to plain JSON values, and
+keeps that snapshot for execution. The live card receives the snapshot; the
+persisted `step.input` contains only the redacted preview. Redaction is
+key-name based, so values under keys that do not look secret remain visible in
+the preview. If an app sets `step.input` itself, it owns that persistence
+decision.
 
 `show_input=False` is a read filter, not a security control. It does not stop
 arguments from being stored.
+
+The decorator does not expose an extra `redact` list. A tool with a sensitive
+field whose name is not caught by the built-in patterns should use the explicit
+`Approval(redact=(...))` API.
 
 ### Advanced: explicit `Approval`
 
@@ -173,7 +180,9 @@ record is refused without changing state.
 The record lives under `step.metadata["approval"]`. It contains the approval id,
 revision, tool, title, status, requesting user, timestamps, expiry, edit flag, a
 per-approval salt, an HMAC digest of the full arguments, and a recursively
-redacted preview. Raw argument values are not part of the persisted record.
+redacted preview. The preview is key-name based: a value under a
+non-secret-looking key stays in the record even though the full-argument digest
+also covers it. Raw argument objects are never stored.
 
 Writes for an approval-bearing step are serialized by a per-step lock and
 awaited while the step is approval-managed. A terminal decision is written
@@ -265,7 +274,9 @@ echo the submitted value. Invalid arguments produce no write and no execution.
 - **Secrets at rest** – the decorated path stores only a redacted preview. The
   preview redacts case-insensitive key parts such as `authorization`, `api_key`,
   `apikey`, `password`, `secret`, `token` and `credential`, recursively, up to
-  depth 8 and 16 KiB. Apps can add keys with `Approval(redact=...)`.
+  depth 8 and 16 KiB. Values under other keys stay visible; the heuristic does
+  not inspect values. Apps can add keys with `Approval(redact=...)`, or use the
+  explicit API when the decorator's fixed list is not enough.
 - **Terminal overwrite** – one locked transition handles decisions and timeouts.
   A later transition returns the stored record and changes nothing.
 - **Identity / session spoofing** – the record is bound to the authenticated

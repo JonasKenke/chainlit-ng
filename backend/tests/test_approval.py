@@ -2106,3 +2106,63 @@ async def test_decorator_edit_on_a_method_keeps_self_out_of_the_record(
         assert await task == "ran"
 
     assert calls == [7]
+
+
+async def test_decorator_rejects_non_json_arguments_before_creating_a_step(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    class Blob:
+        def __repr__(self):
+            return "Blob(secret=sk-nonjson-secret)"
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(payload):
+            calls.append(payload)
+            return "ran"
+
+        with pytest.raises(ApprovalInvalidArguments) as exc:
+            await tool(payload=Blob())
+
+    assert exc.value.field == "payload"
+    assert exc.value.error_type == "json_invalid"
+    assert "sk-nonjson-secret" not in str(exc.value)
+    assert calls == []
+    assert layer.steps == {}
+
+
+async def test_decorator_executes_the_normalized_snapshot(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    class DivergentStr(str):
+        def __deepcopy__(self, memo):
+            return "runs-unseen"
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(value):
+            calls.append((type(value).__name__, value))
+            return "ran"
+
+        task = asyncio.create_task(tool(value=DivergentStr("shown-to-approver")))
+        entry = await _next_entry()
+        assert entry.step.metadata["approval"]["argumentsPreview"] == {
+            "value": "shown-to-approver"
+        }
+
+        await _decide(mock_session, entry)
+        assert await task == "ran"
+
+    assert calls == [("str", "shown-to-approver")]

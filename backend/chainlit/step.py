@@ -82,23 +82,49 @@ def flatten_args_kwargs(func, args, kwargs):
     return {k: deepcopy(v) for k, v in bound_arguments.arguments.items()}
 
 
-def _approval_arguments(func, args, kwargs):
-    """Split self/cls from the JSON-compatible approval arguments."""
+def _approval_arguments(func, args, kwargs) -> Dict:
+    """Snapshot JSON-only arguments, excluding self/cls.
+
+    The snapshot is normalized to plain JSON values, so later copies are
+    identical. The tool executes this snapshot, not the caller's objects.
+    """
+    from chainlit.approval import ApprovalInvalidArguments, _canonical_json
+
     signature = inspect.signature(func)
     bound = signature.bind(*args, **kwargs)
     bound.apply_defaults()
     parameters = list(signature.parameters.values())
     drop_first = bool(parameters) and parameters[0].name in ("self", "cls")
-    prefix = ()
-    arguments = {}
+    arguments: Dict = {}
     for index, (key, value) in enumerate(bound.arguments.items()):
         if index == 0 and drop_first:
-            # Keep the instance itself; deepcopy(self) would run the tool
-            # against a different object after an edit.
-            prefix = (value,)
-        else:
-            arguments[key] = deepcopy(value)
-    return arguments, prefix
+            continue
+        try:
+            arguments[key] = json.loads(_canonical_json(value))
+        except ApprovalInvalidArguments as exc:
+            raise ApprovalInvalidArguments(
+                "approval arguments must be JSON-compatible",
+                field=key,
+                error_type="json_invalid",
+            ) from exc
+    return arguments
+
+
+def _approval_call_arguments(func, args, kwargs, arguments: Dict, *, edited: bool):
+    """Overlay the approved snapshot onto the original call."""
+    from chainlit.approval import ApprovalInvalidArguments
+
+    bound = inspect.signature(func).bind(*args, **kwargs)
+    bound.apply_defaults()
+    for key, value in arguments.items():
+        if key not in bound.arguments:
+            raise ApprovalInvalidArguments(
+                "approved arguments do not match the function signature",
+                field=f"editedArguments.{key}" if edited else key,
+                error_type="unknown_field",
+            )
+        bound.arguments[key] = value
+    return bound.args, bound.kwargs
 
 
 def _approval_preview_input(name: str, arguments: Dict) -> Dict:
@@ -151,6 +177,11 @@ def step(
 
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
+                approval_arguments: Dict = {}
+                if requires_approval:
+                    # Snapshot and validate before creating a step or a card.
+                    approval_arguments = _approval_arguments(func, args, kwargs)
+
                 step_instance = Step(
                     type=type,
                     name=name,
@@ -167,20 +198,12 @@ def step(
                     requires_approval=requires_approval,
                     approval_schema=approval_schema,
                 )
-                approval_arguments: Dict = {}
-                approval_prefix: tuple = ()
                 if requires_approval:
-                    # Persist the redacted preview, never the execution source.
-                    try:
-                        approval_arguments, approval_prefix = _approval_arguments(
-                            func, args, kwargs
-                        )
-                    except Exception as e:
-                        logger.exception(e)
                     step_instance.input = _approval_preview_input(
                         step_instance.name, approval_arguments
                     )
-                    # The decorator is the only supported owner of the flag.
+                    # The decorator alone may satisfy the manual-flag guard.
+                    step_instance._approval_decorated = True
                     step_instance._approval_managed = True
 
                 async with step_instance as step:
@@ -201,14 +224,14 @@ def step(
                             )
                             step.output = f"Approval {label}"
                             return None
-                        if decision.decision == "edit":
-                            bound = inspect.signature(func).bind(
-                                *approval_prefix, **decision.arguments
-                            )
-                            bound.apply_defaults()
-                            result = await func(*bound.args, **bound.kwargs)
-                        else:
-                            result = await func(*args, **kwargs)
+                        call_args, call_kwargs = _approval_call_arguments(
+                            func,
+                            args,
+                            kwargs,
+                            decision.arguments,
+                            edited=decision.decision == "edit",
+                        )
+                        result = await func(*call_args, **call_kwargs)
                     else:
                         try:
                             step.input = flatten_args_kwargs(func, args, kwargs)
@@ -317,6 +340,7 @@ class Step:
         self._output = ""
         self._persistence_tasks: set[asyncio.Task] = set()
         self._approval_managed = False
+        self._approval_decorated = False
         self.requires_approval = requires_approval
         self.approval_schema = approval_schema
         self.thread_id = thread_id or context.session.thread_id
@@ -605,7 +629,7 @@ class Step:
         )
 
     def _check_manual_approval(self) -> None:
-        if self.requires_approval and not self._approval_managed:
+        if self.requires_approval and not self._approval_decorated:
             from chainlit.approval import ApprovalUnsupported
 
             raise ApprovalUnsupported(

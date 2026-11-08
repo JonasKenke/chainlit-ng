@@ -42,6 +42,16 @@ class TestStepClass:
                 with Step(name="manual_tool", requires_approval=True):
                     pass
 
+    async def test_previous_approval_management_does_not_unlock_manual_flag(
+        self, mock_chainlit_context
+    ):
+        async with mock_chainlit_context:
+            step = Step(name="manual_tool", requires_approval=True)
+            step._approval_managed = True
+            with pytest.raises(ApprovalUnsupported, match="through @step"):
+                async with step:
+                    pass
+
     async def test_step_initialization_with_defaults(self, mock_chainlit_context):
         """Test Step initialization with default values."""
         async with mock_chainlit_context:
