@@ -465,6 +465,33 @@ def test_validate_mcp_url_rejects_wildcards_outside_host_and_path():
         ("https://allowed.com/api/x;..", ["https://allowed.com/api"], True),
         # A legitimate percent-encoded path segment must still pass.
         ("https://allowed.com/api/name%20x", ["https://allowed.com/api"], False),
+        # Parser differentials: the host that reaches the wire must be the
+        # allowed host, not a userinfo, backslash or trailing-dot lookalike.
+        (
+            "https://allowed.example.com@evil.com/mcp",
+            ["https://allowed.example.com/mcp"],
+            True,
+        ),
+        (
+            "https://allowed.example.com\\evil.com/mcp",
+            ["https://allowed.example.com/mcp"],
+            True,
+        ),
+        (
+            "https://allowed.example.com%5cevil.com/mcp",
+            ["https://allowed.example.com/mcp"],
+            True,
+        ),
+        (
+            "https://allowed.example.com./mcp",
+            ["https://allowed.example.com/mcp"],
+            True,
+        ),
+        (
+            "https://allowed.example.com:443.evil.com/mcp",
+            ["https://allowed.example.com/mcp"],
+            True,
+        ),
     ],
 )
 def test_validate_mcp_url(url, allowed_urls, should_raise):

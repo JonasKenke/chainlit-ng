@@ -532,6 +532,144 @@ async def test_delete_all_threads_raises_when_sql_fails(
         await data_layer.delete_all_threads("some-user")
 
 
+async def test_list_threads_only_returns_target_user_threads(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="list_alice"))
+    bob = await data_layer.create_user(User(identifier="list_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+
+    page = await data_layer.list_threads(
+        Pagination(first=50), ThreadFilter(userId=alice.id)
+    )
+
+    assert {thread["id"] for thread in page.data} == {
+        "alice_thread_0",
+        "alice_thread_1",
+    }
+
+
+async def test_list_threads_requires_a_user_id(data_layer: SQLAlchemyDataLayer):
+    with pytest.raises(ValueError, match="userId is required"):
+        await data_layer.list_threads(Pagination(first=50), ThreadFilter())
+
+
+async def test_get_element_is_scoped_to_its_thread(data_layer: SQLAlchemyDataLayer):
+    alice = await data_layer.create_user(User(identifier="element_alice"))
+    bob = await data_layer.create_user(User(identifier="element_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+
+    assert await data_layer.get_element("alice_thread_0", "alice_element_0")
+    assert await data_layer.get_element("alice_thread_1", "alice_element_0") is None
+    assert await data_layer.get_element("bob_thread_0", "alice_element_0") is None
+
+
+async def test_delete_element_is_scoped_to_its_thread(
+    mock_chainlit_context,
+    data_layer: SQLAlchemyDataLayer,
+    mock_storage_client: BaseStorageClient,
+):
+    alice = await data_layer.create_user(User(identifier="delete_element_alice"))
+    bob = await data_layer.create_user(User(identifier="delete_element_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+    delete_file = cast(AsyncMock, mock_storage_client.delete_file)
+
+    async with mock_chainlit_context:
+        await data_layer.delete_element("alice_element_0", "bob_thread_0")
+
+        assert await data_layer.get_element("alice_thread_0", "alice_element_0")
+        delete_file.assert_not_awaited()
+
+        await data_layer.delete_element("alice_element_0", "alice_thread_0")
+
+    assert await data_layer.get_element("alice_thread_0", "alice_element_0") is None
+    delete_file.assert_awaited_once_with(object_key="alice-object-0")
+
+
+async def test_create_element_cannot_overwrite_another_threads_element(
+    mock_chainlit_context,
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="overwrite_alice"))
+    bob = await data_layer.create_user(User(identifier="overwrite_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+
+    async with mock_chainlit_context:
+        await data_layer.create_element(
+            Text(
+                id="alice_element_0",
+                name="overwrite.txt",
+                mime="text/plain",
+                content="overwritten",
+                for_id="bob_step_0",
+                thread_id="bob_thread_0",
+            )
+        )
+
+    element = await data_layer.get_element("alice_thread_0", "alice_element_0")
+    assert element is not None
+    assert element["name"] == "attachment.txt"
+    assert await data_layer.get_element("bob_thread_0", "alice_element_0") is None
+
+
+async def test_favorite_steps_only_returns_target_user_steps(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="fav_alice"))
+    bob = await data_layer.create_user(User(identifier="fav_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+    for prefix in ("alice", "bob"):
+        await data_layer.execute_sql(
+            query='UPDATE steps SET "metadata" = :metadata WHERE "id" LIKE :prefix',
+            parameters={"metadata": '{"favorite": true}', "prefix": f"{prefix}_step_%"},
+        )
+
+    steps = await data_layer.get_favorite_steps(alice.id)
+
+    assert {step["id"] for step in steps} == {"alice_step_0", "alice_step_1"}
+
+
+async def test_prompts_are_scoped_to_their_owner(data_layer: SQLAlchemyDataLayer):
+    alice = await data_layer.create_user(User(identifier="prompt_alice"))
+    bob = await data_layer.create_user(User(identifier="prompt_bob"))
+    assert alice
+    assert bob
+    now = "2026-01-01T00:00:00Z"
+    for owner, prompt_id in ((alice, "alice-prompt"), (bob, "bob-prompt")):
+        await data_layer.create_prompt(
+            {
+                "id": prompt_id,
+                "userId": owner.id,
+                "title": prompt_id,
+                "content": "secret",
+                "isShared": False,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+
+    listed = await data_layer.list_prompts(alice.id)
+
+    assert [prompt["id"] for prompt in listed] == ["alice-prompt"]
+    assert await data_layer.delete_prompt("alice-prompt", bob.id) is False
+    assert await data_layer.delete_prompt("alice-prompt", alice.id) is True
+
+
 @pytest.mark.parametrize(
     "payload_template",
     [
@@ -590,3 +728,31 @@ async def test_thread_id_cannot_inject_sql(
         parameters={"thread_id": "victim_thread"},
     )
     assert victim_steps == [{"count": 1}]
+
+
+async def test_element_storage_key_stays_under_the_thread_owner(
+    data_layer: SQLAlchemyDataLayer,
+    mock_storage_client: BaseStorageClient,
+    mock_chainlit_context,
+):
+    alice = await data_layer.create_user(User(identifier="element_key_alice"))
+    bob = await data_layer.create_user(User(identifier="element_key_bob"))
+    assert alice
+    assert bob
+    await data_layer.update_thread("alice-thread", user_id=alice.id)
+    element = Text(
+        id="element-key-1",
+        name="../../bob/overwrite.txt",
+        mime="text/plain",
+        content="payload",
+        thread_id="alice-thread",
+        for_id="step-1",
+    )
+
+    async with mock_chainlit_context:
+        await data_layer.create_element(element)
+
+    upload = cast(AsyncMock, mock_storage_client).upload_file
+    object_key = upload.await_args.kwargs["object_key"]
+    assert object_key.startswith(f"{alice.id}/{element.id}/")
+    assert not object_key.startswith(f"{bob.id}/")
