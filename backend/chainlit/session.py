@@ -185,6 +185,8 @@ class BaseSession:
 
         self.files: Dict[str, FileDict] = {}
         self.files_spec: Dict[str, AskFileSpec] = {}
+        # Upload counts keyed by ask_parent_id; None counts spontaneous uploads.
+        self.uploaded_file_counts: Dict[Optional[str], int] = {}
 
         self.id = id
 
