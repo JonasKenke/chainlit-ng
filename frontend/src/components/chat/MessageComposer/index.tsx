@@ -1,4 +1,4 @@
-import { isMessageTooLarge } from '@/lib/utils';
+import { MESSAGE_TOO_LARGE, isMessageTooLarge } from '@/lib/utils';
 import {
   MutableRefObject,
   useCallback,
@@ -190,7 +190,9 @@ export default function MessageComposer({
         .map((a) => ({ id: a.serverId! }));
 
       if (isMessageTooLarge(message, fileReferences)) {
-        toast.error(t('chat.input.errors.tooLarge'));
+        toast.error(
+          t('chat.input.errors.tooLarge', { defaultValue: MESSAGE_TOO_LARGE })
+        );
         return false;
       }
 
@@ -216,7 +218,9 @@ export default function MessageComposer({
       };
 
       if (isMessageTooLarge(message)) {
-        toast.error(t('chat.input.errors.tooLarge'));
+        toast.error(
+          t('chat.input.errors.tooLarge', { defaultValue: MESSAGE_TOO_LARGE })
+        );
         return false;
       }
 
