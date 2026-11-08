@@ -84,8 +84,10 @@ class TestDecodeJwt:
     def test_rejects_tampered_signature(self):
         token = create_jwt(User(identifier="alice"))
         header, payload, signature = token.split(".")
+        # Tamper the first char: the last base64url char carries padding bits,
+        # so changing it can decode to the same signature bytes.
         tampered = ".".join(
-            [header, payload, signature[:-1] + ("A" if signature[-1] != "A" else "B")]
+            [header, payload, ("A" if signature[0] != "A" else "B") + signature[1:]]
         )
 
         with pytest.raises(pyjwt.InvalidSignatureError):

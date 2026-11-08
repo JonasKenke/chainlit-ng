@@ -265,7 +265,7 @@ no values were printed or stored. Test fixtures use obvious fake constants (e.g.
 
 Integrated tree (`test/security-baseline` + `origin/main` at `904e94cc`):
 
-- `cd backend && env -u DATABASE_URL uv run pytest -q`: **1481 passed** in 45.55s.
+- `cd backend && env -u DATABASE_URL uv run pytest -q`: **1481 passed** in 46.60s.
 - `uv run scripts/lint.py`: all checks passed.
 - `uv run scripts/format.py --check`: 240 files already formatted.
 - `uv run scripts/type_check.py`: no issues in 133 source files.
