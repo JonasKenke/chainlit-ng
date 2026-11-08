@@ -5,7 +5,9 @@ import time
 import uuid
 from copy import deepcopy
 from functools import wraps
-from typing import Callable, Dict, List, Literal, TypedDict, Union
+from typing import Callable, Dict, List, Literal, Optional, Type, TypedDict, Union
+
+from pydantic import BaseModel
 
 from chainlit.config import config
 from chainlit.context import CL_RUN_NAMES, context, local_steps
@@ -80,6 +82,37 @@ def flatten_args_kwargs(func, args, kwargs):
     return {k: deepcopy(v) for k, v in bound_arguments.arguments.items()}
 
 
+def _approval_arguments(func, args, kwargs):
+    """Split self/cls from the JSON-compatible approval arguments."""
+    signature = inspect.signature(func)
+    bound = signature.bind(*args, **kwargs)
+    bound.apply_defaults()
+    parameters = list(signature.parameters.values())
+    drop_first = bool(parameters) and parameters[0].name in ("self", "cls")
+    prefix = ()
+    arguments = {}
+    for index, (key, value) in enumerate(bound.arguments.items()):
+        if index == 0 and drop_first:
+            # Keep the instance itself; deepcopy(self) would run the tool
+            # against a different object after an edit.
+            prefix = (value,)
+        else:
+            arguments[key] = deepcopy(value)
+    return arguments, prefix
+
+
+def _approval_preview_input(name: str, arguments: Dict) -> Dict:
+    from chainlit.approval import _arguments_preview
+
+    return {
+        "approval": {
+            "tool": name,
+            "argumentsPreview": _arguments_preview(arguments),
+            "redacted": True,
+        }
+    }
+
+
 def step(
     original_function: Callable | None = None,
     *,
@@ -95,6 +128,8 @@ def step(
     show_input: Union[bool, str] = "json",
     default_open: bool = False,
     auto_collapse: bool = False,
+    requires_approval: bool = False,
+    approval_schema: Optional[Type[BaseModel]] = None,
 ):
     """Step decorator for async and sync functions."""
 
@@ -103,13 +138,20 @@ def step(
         if not name:
             name = func.__name__
 
+        if requires_approval and not inspect.iscoroutinefunction(func):
+            from chainlit.approval import ApprovalUnsupported
+
+            raise ApprovalUnsupported(
+                "requires_approval is only supported on async functions"
+            )
+
         # Handle async decorator
 
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
-                async with Step(
+                step_instance = Step(
                     type=type,
                     name=name,
                     id=id,
@@ -122,12 +164,57 @@ def step(
                     default_open=default_open,
                     auto_collapse=auto_collapse,
                     metadata=metadata,
-                ) as step:
+                    requires_approval=requires_approval,
+                    approval_schema=approval_schema,
+                )
+                approval_arguments: Dict = {}
+                approval_prefix: tuple = ()
+                if requires_approval:
+                    # Persist the redacted preview, never the execution source.
                     try:
-                        step.input = flatten_args_kwargs(func, args, kwargs)
+                        approval_arguments, approval_prefix = _approval_arguments(
+                            func, args, kwargs
+                        )
                     except Exception as e:
                         logger.exception(e)
-                    result = await func(*args, **kwargs)
+                    step_instance.input = _approval_preview_input(
+                        step_instance.name, approval_arguments
+                    )
+                    # The decorator is the only supported owner of the flag.
+                    step_instance._approval_managed = True
+
+                async with step_instance as step:
+                    if requires_approval:
+                        from chainlit.approval import Approval
+
+                        decision = await Approval(
+                            step=step,
+                            arguments=approval_arguments,
+                            arguments_schema=approval_schema,
+                        ).ask()
+                        if not decision.approved:
+                            step.is_error = True
+                            label = (
+                                "rejected"
+                                if decision.decision == "reject"
+                                else decision.decision
+                            )
+                            step.output = f"Approval {label}"
+                            return None
+                        if decision.decision == "edit":
+                            bound = inspect.signature(func).bind(
+                                *approval_prefix, **decision.arguments
+                            )
+                            bound.apply_defaults()
+                            result = await func(*bound.args, **bound.kwargs)
+                        else:
+                            result = await func(*args, **kwargs)
+                    else:
+                        try:
+                            step.input = flatten_args_kwargs(func, args, kwargs)
+                        except Exception as e:
+                            logger.exception(e)
+                        result = await func(*args, **kwargs)
                     try:
                         if result is not None and not step.output:
                             step.output = result
@@ -219,6 +306,8 @@ class Step:
         auto_collapse: bool | None = False,
         show_input: Union[bool, str] = "json",
         thread_id: str | None = None,
+        requires_approval: bool = False,
+        approval_schema: Optional[Type[BaseModel]] = None,
     ):
         if metadata and "approval" in metadata:
             raise ValueError("metadata['approval'] is reserved")
@@ -228,6 +317,8 @@ class Step:
         self._output = ""
         self._persistence_tasks: set[asyncio.Task] = set()
         self._approval_managed = False
+        self.requires_approval = requires_approval
+        self.approval_schema = approval_schema
         self.thread_id = thread_id or context.session.thread_id
         self.name = name or ""
         self.type = type
@@ -509,10 +600,21 @@ class Step:
             id=self.id,
             parent_id=self.parent_id,
             thread_id=self.thread_id,
+            requires_approval=self.requires_approval,
+            approval_schema=self.approval_schema,
         )
+
+    def _check_manual_approval(self) -> None:
+        if self.requires_approval and not self._approval_managed:
+            from chainlit.approval import ApprovalUnsupported
+
+            raise ApprovalUnsupported(
+                "Step(requires_approval=True) is only supported through @step"
+            )
 
     # Handle Context Manager Protocol
     async def __aenter__(self):
+        self._check_manual_approval()
         self.start = utc_now()
         previous_steps = local_steps.get() or []
         parent_step = previous_steps[-1] if previous_steps else None
@@ -539,6 +641,7 @@ class Step:
         await self.update()
 
     def __enter__(self):
+        self._check_manual_approval()
         self.start = utc_now()
 
         previous_steps = local_steps.get() or []

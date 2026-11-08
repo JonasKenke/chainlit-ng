@@ -35,11 +35,11 @@ const approval = {
   }
 };
 
-function renderCard() {
+function renderCard(overrides: Partial<typeof approval> = {}) {
   return render(
     <ChainlitContext.Provider value={{ respondToApproval } as any}>
       <MessageContext.Provider value={{ cot: 'hidden' } as any}>
-        <ApprovalCard approval={approval} />
+        <ApprovalCard approval={{ ...approval, ...overrides }} />
       </MessageContext.Provider>
     </ChainlitContext.Provider>
   );
@@ -60,6 +60,14 @@ describe('ApprovalCard', () => {
     expect(screen.getByText(/server-held-secret/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+  });
+
+  it('renders the title as text, never as HTML', () => {
+    const title = '<img src=x onerror="alert(1)">';
+    const { container } = renderCard({ title });
+
+    expect(screen.getByText(title)).toBeInTheDocument();
+    expect(container.querySelector('img')).toBeNull();
   });
 
   it('sends a decision without client-held arguments', async () => {
