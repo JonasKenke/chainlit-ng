@@ -2150,6 +2150,8 @@ async def get_thread_element(
     await is_thread_author(current_user.identifier, thread_id)
 
     res = await data_layer.get_element(thread_id, element_id)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Element not found")
     return JSONResponse(content=res)
 
 
