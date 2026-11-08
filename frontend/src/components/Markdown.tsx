@@ -213,6 +213,7 @@ const Markdown = ({
                   {...props}
                   className="text-primary hover:underline"
                   target="_blank"
+                  rel="noopener noreferrer"
                 >
                   {children}
                 </a>
@@ -243,6 +244,10 @@ const Markdown = ({
                   <video
                     src={src}
                     controls
+                    // Browsers ignore referrerpolicy on <video>; keep it on
+                    // both media nodes for a uniform hardening contract.
+                    // @ts-expect-error not part of VideoHTMLAttributes
+                    referrerPolicy="no-referrer"
                     className="w-full h-auto rounded-md"
                     style={{ maxWidth: '100%' }}
                   >
@@ -261,6 +266,7 @@ const Markdown = ({
                   <img
                     src={src}
                     alt={image.alt}
+                    referrerPolicy="no-referrer"
                     className="h-full w-full object-contain"
                   />
                 </AspectRatio>
