@@ -323,6 +323,34 @@ class DisconnectMCPRequest(BaseModel):
     name: str
 
 
+class McpPromptRequest(BaseModel):
+    """Invoke one prompt published by a connected MCP server.
+
+    ``name`` is the connected server, ``prompt`` the prompt to fetch. The
+    argument map is validated against the server's own schema before the
+    call; nothing is injected automatically.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sessionId: str
+    name: str
+    prompt: str
+    arguments: Optional[Dict[str, str]] = None
+
+
+class McpResourceRequest(BaseModel):
+    """Read one resource published by a connected MCP server."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sessionId: str
+    name: str
+    uri: str
+    # Display label from the picker; the element falls back to the URI tail.
+    resourceName: Optional[str] = None
+
+
 class ElementRequest(BaseModel):
     element: Dict
     sessionId: str

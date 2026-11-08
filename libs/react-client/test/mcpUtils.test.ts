@@ -61,6 +61,25 @@ describe('markMcpConnected', () => {
     expect(mcps[0].authorizationUrl).toBeUndefined();
   });
 
+  it('picks up the prompts and resources the server publishes', () => {
+    const mcps = markMcpConnected(pending(), {
+      name: 'server',
+      tools: [],
+      prompts: [
+        { name: 'standup', arguments: [{ name: 'team', required: true }] }
+      ],
+      resources: [{ uri: 'file:///readme.md', name: 'README' }],
+      status: 'connected'
+    });
+
+    expect(mcps[0].prompts).toEqual([
+      { name: 'standup', arguments: [{ name: 'team', required: true }] }
+    ]);
+    expect(mcps[0].resources).toEqual([
+      { uri: 'file:///readme.md', name: 'README' }
+    ]);
+  });
+
   it('clears a stale failure detail', () => {
     const mcps = markMcpConnected(
       [

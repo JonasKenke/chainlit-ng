@@ -182,6 +182,25 @@
       },
       "errors": {
         "connect": "Could not connect to the MCP server"
+      },
+      "library": {
+        "button": "MCP prompts and resources",
+        "title": "MCP library",
+        "tabs": {
+          "prompts": "Prompts",
+          "resources": "Resources"
+        },
+        "prompts": {
+          "empty": "No prompts from connected MCP servers"
+        },
+        "resources": {
+          "empty": "No resources from connected MCP servers"
+        },
+        "promptInsert": "Insert",
+        "promptInserted": "Prompt inserted into the composer",
+        "promptFailed": "Could not get the prompt from the MCP server",
+        "resourceAdded": "Resource added to the chat",
+        "resourceFailed": "Could not read the resource from the MCP server"
       }
     },
     "settings": {

@@ -82,6 +82,13 @@ from chainlit.data.acl import is_thread_author
 from chainlit.data.base import BaseDataLayer
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
+from chainlit.mcp_protocol import (
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    describe_mcp_server,
+    negotiate_protocol,
+    read_resource,
+    render_prompt,
+)
 from chainlit.oauth_providers import get_oauth_provider
 from chainlit.scheduled_task import (
     next_run_at,
@@ -117,6 +124,8 @@ from chainlit.types import (
     ElementRequest,
     GetThreadsRequest,
     ImportSkillRequest,
+    McpPromptRequest,
+    McpResourceRequest,
     PromptDict,
     ScheduledTaskDict,
     SharePromptRequest,
@@ -609,6 +618,20 @@ MCP_OAUTH_URL_DETAIL = (
 )
 MCP_OAUTH_WELL_KNOWN_DETAIL = "OAuth MCP URLs cannot contain /.well-known/."
 MCP_OAUTH_RATE_DETAIL = "Too many MCP authorization attempts; wait a minute and retry."
+
+# Prompt/resource failures answer with fixed details: the server's error text
+# can quote a URL, a token, or another user's data.
+MCP_NOT_CONNECTED_DETAIL = "This MCP server is not connected."
+MCP_PROMPT_FAILED_DETAIL = "Could not get the prompt from the MCP server."
+MCP_PROMPT_NOT_FOUND_DETAIL = "This MCP server has no prompt with that name."
+MCP_PROMPTS_UNSUPPORTED_DETAIL = "This MCP server does not support prompts."
+MCP_RESOURCE_FAILED_DETAIL = "Could not read the resource from the MCP server."
+MCP_RESOURCE_TOO_LARGE_DETAIL = (
+    "The resource is larger than the size limit and was not loaded."
+)
+MCP_PROMPT_TOO_LARGE_DETAIL = (
+    "The prompt is larger than the size limit and was not loaded."
+)
 
 
 def get_mcp_oauth_callback_url(request: Request) -> str:
@@ -3037,15 +3060,14 @@ async def connect_mcp(
                             sampling_callback=None,
                         )
                     )
-                    await mcp_client.initialize()
+                    await negotiate_protocol(mcp_client)
 
                     if config.code.on_mcp_connect:
                         await config.code.on_mcp_connect(oauth_connection, mcp_client)
 
-                    tool_list = await mcp_client.list_tools()
                     mcp_data = {
                         "name": payload.name,
-                        "tools": [{"name": tool.name} for tool in tool_list.tools],
+                        **await describe_mcp_server(mcp_client),
                         "isUserProvided": True,
                         "clientType": payload.clientType,
                         "command": None,
@@ -3429,7 +3451,7 @@ async def connect_mcp(
                     )
                 )
 
-                await mcp_client.initialize()
+                await negotiate_protocol(mcp_client)
                 result_holder["client"] = mcp_client
 
             except BaseException as exc:
@@ -3564,14 +3586,12 @@ async def connect_mcp(
                 "Error closing old MCP session %s", payload.name, exc_info=True
             )
 
-    tool_list = await mcp_client_session.list_tools()
-
     # Echo url/headers only for user-provided servers — the client already
     # sent those. Named servers come from developer config and may embed
     # secrets, so they expose only their name, transport type and tools.
     mcp_payload: Dict[str, object] = {
         "name": mcp_connection.name,
-        "tools": [{"name": t.name} for t in tool_list.tools],
+        **await describe_mcp_server(mcp_client_session),
         "isUserProvided": is_user_provided,
     }
     if is_user_provided:
@@ -3658,6 +3678,127 @@ async def disconnect_mcp(
             await mcp_session_obj.close()
 
     return JSONResponse(content={"success": True})
+
+
+@router.post("/mcp/prompt")
+async def invoke_mcp_prompt(
+    payload: McpPromptRequest,
+    current_user: UserParam,
+):
+    """Render one MCP prompt for the composer.
+
+    Only ever called because the user picked the prompt: Chainlit never
+    injects prompt messages into a conversation on its own.
+    """
+    from chainlit.context import init_ws_context
+    from chainlit.mcp_protocol import (
+        McpContentTooLarge,
+        McpPromptArgumentsError,
+        McpPromptNotFound,
+        McpPromptsUnsupported,
+    )
+    from chainlit.session import WebsocketSession
+
+    session = WebsocketSession.get_by_id(payload.sessionId)
+    context = init_ws_context(session)
+
+    if current_user:
+        if (
+            not context.session.user
+            or context.session.user.identifier != current_user.identifier
+        ):
+            raise HTTPException(status_code=401)
+
+    attached = session.mcp_sessions.get(payload.name)
+    if attached is None:
+        raise HTTPException(status_code=404, detail=MCP_NOT_CONNECTED_DETAIL)
+
+    try:
+        text = await asyncio.wait_for(
+            render_prompt(attached.client, payload.prompt, payload.arguments),
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+        )
+    except McpPromptNotFound:
+        raise HTTPException(status_code=404, detail=MCP_PROMPT_NOT_FOUND_DETAIL)
+    except McpPromptsUnsupported:
+        raise HTTPException(status_code=400, detail=MCP_PROMPTS_UNSUPPORTED_DETAIL)
+    except McpPromptArgumentsError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except McpContentTooLarge:
+        raise HTTPException(status_code=413, detail=MCP_PROMPT_TOO_LARGE_DETAIL)
+    except Exception:
+        logger.warning(
+            "MCP prompt %r from server %r failed",
+            payload.prompt,
+            payload.name,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=502, detail=MCP_PROMPT_FAILED_DETAIL)
+
+    return JSONResponse(content={"text": text})
+
+
+@router.post("/mcp/resource")
+async def read_mcp_resource(
+    payload: McpResourceRequest,
+    current_user: UserParam,
+):
+    """Read one MCP resource and show it as an element in the chat."""
+    from chainlit.context import init_ws_context
+    from chainlit.element import File
+    from chainlit.mcp_protocol import McpContentTooLarge, McpResourceReadError
+    from chainlit.message import Message
+    from chainlit.session import WebsocketSession
+
+    session = WebsocketSession.get_by_id(payload.sessionId)
+    context = init_ws_context(session)
+
+    if current_user:
+        if (
+            not context.session.user
+            or context.session.user.identifier != current_user.identifier
+        ):
+            raise HTTPException(status_code=401)
+
+    attached = session.mcp_sessions.get(payload.name)
+    if attached is None:
+        raise HTTPException(status_code=404, detail=MCP_NOT_CONNECTED_DETAIL)
+
+    try:
+        resource = await asyncio.wait_for(
+            read_resource(attached.client, payload.uri, payload.resourceName),
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+        )
+    except McpContentTooLarge:
+        raise HTTPException(status_code=413, detail=MCP_RESOURCE_TOO_LARGE_DETAIL)
+    except McpResourceReadError:
+        raise HTTPException(status_code=502, detail=MCP_RESOURCE_FAILED_DETAIL)
+    except Exception:
+        logger.warning(
+            "MCP resource %r from server %r failed",
+            payload.uri,
+            payload.name,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=502, detail=MCP_RESOURCE_FAILED_DETAIL)
+
+    # A plain File element: remote content is downloadable, never rendered as
+    # markdown or HTML in the app. props records where it came from.
+    element = File(
+        name=resource.name,
+        content=resource.data,
+        mime=resource.mime_type,
+        props={
+            "mcp": {
+                "server": payload.name,
+                "uri": payload.uri,
+                "mimeType": resource.mime_type,
+            }
+        },
+    )
+    await Message(content="", elements=[element]).send()
+
+    return JSONResponse(content={"element": element.to_dict()})
 
 
 @router.post("/project/file")

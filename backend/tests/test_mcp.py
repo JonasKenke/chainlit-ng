@@ -10,6 +10,7 @@ import httpx
 import httpx2
 import jwt
 import pytest
+from mcp import MCPError, types as mcp_types
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -49,6 +50,7 @@ from chainlit.mcp_oauth import (
 )
 from chainlit.server import (
     MCP_CONNECT_FAILED_DETAIL,
+    MCP_NOT_CONNECTED_DETAIL,
     MCP_OAUTH_CALLBACK_PATH,
     MCP_OAUTH_CHAINLIT_URL_DETAIL,
     MCP_OAUTH_HEADERS_DETAIL,
@@ -57,6 +59,10 @@ from chainlit.server import (
     MCP_OAUTH_SSE_UNSUPPORTED_DETAIL,
     MCP_OAUTH_URL_DETAIL,
     MCP_OAUTH_WELL_KNOWN_DETAIL,
+    MCP_PROMPT_NOT_FOUND_DETAIL,
+    MCP_PROMPTS_UNSUPPORTED_DETAIL,
+    MCP_RESOURCE_FAILED_DETAIL,
+    MCP_RESOURCE_TOO_LARGE_DETAIL,
     MCP_USER_SERVERS_DISABLED_DETAIL,
     app,
     get_mcp_oauth_callback_url,
@@ -1014,7 +1020,10 @@ class FakeAsyncClient:
 
 class FakeClientSession:
     initialize_behavior = None
+    discover_behavior = "legacy"
     tools = [SimpleNamespace(name="echo")]
+    prompts: list = []
+    resources: list = []
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -1025,12 +1034,25 @@ class FakeClientSession:
     async def __aexit__(self, *exc_info):
         return False
 
+    async def discover(self):
+        # Legacy by default: every existing connect test keeps exercising the
+        # initialize() fallback instead of the modern handshake.
+        if type(self).discover_behavior == "legacy":
+            raise MCPError(mcp_types.METHOD_NOT_FOUND, "method not found")
+        await type(self).discover_behavior(self)
+
     async def initialize(self):
         if type(self).initialize_behavior is not None:
             await type(self).initialize_behavior(self)
 
-    async def list_tools(self):
-        return SimpleNamespace(tools=type(self).tools)
+    async def list_tools(self, *, params=None):
+        return SimpleNamespace(tools=type(self).tools, next_cursor=None)
+
+    async def list_prompts(self, *, params=None):
+        return SimpleNamespace(prompts=type(self).prompts, next_cursor=None)
+
+    async def list_resources(self, *, params=None):
+        return SimpleNamespace(resources=type(self).resources, next_cursor=None)
 
 
 class FakeOAuthFlow:
@@ -1103,7 +1125,10 @@ def fake_sdk(monkeypatch):
     clients: list[FakeAsyncClient] = []
     FakeAsyncClient.instances = clients
     FakeClientSession.initialize_behavior = None
+    FakeClientSession.discover_behavior = "legacy"
     FakeClientSession.tools = [SimpleNamespace(name="echo")]
+    FakeClientSession.prompts = []
+    FakeClientSession.resources = []
 
     transport_calls = []
 
@@ -1978,6 +2003,8 @@ class TestMcpPlainRegression:
             "mcp": {
                 "name": "weather",
                 "tools": [{"name": "echo"}],
+                "prompts": [],
+                "resources": [],
                 "isUserProvided": False,
                 "type": "streamable-http",
             },
@@ -2024,6 +2051,8 @@ class TestNamedMcpServers:
             "mcp": {
                 "name": "local",
                 "tools": [{"name": "echo"}],
+                "prompts": [],
+                "resources": [],
                 "isUserProvided": False,
                 "type": "stdio",
             },
@@ -2142,6 +2171,8 @@ class TestNamedMcpServers:
         assert response.json()["mcp"] == {
             "name": "events",
             "tools": [{"name": "echo"}],
+            "prompts": [],
+            "resources": [],
             "isUserProvided": False,
             "type": "sse",
         }
@@ -2650,3 +2681,464 @@ class TestOAuthTransportAllowlist:
         ]
         assert ws_session.mcp_sessions == {}
         assert elapsed < 5, f"fail-fast did not fire; took {elapsed:.1f}s"
+
+
+# ── KRE-283: pagination, prompts, resources, version negotiation ──
+
+
+class PagedSession:
+    """Fake listing surface: each call returns the next page of a fixed list."""
+
+    def __init__(self, tools=None, prompts=None, resources=None):
+        self.pages = {
+            "tools": tools or [[]],
+            "prompts": prompts or [[]],
+            "resources": resources or [[]],
+        }
+        self.seen_cursors: list = []
+
+    async def _page(self, listing: str, attribute: str, params):
+        pages = self.pages[listing]
+        cursor = params.cursor if params is not None else None
+        self.seen_cursors.append((listing, cursor))
+        index = int(cursor) if cursor else 0
+        next_cursor = str(index + 1) if index + 1 < len(pages) else None
+        return SimpleNamespace(**{attribute: pages[index], "next_cursor": next_cursor})
+
+    async def list_tools(self, *, params=None):
+        return await self._page("tools", "tools", params)
+
+    async def list_prompts(self, *, params=None):
+        return await self._page("prompts", "prompts", params)
+
+    async def list_resources(self, *, params=None):
+        return await self._page("resources", "resources", params)
+
+
+def prompt_page(name: str, description: str = "") -> mcp_types.Prompt:
+    return mcp_types.Prompt(name=name, description=description)
+
+
+def resource_page(uri: str, name: str = "") -> mcp_types.Resource:
+    return mcp_types.Resource(uri=uri, name=name or uri, mime_type="text/plain")
+
+
+class TestMcpProtocolPagination:
+    async def test_every_page_of_tools_prompts_and_resources_is_collected(self):
+        from chainlit.mcp_protocol import describe_mcp_server
+
+        session = PagedSession(
+            tools=[[SimpleNamespace(name="a")], [SimpleNamespace(name="b")]],
+            prompts=[[prompt_page("one")], [prompt_page("two")]],
+            resources=[[resource_page("file:///a")], [resource_page("file:///b")]],
+        )
+
+        payload = await describe_mcp_server(session)
+
+        assert payload["tools"] == [{"name": "a"}, {"name": "b"}]
+        assert [prompt["name"] for prompt in payload["prompts"]] == ["one", "two"]
+        assert [resource["uri"] for resource in payload["resources"]] == [
+            "file:///a",
+            "file:///b",
+        ]
+        # The second request carries the first page's cursor.
+        assert ("tools", "1") in session.seen_cursors
+
+    async def test_the_cap_stops_the_loop_and_warns(self, monkeypatch, caplog):
+        from chainlit import mcp_protocol
+
+        class Endless(PagedSession):
+            async def list_tools(self, *, params=None):
+                return SimpleNamespace(
+                    tools=[SimpleNamespace(name="again")], next_cursor="more"
+                )
+
+        monkeypatch.setattr(mcp_protocol, "MCP_MAX_LIST_PAGES", 3)
+
+        with caplog.at_level(logging.WARNING, logger="chainlit.mcp_protocol"):
+            payload = await mcp_protocol.describe_mcp_server(Endless())
+
+        assert payload["tools"] == [{"name": "again"}] * 3
+        assert "stopped after 3 pages" in caplog.text
+
+    async def test_prompts_and_resources_that_fail_to_list_do_not_fail_the_connect(
+        self,
+    ):
+        from chainlit.mcp_protocol import describe_mcp_server
+
+        class ToolsOnly(PagedSession):
+            async def list_prompts(self, *, params=None):
+                raise MCPError(mcp_types.METHOD_NOT_FOUND, "no prompts")
+
+            async def list_resources(self, *, params=None):
+                raise RuntimeError("boom")
+
+        payload = await describe_mcp_server(
+            ToolsOnly(tools=[[SimpleNamespace(name="echo")]])
+        )
+
+        assert payload["tools"] == [{"name": "echo"}]
+        assert payload["prompts"] == []
+        assert payload["resources"] == []
+
+    async def test_connect_payload_carries_every_prompt_and_resource_page(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        class PagedConnectSession(FakeClientSession):
+            pass
+
+        PagedConnectSession.list_tools = PagedSession(
+            tools=[[SimpleNamespace(name="a")], [SimpleNamespace(name="b")]]
+        ).list_tools
+        PagedConnectSession.prompts = [prompt_page("one"), prompt_page("two")]
+        PagedConnectSession.list_prompts = PagedSession(
+            prompts=[[prompt_page("one")], [prompt_page("two")]]
+        ).list_prompts
+        PagedConnectSession.list_resources = PagedSession(
+            resources=[[resource_page("file:///a")], [resource_page("file:///b")]]
+        ).list_resources
+
+        test_config.features.mcp.enabled = True
+        test_config.features.mcp.servers = [
+            StreamableHttpMcpServer(
+                name="docs", type="streamable-http", url="https://mcp.example.com/mcp"
+            )
+        ]
+        monkeypatch.setattr("mcp.ClientSession", PagedConnectSession)
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp", json={"sessionId": ws_session.id, "name": "docs"}
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()["mcp"]
+        assert payload["tools"] == [{"name": "a"}, {"name": "b"}]
+        assert [prompt["name"] for prompt in payload["prompts"]] == ["one", "two"]
+        assert [resource["uri"] for resource in payload["resources"]] == [
+            "file:///a",
+            "file:///b",
+        ]
+
+
+class TestMcpVersionNegotiation:
+    async def test_server_discover_is_preferred(self):
+        from chainlit.mcp_protocol import negotiate_protocol
+
+        calls: list[str] = []
+
+        class Modern:
+            async def discover(self):
+                calls.append("discover")
+
+            async def initialize(self):
+                calls.append("initialize")
+
+        assert await negotiate_protocol(Modern()) == "discover"
+        assert calls == ["discover"]
+
+    async def test_rejected_discover_falls_back_to_initialize(self):
+        from chainlit.mcp_protocol import negotiate_protocol
+
+        calls: list[str] = []
+
+        class Legacy:
+            async def discover(self):
+                calls.append("discover")
+                raise MCPError(mcp_types.METHOD_NOT_FOUND, "no server/discover")
+
+            async def initialize(self):
+                calls.append("initialize")
+
+        assert await negotiate_protocol(Legacy()) == "initialize"
+        assert calls == ["discover", "initialize"]
+
+    async def test_legacy_server_still_connects_through_initialize(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        calls: list[str] = []
+
+        async def initialize(inner):
+            calls.append("initialize")
+
+        monkeypatch.setattr(FakeClientSession, "initialize_behavior", initialize)
+        # The default fake rejects server/discover like a pre-2026 server.
+        test_config.features.mcp.enabled = True
+        test_config.features.mcp.servers = [
+            StreamableHttpMcpServer(
+                name="legacy", type="streamable-http", url="https://mcp.example.com/mcp"
+            )
+        ]
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp", json={"sessionId": ws_session.id, "name": "legacy"}
+        )
+
+        assert response.status_code == 200, response.text
+        assert calls == ["initialize"]
+
+
+class PromptFakeSession(FakeClientSession):
+    prompts = [
+        mcp_types.Prompt(
+            name="standup",
+            description="Daily standup",
+            arguments=[
+                mcp_types.PromptArgument(
+                    name="team", description="Team name", required=True
+                ),
+                mcp_types.PromptArgument(
+                    name="tone", description="Tone", required=False
+                ),
+            ],
+        ),
+        mcp_types.Prompt(name="plain", description="No arguments"),
+    ]
+
+    async def list_prompts(self, *, params=None):
+        return SimpleNamespace(prompts=type(self).prompts, next_cursor=None)
+
+    async def get_prompt(self, name, arguments=None):
+        if name == "plain":
+            return mcp_types.GetPromptResult(
+                messages=[
+                    mcp_types.PromptMessage(
+                        role="user",
+                        content=mcp_types.TextContent(type="text", text="Hello"),
+                    )
+                ]
+            )
+        return mcp_types.GetPromptResult(
+            messages=[
+                mcp_types.PromptMessage(
+                    role="user",
+                    content=mcp_types.TextContent(
+                        type="text", text=f"Team {arguments['team']}"
+                    ),
+                ),
+                mcp_types.PromptMessage(
+                    role="assistant",
+                    content=mcp_types.TextContent(type="text", text="Second"),
+                ),
+            ]
+        )
+
+
+class NoPromptsFakeSession(FakeClientSession):
+    async def list_prompts(self, *, params=None):
+        raise MCPError(mcp_types.METHOD_NOT_FOUND, "no prompts")
+
+
+async def connect_docs_server(
+    client, test_config, ws_session, monkeypatch, session_cls=PromptFakeSession
+):
+    test_config.features.mcp.enabled = True
+    test_config.features.mcp.servers = [
+        StreamableHttpMcpServer(
+            name="docs", type="streamable-http", url="https://mcp.example.com/mcp"
+        )
+    ]
+    monkeypatch.setattr("mcp.ClientSession", session_cls)
+    login_as(ALICE)
+    response = await client.post(
+        "/mcp", json={"sessionId": ws_session.id, "name": "docs"}
+    )
+    assert response.status_code == 200, response.text
+    return response
+
+
+class TestMcpPromptInvocation:
+    async def test_required_arguments_are_validated(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        await connect_docs_server(client, test_config, ws_session, monkeypatch)
+
+        response = await client.post(
+            "/mcp/prompt",
+            json={
+                "sessionId": ws_session.id,
+                "name": "docs",
+                "prompt": "standup",
+                "arguments": {"tone": "terse"},
+            },
+        )
+
+        assert response.status_code == 422
+        assert "team" in response.json()["detail"]
+
+    async def test_unknown_arguments_are_rejected(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        await connect_docs_server(client, test_config, ws_session, monkeypatch)
+
+        response = await client.post(
+            "/mcp/prompt",
+            json={
+                "sessionId": ws_session.id,
+                "name": "docs",
+                "prompt": "standup",
+                "arguments": {"team": "core", "extra": "x"},
+            },
+        )
+
+        assert response.status_code == 422
+        assert "extra" in response.json()["detail"]
+
+    async def test_prompt_messages_are_rendered_into_one_text(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        await connect_docs_server(client, test_config, ws_session, monkeypatch)
+
+        response = await client.post(
+            "/mcp/prompt",
+            json={
+                "sessionId": ws_session.id,
+                "name": "docs",
+                "prompt": "standup",
+                "arguments": {"team": "core"},
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"text": "Team core\n\nSecond"}
+
+    async def test_unknown_prompt_name_gives_a_clean_error(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        await connect_docs_server(client, test_config, ws_session, monkeypatch)
+
+        response = await client.post(
+            "/mcp/prompt",
+            json={
+                "sessionId": ws_session.id,
+                "name": "docs",
+                "prompt": "missing",
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == MCP_PROMPT_NOT_FOUND_DETAIL
+
+    async def test_server_without_prompts_says_so(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        await connect_docs_server(
+            client, test_config, ws_session, monkeypatch, NoPromptsFakeSession
+        )
+
+        response = await client.post(
+            "/mcp/prompt",
+            json={"sessionId": ws_session.id, "name": "docs", "prompt": "anything"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == MCP_PROMPTS_UNSUPPORTED_DETAIL
+
+    async def test_disconnected_server_is_a_clean_404(
+        self, client, test_config, ws_session
+    ):
+        login_as(ALICE)
+
+        response = await client.post(
+            "/mcp/prompt",
+            json={"sessionId": ws_session.id, "name": "docs", "prompt": "standup"},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == MCP_NOT_CONNECTED_DETAIL
+
+
+class ResourceFakeSession(FakeClientSession):
+    contents = [
+        mcp_types.TextResourceContents(
+            uri="file:///readme.md", mime_type="text/markdown", text="# Hi"
+        )
+    ]
+
+    async def read_resource(self, uri):
+        return mcp_types.ReadResourceResult(contents=type(self).contents)
+
+
+class BrokenResourceFakeSession(FakeClientSession):
+    async def read_resource(self, uri):
+        raise MCPError(-32603, "PRM https://evil.example/token?secret=hostile")
+
+
+class TestMcpResourceRead:
+    async def test_read_produces_an_element_with_provenance(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        await connect_docs_server(
+            client, test_config, ws_session, monkeypatch, ResourceFakeSession
+        )
+
+        response = await client.post(
+            "/mcp/resource",
+            json={
+                "sessionId": ws_session.id,
+                "name": "docs",
+                "uri": "file:///readme.md",
+                "resourceName": "README",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        element = response.json()["element"]
+        assert element["type"] == "file"
+        assert element["name"] == "README"
+        assert element["mime"] == "text/markdown"
+        assert element["props"]["mcp"] == {
+            "server": "docs",
+            "uri": "file:///readme.md",
+            "mimeType": "text/markdown",
+        }
+        assert element["forId"]
+        # The element reaches the chat as part of a new message.
+        emitted = [call.args[0] for call in ws_session.emit.call_args_list]
+        assert "new_message" in emitted
+        assert "element" in emitted
+
+    async def test_content_above_the_cap_is_blocked(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        from chainlit import mcp_protocol
+
+        await connect_docs_server(
+            client, test_config, ws_session, monkeypatch, ResourceFakeSession
+        )
+        monkeypatch.setattr(mcp_protocol, "MCP_CONTENT_MAX_BYTES", 3)
+        ws_session.emit.reset_mock()
+
+        response = await client.post(
+            "/mcp/resource",
+            json={
+                "sessionId": ws_session.id,
+                "name": "docs",
+                "uri": "file:///readme.md",
+            },
+        )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == MCP_RESOURCE_TOO_LARGE_DETAIL
+        assert ws_session.emit.call_args_list == []
+
+    async def test_server_error_text_is_not_echoed(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch
+    ):
+        await connect_docs_server(
+            client, test_config, ws_session, monkeypatch, BrokenResourceFakeSession
+        )
+
+        response = await client.post(
+            "/mcp/resource",
+            json={
+                "sessionId": ws_session.id,
+                "name": "docs",
+                "uri": "file:///readme.md",
+            },
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == MCP_RESOURCE_FAILED_DETAIL
+        assert "hostile" not in response.text
