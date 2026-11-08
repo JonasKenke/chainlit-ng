@@ -625,6 +625,7 @@ MCP_NOT_CONNECTED_DETAIL = "This MCP server is not connected."
 MCP_PROMPT_FAILED_DETAIL = "Could not get the prompt from the MCP server."
 MCP_PROMPT_NOT_FOUND_DETAIL = "This MCP server has no prompt with that name."
 MCP_PROMPTS_UNSUPPORTED_DETAIL = "This MCP server does not support prompts."
+MCP_PROMPT_ARGUMENTS_DETAIL = "This prompt needs different arguments."
 MCP_RESOURCE_FAILED_DETAIL = "Could not read the resource from the MCP server."
 MCP_RESOURCE_TOO_LARGE_DETAIL = (
     "The resource is larger than the size limit and was not loaded."
@@ -3067,7 +3068,7 @@ async def connect_mcp(
 
                     mcp_data = {
                         "name": payload.name,
-                        **await describe_mcp_server(mcp_client),
+                        **await describe_mcp_server(mcp_client, payload.name),
                         "isUserProvided": True,
                         "clientType": payload.clientType,
                         "command": None,
@@ -3591,7 +3592,7 @@ async def connect_mcp(
     # secrets, so they expose only their name, transport type and tools.
     mcp_payload: Dict[str, object] = {
         "name": mcp_connection.name,
-        **await describe_mcp_server(mcp_client_session),
+        **await describe_mcp_server(mcp_client_session, mcp_connection.name),
         "isUserProvided": is_user_provided,
     }
     if is_user_provided:
@@ -3697,9 +3698,8 @@ async def invoke_mcp_prompt(
         McpPromptNotFound,
         McpPromptsUnsupported,
     )
-    from chainlit.session import WebsocketSession
 
-    session = WebsocketSession.get_by_id(payload.sessionId)
+    session = _get_ws_session(payload.sessionId)
     context = init_ws_context(session)
 
     if current_user:
@@ -3722,8 +3722,8 @@ async def invoke_mcp_prompt(
         raise HTTPException(status_code=404, detail=MCP_PROMPT_NOT_FOUND_DETAIL)
     except McpPromptsUnsupported:
         raise HTTPException(status_code=400, detail=MCP_PROMPTS_UNSUPPORTED_DETAIL)
-    except McpPromptArgumentsError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    except McpPromptArgumentsError:
+        raise HTTPException(status_code=422, detail=MCP_PROMPT_ARGUMENTS_DETAIL)
     except McpContentTooLarge:
         raise HTTPException(status_code=413, detail=MCP_PROMPT_TOO_LARGE_DETAIL)
     except Exception:
@@ -3748,9 +3748,8 @@ async def read_mcp_resource(
     from chainlit.element import File
     from chainlit.mcp_protocol import McpContentTooLarge, McpResourceReadError
     from chainlit.message import Message
-    from chainlit.session import WebsocketSession
 
-    session = WebsocketSession.get_by_id(payload.sessionId)
+    session = _get_ws_session(payload.sessionId)
     context = init_ws_context(session)
 
     if current_user:
@@ -3776,7 +3775,7 @@ async def read_mcp_resource(
     except Exception:
         logger.warning(
             "MCP resource %r from server %r failed",
-            payload.uri,
+            payload.resourceName or "unnamed",
             payload.name,
             exc_info=True,
         )

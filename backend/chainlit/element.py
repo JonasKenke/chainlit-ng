@@ -167,6 +167,10 @@ class Element:
         chainlit_key = e_dict.get("chainlitKey")
         display = e_dict.get("display", "inline")
         mime_type = e_dict.get("mime", "")
+        props = e_dict.get("props")
+        if type == "custom" and props is None:
+            # CustomElement.props is required; older persisted dicts omit it.
+            props = {}
 
         # Common parameters for all element types
         common_params = {
@@ -180,7 +184,7 @@ class Element:
             "chainlit_key": chainlit_key,
             "display": display,
             "mime": mime_type,
-            "props": e_dict.get("props"),
+            "props": props,
         }
 
         if type == "image":

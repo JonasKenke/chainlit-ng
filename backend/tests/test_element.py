@@ -211,6 +211,22 @@ class TestElementBase:
             assert restored.props == props
             assert restored.to_dict()["props"] == props
 
+    async def test_custom_element_without_props_still_loads(
+        self, mock_chainlit_context
+    ):
+        """Older persisted custom elements have no props key; default to {}."""
+        async with mock_chainlit_context:
+            restored = Element.from_dict(
+                {
+                    "id": "custom-legacy",
+                    "type": "custom",
+                    "name": "Sources",
+                    "url": "https://example.com/sources",
+                }
+            )
+
+            assert restored.props == {}
+
     async def test_element_from_dict_preserves_bytes_content(
         self, mock_chainlit_context
     ):

@@ -9,6 +9,7 @@ capped before content is copied into a Chainlit element or the composer, and
 callers map errors to fixed details instead of echoing server text.
 """
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 # or broken server (a cursor loop, or one item per page forever) from pinning
 # a connect request; when it trips the listing is truncated and logged.
 MCP_MAX_LIST_PAGES = 100
+
+# Pages are also capped in total items: a hostile server can put an arbitrary
+# number of entries in one page, and every entry is forwarded to the UI.
+MCP_MAX_LIST_ITEMS = 1000
 
 # Untrusted remote content becomes a Chainlit element or composer text, so
 # both paths share one byte cap.
@@ -83,6 +88,14 @@ async def _paginate(fetch, attribute: str, label: str) -> List[Any]:
         params = mcp_types.PaginatedRequestParams(cursor=cursor) if cursor else None
         result = await fetch(params=params)
         items.extend(getattr(result, attribute))
+        if len(items) > MCP_MAX_LIST_ITEMS:
+            del items[MCP_MAX_LIST_ITEMS:]
+            logger.warning(
+                "MCP %s listing stopped at %d items; the rest was truncated.",
+                label,
+                MCP_MAX_LIST_ITEMS,
+            )
+            return items
         cursor = getattr(result, "next_cursor", None)
         if not cursor:
             return items
@@ -113,8 +126,29 @@ async def list_all_resources(session) -> List[Any]:
     return await _paginate(fetch, "resources", "resources")
 
 
-async def describe_mcp_server(session) -> Dict[str, Any]:
+async def describe_mcp_server(session, name: Optional[str] = None) -> Dict[str, Any]:
     """Everything the UI lists for a connected server.
+
+    The whole listing shares one request budget: three paginated listings can
+    otherwise pin a connect request for hours when a server answers slowly or
+    keeps handing back cursors. On timeout the server stays connected with an
+    empty library instead of failing the connection.
+    """
+    try:
+        return await asyncio.wait_for(
+            _describe_mcp_server(session), timeout=MCP_REQUEST_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "MCP %r listing timed out after %.0fs; connecting with an empty list.",
+            name or "server",
+            MCP_REQUEST_TIMEOUT_SECONDS,
+        )
+        return {"tools": [], "prompts": [], "resources": []}
+
+
+async def _describe_mcp_server(session) -> Dict[str, Any]:
+    """List one server without the time budget; see ``describe_mcp_server``.
 
     Tools must list or the connection is useless. Prompts and resources are
     optional capabilities, so a server that rejects those calls still connects

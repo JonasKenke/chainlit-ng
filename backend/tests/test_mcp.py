@@ -59,6 +59,7 @@ from chainlit.server import (
     MCP_OAUTH_SSE_UNSUPPORTED_DETAIL,
     MCP_OAUTH_URL_DETAIL,
     MCP_OAUTH_WELL_KNOWN_DETAIL,
+    MCP_PROMPT_ARGUMENTS_DETAIL,
     MCP_PROMPT_NOT_FOUND_DETAIL,
     MCP_PROMPTS_UNSUPPORTED_DETAIL,
     MCP_RESOURCE_FAILED_DETAIL,
@@ -2761,6 +2762,37 @@ class TestMcpProtocolPagination:
         assert payload["tools"] == [{"name": "again"}] * 3
         assert "stopped after 3 pages" in caplog.text
 
+    async def test_the_item_cap_truncates_and_warns(self, monkeypatch, caplog):
+        from chainlit import mcp_protocol
+
+        session = PagedSession(
+            tools=[[SimpleNamespace(name=str(index)) for index in range(5)]]
+        )
+        monkeypatch.setattr(mcp_protocol, "MCP_MAX_LIST_ITEMS", 3)
+
+        with caplog.at_level(logging.WARNING, logger="chainlit.mcp_protocol"):
+            payload = await mcp_protocol.describe_mcp_server(session)
+
+        assert payload["tools"] == [{"name": "0"}, {"name": "1"}, {"name": "2"}]
+        assert "stopped at 3 items" in caplog.text
+
+    async def test_a_hanging_listing_times_out_with_an_empty_payload(
+        self, monkeypatch, caplog
+    ):
+        from chainlit import mcp_protocol
+
+        class Hanging(PagedSession):
+            async def list_tools(self, *, params=None):
+                await asyncio.Event().wait()
+
+        monkeypatch.setattr(mcp_protocol, "MCP_REQUEST_TIMEOUT_SECONDS", 0.05)
+
+        with caplog.at_level(logging.WARNING, logger="chainlit.mcp_protocol"):
+            payload = await mcp_protocol.describe_mcp_server(Hanging(), "slow")
+
+        assert payload == {"tools": [], "prompts": [], "resources": []}
+        assert "timed out" in caplog.text
+
     async def test_prompts_and_resources_that_fail_to_list_do_not_fail_the_connect(
         self,
     ):
@@ -2965,7 +2997,8 @@ class TestMcpPromptInvocation:
         )
 
         assert response.status_code == 422
-        assert "team" in response.json()["detail"]
+        assert response.json()["detail"] == MCP_PROMPT_ARGUMENTS_DETAIL
+        assert "team" not in response.text
 
     async def test_unknown_arguments_are_rejected(
         self, client, test_config, ws_session, fake_sdk, monkeypatch
@@ -2983,7 +3016,8 @@ class TestMcpPromptInvocation:
         )
 
         assert response.status_code == 422
-        assert "extra" in response.json()["detail"]
+        assert response.json()["detail"] == MCP_PROMPT_ARGUMENTS_DETAIL
+        assert "extra" not in response.text
 
     async def test_prompt_messages_are_rendered_into_one_text(
         self, client, test_config, ws_session, fake_sdk, monkeypatch
@@ -3048,6 +3082,18 @@ class TestMcpPromptInvocation:
         assert response.status_code == 404
         assert response.json()["detail"] == MCP_NOT_CONNECTED_DETAIL
 
+    async def test_an_unknown_session_is_a_clean_404(self, client):
+        login_as(ALICE)
+
+        for path, body in (
+            ("/mcp/prompt", {"name": "docs", "prompt": "standup"}),
+            ("/mcp/resource", {"name": "docs", "uri": "file:///readme.md"}),
+        ):
+            response = await client.post(path, json={"sessionId": "nope", **body})
+
+            assert response.status_code == 404, path
+            assert response.json()["detail"] == "Session not found"
+
 
 class ResourceFakeSession(FakeClientSession):
     contents = [
@@ -3063,6 +3109,11 @@ class ResourceFakeSession(FakeClientSession):
 class BrokenResourceFakeSession(FakeClientSession):
     async def read_resource(self, uri):
         raise MCPError(-32603, "PRM https://evil.example/token?secret=hostile")
+
+
+class FailingResourceFakeSession(FakeClientSession):
+    async def read_resource(self, uri):
+        raise RuntimeError("boom")
 
 
 class TestMcpResourceRead:
@@ -3142,3 +3193,25 @@ class TestMcpResourceRead:
         assert response.status_code == 502
         assert response.json()["detail"] == MCP_RESOURCE_FAILED_DETAIL
         assert "hostile" not in response.text
+
+    async def test_a_failing_read_logs_the_name_not_the_uri(
+        self, client, test_config, ws_session, fake_sdk, monkeypatch, caplog
+    ):
+        await connect_docs_server(
+            client, test_config, ws_session, monkeypatch, FailingResourceFakeSession
+        )
+
+        with caplog.at_level(logging.WARNING, logger="chainlit.server"):
+            response = await client.post(
+                "/mcp/resource",
+                json={
+                    "sessionId": ws_session.id,
+                    "name": "docs",
+                    "uri": "file:///secret-token",
+                    "resourceName": "README",
+                },
+            )
+
+        assert response.status_code == 502
+        assert "README" in caplog.text
+        assert "secret-token" not in caplog.text
