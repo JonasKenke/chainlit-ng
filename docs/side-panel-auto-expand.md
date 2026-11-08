@@ -27,3 +27,26 @@ opens it.
 
 Older clients ignore the unknown `autoExpand` field and keep their previous
 behavior.
+
+## Opening the side panel from the backend
+
+Use `cl.open_side_view(element_id)` to open an element that the client already
+received for the current thread. It sends only the element id, so the element
+payload is not sent again:
+
+```python
+@cl.on_message
+async def main(message: cl.Message):
+    details = cl.Text(
+        name="Details",
+        content="Reference material",
+        display="side",
+        auto_expand=False,
+    )
+    await cl.Message(content="See Details.", elements=[details]).send()
+    await cl.open_side_view(details.id)
+```
+
+The client resolves the id against the elements it holds. An unknown id is a
+silent no-op (debug log only), so elements must be sent before they can be
+opened. Older clients ignore the `open_side_view` event.

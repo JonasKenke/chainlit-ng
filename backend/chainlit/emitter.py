@@ -7,7 +7,7 @@ from socketio.exceptions import TimeoutError
 
 from chainlit.chat_context import chat_context
 from chainlit.config import config
-from chainlit.context import ChainlitContextException
+from chainlit.context import ChainlitContextException, context
 from chainlit.data import get_data_layer
 from chainlit.element import Element, ElementDict, File
 from chainlit.logger import logger
@@ -142,6 +142,10 @@ class BaseChainlitEmitter:
 
     async def send_approval(self, approval: Dict[str, Any]):
         """Stub method to send an approval card to the UI."""
+        pass
+
+    async def open_side_view(self, element_id: str):
+        """Stub method to open the side view for an element by id."""
         pass
 
     def send_timeout(self, event: Literal["ask_timeout", "call_fn_timeout"]):
@@ -290,6 +294,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
     async def send_approval(self, approval: Dict[str, Any]):
         """Send an approval card to the UI."""
         await self.emit("approval", approval)
+
+    async def open_side_view(self, element_id: str):
+        """Open the side view for an element the client already received."""
+        await self.emit("open_side_view", {"id": element_id})
 
     def send_timeout(self, event: Literal["ask_timeout", "call_fn_timeout"]):
         return self.emit(event, {})
@@ -544,3 +552,13 @@ class ChainlitEmitter(BaseChainlitEmitter):
         if type not in get_args(ToastType):
             raise ValueError(f"Invalid toast type: {type}")
         await self.emit("toast", {"message": message, "type": type})
+
+
+async def open_side_view(element_id: str):
+    """Open the element side view for an element the client already received.
+
+    Args:
+        element_id (str): The id of an element already sent to this client.
+            Unknown ids are ignored by the client.
+    """
+    await context.emitter.open_side_view(element_id)

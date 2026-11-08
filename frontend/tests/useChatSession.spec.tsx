@@ -8,6 +8,7 @@ import {
   useChatInteract,
   useChatSession
 } from '@chainlit/react-client';
+import type { IMessageElement } from '@chainlit/react-client';
 
 import { io, sockets } from './mocks/socket.io-client';
 
@@ -353,5 +354,57 @@ describe('useChatInteract clear', () => {
     act(() => interact.clear());
 
     expect(store.getState().approvals).toEqual([]);
+  });
+});
+
+describe('useChatSession open_side_view', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    io.mockClear();
+    sockets.length = 0;
+  });
+
+  const element: IMessageElement = {
+    id: 'element-1',
+    type: 'text',
+    name: 'Details',
+    display: 'side',
+    forId: 'step-1'
+  };
+
+  async function openSideViewHandler() {
+    const { store } = await connectWithResumeHandler();
+    const socket = sockets[0];
+    const handler = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'open_side_view'
+    )?.[1] as (payload: { id: string }) => void;
+    expect(handler).toBeTruthy();
+    return { store, handler };
+  }
+
+  it('opens the side view for a delivered element', async () => {
+    const { store, handler } = await openSideViewHandler();
+
+    act(() => {
+      store.setState({ elements: [element] });
+      handler({ id: element.id });
+    });
+
+    expect(store.getState().sideView).toEqual({
+      title: element.name,
+      elements: [element]
+    });
+  });
+
+  it('leaves the side view unchanged for an unknown id', async () => {
+    const { store, handler } = await openSideViewHandler();
+
+    act(() => {
+      store.setState({ elements: [element], sideView: undefined });
+      handler({ id: 'missing-element' });
+    });
+
+    expect(store.getState().sideView).toBeUndefined();
   });
 });
