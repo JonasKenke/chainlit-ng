@@ -59,6 +59,9 @@
   "chat": {
     "input": {
       "placeholder": "Type your message here...",
+      "errors": {
+        "tooLarge": "Message is too large. The maximum message size is 1 MB."
+      },
       "actions": {
         "send": "Send message",
         "stop": "Stop Task",
