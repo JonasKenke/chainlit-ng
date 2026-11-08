@@ -20,6 +20,11 @@ from chainlit.step import (
 class TestStepClass:
     """Test suite for the Step class."""
 
+    async def test_reserved_approval_metadata_key_raises(self, mock_chainlit_context):
+        async with mock_chainlit_context:
+            with pytest.raises(ValueError, match="reserved"):
+                Step(name="test_step", metadata={"approval": {}})
+
     async def test_step_initialization_with_defaults(self, mock_chainlit_context):
         """Test Step initialization with default values."""
         async with mock_chainlit_context:

@@ -140,6 +140,10 @@ class BaseChainlitEmitter:
         """Stub method to delete a message in the UI."""
         pass
 
+    async def send_approval(self, approval: Dict[str, Any]):
+        """Stub method to send an approval card to the UI."""
+        pass
+
     def send_timeout(self, event: Literal["ask_timeout", "call_fn_timeout"]):
         """Stub method to send a timeout to the UI."""
         pass
@@ -282,6 +286,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
     def delete_step(self, step_dict: StepDict):
         """Delete a message in the UI."""
         return self.emit("delete_message", step_dict)
+
+    async def send_approval(self, approval: Dict[str, Any]):
+        """Send an approval card to the UI."""
+        await self.emit("approval", approval)
 
     def send_timeout(self, event: Literal["ask_timeout", "call_fn_timeout"]):
         return self.emit(event, {})

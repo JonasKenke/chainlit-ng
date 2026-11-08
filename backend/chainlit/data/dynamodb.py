@@ -12,6 +12,7 @@ import aiofiles
 import aiohttp
 import boto3  # type: ignore
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from chainlit.context import context
 from chainlit.data.base import BaseDataLayer
@@ -376,6 +377,53 @@ class DynamoDBDataLayer(BaseDataLayer):
             },
             updates=step_dict,  # type: ignore
         )
+
+    async def write_approval(
+        self,
+        *,
+        thread_id: str,
+        step_id: str,
+        record: Dict[str, Any],
+        expected_revision: Optional[int],
+    ) -> bool:
+        names = {"#md": "metadata", "#ap": "approval", "#id": "id"}
+        values = self._serialize_item({":record": record, ":id": record.get("id")})
+        if expected_revision is None:
+            names["#status"] = "status"
+            condition = (
+                "attribute_not_exists(#md.#ap) OR "
+                "(#md.#ap.#status <> :pending) OR "
+                "(#md.#ap.#id = :id AND #md.#ap.#status = :pending)"
+            )
+            values.update(self._serialize_item({":pending": "pending"}))
+        else:
+            names["#revision"] = "revision"
+            condition = (
+                "attribute_not_exists(#md.#ap) OR "
+                "(#md.#ap.#id = :id AND #md.#ap.#revision = :expected)"
+            )
+            values.update(self._serialize_item({":expected": expected_revision}))
+
+        try:
+            self.client.update_item(
+                TableName=self.table_name,
+                Key=self._serialize_item(
+                    {"PK": f"THREAD#{thread_id}", "SK": f"STEP#{step_id}"}
+                ),
+                UpdateExpression="SET #md.#ap = :record",
+                ConditionExpression=condition,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+            )
+            return True
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code != "ConditionalCheckFailedException":
+                _logger.warning("DynamoDB: write_approval failed: %s", code)
+            return False
+        except Exception:
+            _logger.exception("DynamoDB: write_approval failed")
+            return False
 
     @queue_until_user_message()
     async def delete_step(self, step_id: str):

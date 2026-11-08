@@ -10,6 +10,7 @@ import {
 } from 'src/state';
 import {
   IAction,
+  IApproval,
   ICommand,
   IElement,
   IMcp,
@@ -62,6 +63,7 @@ const useChatSession = () => {
   const setElements = useSetChainlitState('elements');
   const setTasklists = useSetChainlitState('tasklists');
   const setActions = useSetChainlitState('actions');
+  const setApprovals = useSetChainlitState('approvals');
   const setChatSettingsInputs = useSetChainlitState('chatSettingsInputs');
   const setTokenCount = useSetChainlitState('tokenCount');
   const [chatProfile, setChatProfile] = useChainlitState('chatProfile');
@@ -284,6 +286,9 @@ const useChatSession = () => {
           setChatSettingsValue(thread.metadata?.chat_settings);
         }
         setMessages(messages);
+        setApprovals((old) =>
+          old.filter((approval) => approval.threadId === thread.id)
+        );
         const elements = (thread.elements || []).filter(
           (e): e is IElement => e != null
         );
@@ -488,6 +493,22 @@ const useChatSession = () => {
 
       socket.on('action', (action: IAction) => {
         setActions((old) => [...old, action]);
+      });
+
+      socket.on('approval', (approval: IApproval) => {
+        setApprovals((old) => {
+          const index = old.findIndex((item) => item.id === approval.id);
+          if (index === -1) return [...old, approval];
+          const previous = old[index];
+          // A late pending event must not overwrite a terminal decision.
+          if ((approval.revision ?? 0) < (previous.revision ?? 0)) return old;
+          const merged = {
+            ...previous,
+            ...approval,
+            arguments: approval.arguments ?? previous.arguments
+          };
+          return [...old.slice(0, index), merged, ...old.slice(index + 1)];
+        });
       });
 
       socket.on('remove_action', (action: IAction) => {

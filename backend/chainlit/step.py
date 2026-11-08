@@ -220,9 +220,14 @@ class Step:
         show_input: Union[bool, str] = "json",
         thread_id: str | None = None,
     ):
+        if metadata and "approval" in metadata:
+            raise ValueError("metadata['approval'] is reserved")
+
         time.sleep(0.001)
         self._input = ""
         self._output = ""
+        self._persistence_tasks: set[asyncio.Task] = set()
+        self._approval_managed = False
         self.thread_id = thread_id or context.session.thread_id
         self.name = name or ""
         self.type = type
@@ -292,6 +297,25 @@ class Step:
                 self.language = "text"
         return processed_content
 
+    def _track_persistence(self, coro) -> asyncio.Task:
+        task = create_persistence_task(coro)
+        self._persistence_tasks.add(task)
+        task.add_done_callback(self._persistence_tasks.discard)
+        return task
+
+    def _approval_persistence_suppressed(self) -> bool:
+        if not self._approval_managed:
+            return False
+        from chainlit.approval import is_thread_deleted
+
+        return is_thread_deleted(self.thread_id)
+
+    async def flush_persistence(self) -> None:
+        """Await every write scheduled for this step so far."""
+        while self._persistence_tasks:
+            await asyncio.gather(*list(self._persistence_tasks), return_exceptions=True)
+            await asyncio.sleep(0)
+
     @property
     def input(self):
         return self._input
@@ -352,9 +376,16 @@ class Step:
         step_dict = self.to_dict()
         data_layer = get_data_layer()
 
-        if data_layer:
+        if data_layer and not self._approval_persistence_suppressed():
             try:
-                create_persistence_task(data_layer.update_step(step_dict.copy()))
+                if self._approval_managed:
+                    from chainlit.approval import step_lock
+
+                    async with step_lock(self.thread_id, self.id):
+                        step_dict = self.to_dict()
+                        await data_layer.update_step(step_dict.copy())
+                else:
+                    self._track_persistence(data_layer.update_step(step_dict.copy()))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
@@ -379,7 +410,13 @@ class Step:
 
         if data_layer:
             try:
-                create_persistence_task(data_layer.delete_step(self.id))
+                if self._approval_managed:
+                    from chainlit.approval import step_lock
+
+                    async with step_lock(self.thread_id, self.id):
+                        await data_layer.delete_step(self.id)
+                else:
+                    self._track_persistence(data_layer.delete_step(self.id))
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e
@@ -403,9 +440,15 @@ class Step:
 
         data_layer = get_data_layer()
 
-        if data_layer:
+        if data_layer and not self._approval_persistence_suppressed():
             try:
-                create_persistence_task(data_layer.create_step(step_dict.copy()))
+                if self._approval_managed:
+                    from chainlit.approval import step_lock
+
+                    async with step_lock(self.thread_id, self.id):
+                        await data_layer.create_step(step_dict.copy())
+                else:
+                    self._track_persistence(data_layer.create_step(step_dict.copy()))
                 self.persisted = True
             except Exception as e:
                 if self.fail_on_persist_error:

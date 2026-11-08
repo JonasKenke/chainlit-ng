@@ -19,6 +19,21 @@ from pydantic.dataclasses import dataclass
 
 import chainlit.input_widget as input_widget
 from chainlit.action import Action
+from chainlit.approval import (
+    Approval,
+    ApprovalAuthRequired,
+    ApprovalDecision,
+    ApprovalError,
+    ApprovalInvalidArguments,
+    ApprovalLimitReached,
+    ApprovalNotFound,
+    ApprovalNotPending,
+    ApprovalNotReady,
+    ApprovalPersistenceError,
+    ApprovalSessionMismatch,
+    ApprovalThreadMismatch,
+    ApprovalUnsupported,
+)
 from chainlit.cache import cache
 from chainlit.chat_context import chat_context
 from chainlit.chat_settings import ChatSettings
@@ -145,6 +160,19 @@ __getattr__ = make_module_getattr(
 
 __all__ = [
     "Action",
+    "Approval",
+    "ApprovalAuthRequired",
+    "ApprovalDecision",
+    "ApprovalError",
+    "ApprovalInvalidArguments",
+    "ApprovalLimitReached",
+    "ApprovalNotFound",
+    "ApprovalNotPending",
+    "ApprovalNotReady",
+    "ApprovalPersistenceError",
+    "ApprovalSessionMismatch",
+    "ApprovalThreadMismatch",
+    "ApprovalUnsupported",
     "AskActionMessage",
     "AskElementMessage",
     "AskFileMessage",

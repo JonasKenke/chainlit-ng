@@ -150,6 +150,10 @@ class BaseSession:
     raise_callback_errors: bool
     current_task: Optional[asyncio.Task] = None
     chat_started: bool = False
+    # Server-generated identity of this session instance. A reconnect reuses
+    # the object (and this token); a new session with the same client id does
+    # not.
+    generation: str
 
     def __init__(
         self,
@@ -189,6 +193,7 @@ class BaseSession:
         self.uploaded_file_counts: Dict[Optional[str], int] = {}
 
         self.id = id
+        self.generation = uuid.uuid4().hex
 
         self.chat_settings: Dict[str, Any] = {}
         self.modes: list[Mode] = []

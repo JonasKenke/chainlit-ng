@@ -421,6 +421,59 @@ class ChainlitDataLayer(BaseDataLayer):
     async def update_step(self, step_dict: StepDict):
         await self.create_step(step_dict)
 
+    async def write_approval(
+        self,
+        *,
+        thread_id: str,
+        step_id: str,
+        record: Dict[str, Any],
+        expected_revision: Optional[int],
+    ) -> bool:
+        params: Dict[str, Any] = {
+            "record": json.dumps(record),
+            "id": step_id,
+            "approval_id": record.get("id"),
+        }
+        if expected_revision is None:
+            thread_placeholder = "$4"
+            condition_match = (
+                "COALESCE(metadata #>> '{approval,status}', 'terminal') "
+                "<> 'pending' OR ("
+                "metadata #>> '{approval,id}' = $3 AND "
+                "metadata #>> '{approval,status}' = 'pending')"
+            )
+        else:
+            condition_match = (
+                "metadata #>> '{approval,id}' = $3 AND "
+                "(metadata #>> '{approval,revision}')::int = $4"
+            )
+            params["expected_revision"] = expected_revision
+            thread_placeholder = "$5"
+        params["thread_id"] = thread_id
+
+        query = f"""
+            UPDATE "Step"
+            SET metadata = jsonb_set(
+                COALESCE(metadata, '{{}}'::jsonb),
+                '{{approval}}',
+                $1::jsonb
+            )
+            WHERE id = $2
+              AND "threadId" = {thread_placeholder}
+              AND (
+                metadata IS NULL
+                OR metadata -> 'approval' IS NULL
+                OR ({condition_match})
+              )
+            RETURNING id
+        """
+        try:
+            rows = await self.execute_query(query, params)
+            return len(rows) == 1
+        except Exception:
+            logger.exception("ChainlitDataLayer: write_approval failed")
+            return False
+
     @queue_until_user_message()
     async def delete_step(self, step_id: str):
         # Delete associated elements and feedbacks first

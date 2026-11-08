@@ -257,6 +257,31 @@ class CallActionRequest(BaseModel):
     sessionId: str
 
 
+class ApprovalDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sessionId: str = Field(min_length=1, max_length=128)
+    approvalId: str = Field(min_length=1, max_length=64)
+    decision: Literal["approve", "reject"]
+    reason: Optional[str] = Field(default=None, max_length=500)
+    decisionRequestId: str = Field(
+        min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+
+
+class ApprovalDecisionResponse(BaseModel):
+    approvalId: str
+    status: Literal[
+        "pending", "approved", "rejected", "expired", "superseded", "orphaned"
+    ]
+    decision: Optional[Literal["approve", "reject"]] = None
+    decidedBy: Optional[str] = None
+    decidedAt: Optional[str] = None
+    terminalReason: Optional[str] = None
+    revision: int
+    error: Optional[str] = None
+
+
 class ConnectMCPRequest(BaseModel):
     """Request to connect an MCP server.
 

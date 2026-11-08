@@ -12,4 +12,5 @@ export * from './config';
 export * from './mcp';
 export * from './prompt';
 export * from './scheduledTask';
+export * from './approval';
 export * from './skill';

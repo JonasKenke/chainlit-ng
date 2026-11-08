@@ -1,5 +1,6 @@
+import json
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from chainlit.types import (
     Feedback,
@@ -134,6 +135,59 @@ class BaseDataLayer(ABC):
         await self.update_step(step_dict)
         return step_dict
 
+    async def write_approval(
+        self,
+        *,
+        thread_id: str,
+        step_id: str,
+        record: Dict[str, Any],
+        expected_revision: Optional[int],
+    ) -> bool:
+        """Persist ``metadata['approval']`` and return True only if durable.
+
+        Portable default for custom layers: read the step, merge the approval
+        key, update, then read back and require the full normalized record to
+        match. Any exception or mismatch is a failure; a normal return from
+        ``update_step`` is not proof. Layers with a conditional write override
+        this.
+        """
+        try:
+            expected = _normalized_record(record)
+            thread = await self.get_thread(thread_id)
+            step = _find_step(thread, step_id)
+            if step is None:
+                return False
+
+            metadata = _normalize_metadata(step.get("metadata"))
+            existing = metadata.get("approval")
+            if expected_revision is None:
+                if isinstance(existing, dict) and (
+                    existing.get("status") == "pending"
+                    and existing.get("id") != record.get("id")
+                ):
+                    return False
+            elif (
+                not isinstance(existing, dict)
+                or existing.get("id") != record.get("id")
+                or existing.get("revision") != expected_revision
+            ):
+                return False
+
+            updated = dict(step)
+            updated["metadata"] = {**metadata, "approval": record}
+            await self.update_step(updated)  # type: ignore[arg-type]
+
+            reread = await self.get_thread(thread_id)
+            stored_step = _find_step(reread, step_id)
+            if stored_step is None:
+                return False
+            stored = _normalize_metadata(stored_step.get("metadata")).get("approval")
+            if not isinstance(stored, dict):
+                return False
+            return _normalized_record(stored) == expected
+        except Exception:
+            return False
+
     # ---- Prompt Gallery (opt-in; non-abstract so existing data layers stay valid) ----
 
     async def create_prompt(self, prompt: PromptDict) -> PromptDict:
@@ -232,3 +286,28 @@ class BaseDataLayer(ABC):
         raise NotImplementedError(
             "Prompt scheduling is not implemented for this data layer"
         )
+
+
+def _normalize_metadata(value: Any) -> Dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _normalized_record(value: Dict[str, Any]) -> Any:
+    return json.loads(json.dumps(value, sort_keys=True, default=str))
+
+
+def _find_step(thread: Optional["ThreadDict"], step_id: str) -> Optional["StepDict"]:
+    if not isinstance(thread, dict):
+        return None
+    steps = thread.get("steps")
+    if not isinstance(steps, list):
+        return None
+    for step in steps:
+        if isinstance(step, dict) and step.get("id") == step_id:
+            return step
+    return None

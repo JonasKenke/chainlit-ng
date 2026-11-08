@@ -38,6 +38,15 @@ from starlette.types import Receive, Scope, Send
 from typing_extensions import Annotated
 from watchfiles import awatch
 
+from chainlit.approval import (
+    ApprovalError,
+    ApprovalNotPending,
+    clear_thread_deleted,
+    managed_thread_ids_for,
+    mark_thread_deleted,
+    supersede_thread_approvals,
+    transition,
+)
 from chainlit.auth import (
     create_jwt,
     decode_jwt,
@@ -82,6 +91,7 @@ from chainlit.scheduled_task import (
 )
 from chainlit.scheduler import ScheduledTaskWorker
 from chainlit.secret import random_secret
+from chainlit.session import WebsocketSession
 from chainlit.skill import (
     MAX_SKILLS,
     Skill,
@@ -93,6 +103,8 @@ from chainlit.skill import (
 )
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
+    ApprovalDecisionRequest,
+    ApprovalDecisionResponse,
     AskFileSpec,
     CallActionRequest,
     ConnectMCPRequest,
@@ -2397,7 +2409,13 @@ async def delete_thread(
 
     await is_thread_author(current_user.identifier, thread_id)
 
-    await data_layer.delete_thread(thread_id)
+    mark_thread_deleted(thread_id)
+    try:
+        await data_layer.delete_thread(thread_id)
+    except Exception:
+        clear_thread_deleted(thread_id)
+        raise
+    await supersede_thread_approvals(thread_id)
     return JSONResponse(content={"success": True})
 
 
@@ -2417,20 +2435,105 @@ async def delete_user_threads(current_user: UserParam):
     user_id = await _get_user_id(current_user, data_layer)
     start = time.perf_counter()
 
+    pending_thread_ids = managed_thread_ids_for(identifier)
+    for thread_id in pending_thread_ids:
+        mark_thread_deleted(thread_id)
     try:
         deleted = await data_layer.delete_all_threads(user_id)
     except NotImplementedError as exc:
+        for thread_id in pending_thread_ids:
+            clear_thread_deleted(thread_id)
         raise HTTPException(
             status_code=501,
             detail=str(exc)
             or "Bulk thread deletion is not supported by this data layer",
         ) from exc
+    except Exception:
+        for thread_id in pending_thread_ids:
+            clear_thread_deleted(thread_id)
+        raise
+
+    for thread_id in pending_thread_ids:
+        await supersede_thread_approvals(thread_id)
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     logger.info(
         "Deleted %s threads for user %s in %sms", deleted, identifier, duration_ms
     )
     return JSONResponse(content={"success": True, "deleted": deleted})
+
+
+def _is_json_same_origin(request: Request) -> bool:
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/json":
+        return False
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    host = request.headers.get("host")
+    if not host:
+        return False
+    parsed = urllib.parse.urlsplit(origin)
+    return parsed.scheme == request.url.scheme and parsed.netloc == host
+
+
+def _approval_response(record: dict, *, error: Optional[str] = None) -> dict:
+    return ApprovalDecisionResponse(
+        approvalId=record["id"],
+        status=record["status"],
+        decision=record.get("decision"),
+        decidedBy=record.get("decidedBy"),
+        decidedAt=record.get("decidedAt") or record.get("terminalAt"),
+        terminalReason=record.get("terminalReason"),
+        revision=int(record.get("revision", 1)),
+        error=error,
+    ).model_dump()
+
+
+@router.post("/project/approval")
+async def decide_approval(
+    request: Request,
+    payload: ApprovalDecisionRequest,
+    current_user: UserParam,
+):
+    """Decide a pending approval. The server owns the arguments."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not _is_json_same_origin(request):
+        raise HTTPException(status_code=403, detail="Invalid request origin")
+
+    session = WebsocketSession.get_by_id(payload.sessionId)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.user or session.user.identifier != current_user.identifier:
+        raise HTTPException(status_code=403, detail="Approval author required")
+    if session.unavailable_chat_profile:
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation is read-only because its chat profile is unavailable.",
+        )
+
+    try:
+        record = await transition(
+            payload.approvalId,
+            "approved" if payload.decision == "approve" else "rejected",
+            actor=session.user,
+            thread_id=session.thread_id,
+            session_generation=session.generation,
+            reason=payload.reason,
+            decision_request_id=payload.decisionRequestId,
+        )
+    except ApprovalNotPending as exc:
+        if exc.record is None:
+            raise HTTPException(status_code=exc.status_code, detail=exc.code)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_approval_response(exc.record, error=exc.code),
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code)
+
+    return JSONResponse(content=_approval_response(record))
 
 
 @router.post("/project/action")
