@@ -129,12 +129,18 @@ mimetypes.add_type("text/css", ".css")
 
 
 def _cleanup_files_directory() -> None:
-    """Remove uploads on reload, but never a directory outside APP_ROOT."""
-    if not FILES_DIRECTORY.is_dir():
+    """Remove only the legacy default upload directory on shutdown.
+
+    A configured directory may contain operator data, so it is preserved
+    exactly like a directory outside APP_ROOT.
+    """
+    feature = config.features.spontaneous_file_upload
+    if feature is not None and feature.directory is not None:
         return
-    resolved = FILES_DIRECTORY.resolve()
-    app_root = Path(APP_ROOT).resolve()
-    if resolved != app_root and app_root in resolved.parents:
+    default_directory = (Path(APP_ROOT) / ".files").resolve()
+    if FILES_DIRECTORY.resolve() != default_directory:
+        return
+    if FILES_DIRECTORY.is_dir():
         shutil.rmtree(FILES_DIRECTORY)
 
 
