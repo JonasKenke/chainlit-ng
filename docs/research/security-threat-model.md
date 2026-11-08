@@ -1,10 +1,12 @@
 # Security baseline: threat model and automated test matrix
 
-Status: baseline implemented; four follow-ups filed (F1 blocks completion under the
-security review policy). No production code is changed by this branch.
+Status: baseline implemented and integrated with `main`; F1–F4 are fixed and their
+regression tests pass. F2's element-ownership fix is the only production change on
+this branch.
 
-- Date: 2026-11-07
-- Base: `origin/main` at `9b8c9145` (MCP allowlist wildcard support)
+- Date: 2026-11-07 (integrated with `main` 2026-11-08)
+- Baseline base: `origin/main` at `9b8c9145` (MCP allowlist wildcard support)
+- Integrated with `origin/main` at `904e94cc` (KRE-199/201/202 fixes)
 - Branch: `test/security-baseline`
 - Scope: backend auth (password/OAuth/JWT), cookies/sessions, uploads and element
   paths, SQLAlchemy data-layer tenancy, MCP user-server allowlist, markdown/file
@@ -91,11 +93,11 @@ severity.
 | Upload   | Hostile session id becomes a path                                | none                                                                                                    | added `TestSessionIdPathComponent` (`is_valid_session_id`, `files_dir`)                        | unit         | high                 |
 | Upload   | Client declares a MIME type/extension outside the allowlist      | `test_server.py::test_upload_file_mime_type_check`                                                      | covered                                                                                        | route        | medium               |
 | Upload   | File larger than `max_size_mb`                                   | `test_server.py::test_upload_file_size_check`                                                           | covered; boundary added in `TestSizeLimitBoundary`                                             | route + unit | medium               |
-| Upload   | Oversized body is buffered before the size check                 | none                                                                                                    | F4 follow-up (5e8a61dc)                                                                        | —            | low                  |
+| Upload   | Oversized body is buffered before the size check                 | none                                                                                                    | fixed on main (KRE-202, `fd575ef2`): validate before read; zero-read regression test           | —            | low                  |
 | Upload   | Only a foreign user's session may read its files                 | `test_server.py::test_file_access_by_different_user`                                                    | covered                                                                                        | route        | high                 |
 | Download | `file_id` path traversal / guessing                              | none                                                                                                    | added `TestFileResponse::test_path_traversal_file_id_is_not_resolved`                          | route        | medium               |
 | Download | Filename/CRLF reflected into response headers                    | none                                                                                                    | added `test_filename_is_not_reflected_into_response_headers`                                   | route        | medium               |
-| Download | Uploaded HTML is served inline from the app origin               | none                                                                                                    | F3 follow-up (7eb11be6); response header assertion in the same test                            | —            | low                  |
+| Download | Uploaded HTML is served inline from the app origin               | none                                                                                                    | fixed on main (KRE-201, `60b4995a`): force attachment + `nosniff`; header assertion in test    | —            | low                  |
 | Markdown | `language` query selects a file outside the app root             | `test_server.py::test_project_settings_path_traversal`, `test_project_translations_file_path_traversal` | covered at the route; added `test_markdown.py::TestGetMarkdownStrTraversal` for direct callers | unit         | high                 |
 
 ### 4.3 Threads, elements, tenancy
@@ -106,12 +108,12 @@ severity.
 | Threads    | Read another user's element via thread/element route               | none                                                                          | covered by the same parameterised ACL test                                                                                                                 | route        | high                 |
 | Threads    | Client supplies `filter.userId` to list another tenant's threads   | none                                                                          | added `TestThreadListFilter::test_client_supplied_user_id_is_overwritten`                                                                                  | route        | high                 |
 | Threads    | Shared-thread endpoint leaks `env`/`chat_settings`/custom metadata | `test_thread_metadata.py` (filter), share flag tested in `test_server.py`     | added `TestSharedThreadExposure` (unshared=404, metadata filtered, callback denial)                                                                        | route        | high                 |
-| Elements   | Custom element update/delete by a different tenant                 | sanitization only: `test_element.py::test_custom_element_sanitize_*`          | **F2**; `test_cross_tenant_custom_element_delete_is_rejected` (xfail strict)                                                                               | route        | medium               |
+| Elements   | Custom element update/delete by a different tenant                 | sanitization only: `test_element.py::test_custom_element_sanitize_*`          | **F2 fixed** (KRE-200, `71db4c01`); cross-tenant delete/update tests pass                                                                                  | route        | medium               |
 | Elements   | Element object key escapes the owning user prefix                  | none                                                                          | added `test_sql_alchemy.py::test_element_storage_key_stays_under_the_thread_owner`                                                                         | unit         | medium               |
 | SQL        | `delete_all_threads` deletes another user's rows                   | `test_sql_alchemy.py::test_delete_all_threads_only_deletes_target_user`       | covered (KRE-127)                                                                                                                                          | unit         | critical             |
 | SQL        | `list_threads` / favorites / prompts return another user's rows    | none                                                                          | added `test_list_threads_only_returns_target_user_threads`, `test_favorite_steps_only_returns_target_user_steps`, `test_prompts_are_scoped_to_their_owner` | unit         | high                 |
 | SQL        | `get_element` ignores the thread id                                | none                                                                          | added `test_get_element_is_scoped_to_its_thread`                                                                                                           | unit         | high                 |
-| SQL        | Client-supplied thread id injects SQL into step/element reads      | none                                                                          | **F1**; `test_thread_id_cannot_inject_sql` (xfail strict)                                                                                                  | unit         | high                 |
+| SQL        | Client-supplied thread id injects SQL into step/element reads      | none                                                                          | **F1 fixed** (KRE-199, `c9e00f3d`); parametrised `test_thread_id_cannot_inject_sql` binds ids                                                              | unit         | high                 |
 | Prompts    | Update/delete another user's prompt                                | `test_prompt_gallery.py::test_update_prompt_not_owner` (delete scoped in SQL) | covered                                                                                                                                                    | route + unit | high                 |
 | Scheduling | Update/run/delete another user's scheduled task                    | `test_prompt_scheduling.py::test_owner_and_validation_rejection`              | covered for update; SQL delete is user-scoped                                                                                                              | route + unit | high                 |
 | Share      | Unknown thread returns 500 rather than 404                         | none                                                                          | observation only: `TestThreadAcl::test_missing_thread_does_not_reach_the_data_layer`; no body leaked                                                       | route        | low                  |
@@ -161,11 +163,12 @@ the tests. PostgreSQL's UUID primary key rejects the insert, which limits exposu
 there but does not fix the interpolation.
 
 **Repro:** `backend/tests/data/test_sql_alchemy.py::test_thread_id_cannot_inject_sql`
-(`xfail(strict=True)`). It fails today with `VICTIM-SECRET` in the attacker's result.
+(no `xfail` since the fix). Before the fix it failed with `VICTIM-SECRET` in the
+attacker's result; it now covers a UNION read, `OR 1=1` and a stacked `DROP`.
 
 **Fix:** bind thread ids as parameters (expanding bindparam) in the steps/elements
-queries; validate `threadId` at the socket boundary; remove the xfail marker.
-Filed as `e7a29b68-9e66-43cb-be3b-7b597d9dac51` (high, Developer).
+queries. Fixed on `main` by `c9e00f3d` (KRE-199); follow-up
+`e7a29b68-9e66-43cb-be3b-7b597d9dac51` closed.
 
 ### F2 (medium) — missing object-level authorization on `/project/element`
 
@@ -183,12 +186,14 @@ overwrite the element content or delete the row/blob.
 likelihood; shared threads supply the id.
 
 **Repro:** `backend/tests/test_security_tenancy.py::test_cross_tenant_custom_element_delete_is_rejected`
-(`xfail(strict=True)`): the route answers 200 and calls
-`data_layer.delete_element("alice-element-id", "alice-thread")`.
+and `...update...is_rejected` (no `xfail` since the fix). Before the fix the route
+answered 200 and called `data_layer.delete_element("alice-element-id",
+"alice-thread")`.
 
 **Fix:** resolve the element's thread and require the caller to be its author before
-update/delete; scope the data-layer mutation by `(thread_id, element_id)`; remove the
-xfail marker. Filed as `1fe21a5c-f432-433e-bb53-22b00657b162` (medium, Developer).
+update/delete; scope the data-layer mutation by `(thread_id, element_id)`. Fixed on
+this branch by `71db4c01` (KRE-200); follow-up `1fe21a5c-f432-433e-bb53-22b00657b162`
+closed.
 
 ### F3 (low) — uploaded non-media files are served inline without `nosniff`
 
@@ -197,14 +202,16 @@ xfail marker. Filed as `1fe21a5c-f432-433e-bb53-22b00657b162` (medium, Developer
 directly renders from the Chainlit origin (no-auth deployments; direct navigation).
 The UI's `download` link reduces the normal path. Filed as
 `7eb11be6-44e2-4667-b955-e8e749143b9c` (low). Verified non-issue: filenames are not
-reflected into response headers (`TestFileResponse`).
+reflected into response headers (`TestFileResponse`). Fixed on `main` by `60b4995a`
+(KRE-201): non-media uploads are forced to attachment and served with `nosniff`.
 
 ### F4 (low) — upload body read before size validation
 
 `upload_file()` reads the entire `UploadFile` before calling `validate_file_upload()`,
 so `max_size_mb` does not bound memory. Filed as
-`5e8a61dc-dccf-49c0-9703-4d987a4073c2` (low). No flaky memory-pressure test added;
-the control-flow ordering is the evidence.
+`5e8a61dc-dccf-49c0-9703-4d987a4073c2` (low). Fixed on `main` by `fd575ef2`
+(KRE-202): `validate_file_upload()` runs before `UploadFile.read()`, with a regression
+test asserting zero reads for an oversized upload.
 
 ## 6. Verified mitigations (keep these)
 
@@ -256,19 +263,17 @@ no values were printed or stored. Test fixtures use obvious fake constants (e.g.
 
 ## 8. Verification
 
-- `cd backend && uv run pytest -q`: **1393 passed, 2 xfailed**.
-- After the pre-commit formatter: targeted security files **106 passed, 2 xfailed**.
-- `uv run scripts/lint.py`: all checks passed.
-- `uv run scripts/format.py --check`: 230 files already formatted.
-- `uv run scripts/type_check.py`: no issues in 126 source files.
-- `git diff -- backend/chainlit` after all mutation checks: empty (no production
-  changes).
+Integrated tree (`test/security-baseline` + `origin/main` at `904e94cc`):
 
-The workspace is shared with another concurrent run. Later full-suite reruns under
-load average > 70 on a 2-vCPU host hit the pre-existing 15-second subprocess timeout
-in `tests/test_cache.py::test_cache_nested_and_recursive_calls`; that test passes in
-isolation when import time is normal and is unrelated to this branch. The green run
-above is the verification baseline.
+- `cd backend && env -u DATABASE_URL uv run pytest -q`: **1481 passed** in 45.55s.
+- `uv run scripts/lint.py`: all checks passed.
+- `uv run scripts/format.py --check`: 240 files already formatted.
+- `uv run scripts/type_check.py`: no issues in 133 source files.
+- `git diff -- backend/chainlit` after all mutation checks: empty (the only production
+  change is the reviewed F2 fix).
+
+The earlier 1393-passed run was recorded before the merge with `main`; the green run
+above is the verification baseline for the integrated branch.
 
 ## 8.1 Mutation evidence
 
@@ -276,27 +281,30 @@ Each mutation was applied to a production file, the targeted tests were run, and
 file was restored from its original copy. `git diff -- backend/chainlit` is empty after
 the checks.
 
-| Mutation                                           | Test                                         | Result                                                    |
-| -------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------- |
-| `decode_jwt`: `verify_signature: True` → `False`   | `auth/test_jwt.py`                           | 6 failed, 10 passed — signature/algorithm tests detect it |
-| `is_thread_author`: always allow                   | `test_security_tenancy.py`                   | 5 failed (all ACL routes), 1 xfailed                      |
-| `validate_mcp_url`: skip `_has_ambiguous_path`     | `test_mcp.py -k validate_mcp_url`            | 24 failed, 44 passed                                      |
-| `persist_file`: store under `name` instead of UUID | `test_security_uploads.py`                   | 5 failed (traversal cases)                                |
-| `get_all_user_threads`: drop `userId` predicate    | `test_sql_alchemy.py -k only_returns_target` | 1 failed (tenant list test)                               |
+| Mutation                                           | Test                                                                     | Result                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `decode_jwt`: `verify_signature: True` → `False`   | `auth/test_jwt.py`                                                       | 6 failed, 10 passed — signature/algorithm tests detect it |
+| `is_thread_author`: always allow                   | `test_security_tenancy.py`                                               | 7 failed (all ACL routes)                                 |
+| `validate_mcp_url`: skip `_has_ambiguous_path`     | `test_mcp.py -k validate_mcp_url`                                        | 24 failed, 44 passed                                      |
+| `persist_file`: store under `name` instead of UUID | `test_security_uploads.py`                                               | 5 failed (traversal cases)                                |
+| `get_all_user_threads`: drop `userId` predicate    | `test_sql_alchemy.py -k only_returns_target`                             | 1 failed (tenant list test)                               |
+| `_authorize_custom_element`: early return          | `test_security_tenancy.py -k "cross_tenant_custom_element or owner_can"` | 3 failed, 1 passed                                        |
 
-The two `xfail(strict=True)` tests are the current repros for F1/F2. If either fix
-lands, the strict xfail turns into an XPASS failure, forcing the marker to be removed.
+Both strict `xfail` markers were removed when their fixes landed (F1 on `main`, F2 on
+this branch); under `strict=True` an XPASS would itself fail the suite. Re-run on the
+integrated tree, the mutations above still fail the tests, so none of the coverage
+relies on the removed markers.
 
 ## 9. Follow-ups and E2E list
 
 Filed on the board as children of this issue (Developer owner):
 
-| ID                                     | Severity | Item                                                   |
-| -------------------------------------- | -------- | ------------------------------------------------------ |
-| `e7a29b68-9e66-43cb-be3b-7b597d9dac51` | high     | F1: bind thread ids in SQLAlchemy step/element queries |
-| `1fe21a5c-f432-433e-bb53-22b00657b162` | medium   | F2: enforce element ownership on `/project/element`    |
-| `7eb11be6-44e2-4667-b955-e8e749143b9c` | low      | F3: attachment/nosniff headers for uploaded files      |
-| `5e8a61dc-dccf-49c0-9703-4d987a4073c2` | low      | F4: validate upload size before buffering the body     |
+| ID                                     | Severity | Item                                                                         |
+| -------------------------------------- | -------- | ---------------------------------------------------------------------------- |
+| `e7a29b68-9e66-43cb-be3b-7b597d9dac51` | high     | F1: bind thread ids in SQLAlchemy step/element queries (fixed by `c9e00f3d`) |
+| `1fe21a5c-f432-433e-bb53-22b00657b162` | medium   | F2: enforce element ownership on `/project/element` (fixed by `71db4c01`)    |
+| `7eb11be6-44e2-4667-b955-e8e749143b9c` | low      | F3: attachment/nosniff headers for uploaded files (fixed by `60b4995a`)      |
+| `5e8a61dc-dccf-49c0-9703-4d987a4073c2` | low      | F4: validate upload size before buffering the body (fixed by `fd575ef2`)     |
 
 Browser-only cases for the E2E Tester (not backend tests):
 
@@ -331,8 +339,8 @@ Browser-only cases for the E2E Tester (not backend tests):
 
 ## Verdict
 
-`pass with follow-ups` for the baseline deliverables (matrix, tests, static checks, no
-production changes). Under the security review policy the high-severity F1 blocks
-closing the parent security work until fixed or explicitly accepted by the CEO; F2 is
-medium, F3/F4 are low. The baseline itself is safe to merge because it only adds tests
-and documentation.
+`pass with follow-ups` for the integrated baseline. F1 (high) and F3/F4 were fixed on
+`main`; F2 (medium) is fixed on this branch. The remaining follow-ups are the
+browser-only E2E cases in §9 and the residual risks in §10 (DNS rebinding, no built-in
+rate limiting, private storage for element URLs). The one production change here is
+the reviewed F2 fix; the rest is tests and documentation.
