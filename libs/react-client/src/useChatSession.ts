@@ -62,7 +62,10 @@ function approvalFromStep(step: IStep): IApproval | null {
     expiresAt: record.expiresAt ?? null,
     // Arguments are not persisted; the read-only card shows the redacted
     // preview. The live event is the only source of full arguments.
-    arguments: record.argumentsPreview ?? {},
+    arguments: record.editedArgumentsPreview ?? record.argumentsPreview ?? {},
+    argumentsPreview: record.argumentsPreview ?? null,
+    editedArgumentsPreview: record.editedArgumentsPreview ?? null,
+    editAllowed: Boolean(record.editAllowed),
     decidedBy: record.decidedBy ?? null,
     decidedAt: record.decidedAt ?? null,
     decision: record.decision ?? null,

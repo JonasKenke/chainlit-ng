@@ -37,14 +37,17 @@ def _public_steps(steps: Any) -> Any:
             result.append(step)
             continue
         approval = raw_metadata["approval"]
+        # The framework writes the edited preview into the step input trace
+        # (M11); the public view must not carry it past the whitelist.
+        public_step = {key: value for key, value in step.items() if key != "input"}
         if not isinstance(approval, dict):
             # An unexpected shape may carry detail outside the nested record;
             # drop the whole step metadata rather than guessing.
-            result.append({**step, "metadata": {}})
+            result.append({**public_step, "metadata": {}})
             continue
         result.append(
             {
-                **step,
+                **public_step,
                 "metadata": {
                     **raw_metadata,
                     "approval": {

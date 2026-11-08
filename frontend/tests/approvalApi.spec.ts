@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ChainlitAPI } from '@chainlit/react-client';
+import { ChainlitAPI, ClientError } from '@chainlit/react-client';
 
 describe('respondToApproval', () => {
   afterEach(() => {
@@ -34,5 +34,24 @@ describe('respondToApproval', () => {
         decisionRequestId: 'request-1'
       })
     ).resolves.toEqual(terminal);
+  });
+});
+
+describe('ClientError', () => {
+  it('renders a structured 422 detail as field and type', () => {
+    const error = new ClientError(
+      'Unprocessable Entity',
+      422,
+      {
+        error: 'ApprovalInvalidArguments',
+        field: 'editedArguments.unknownField',
+        type: 'extra_forbidden'
+      } as any,
+      {}
+    );
+
+    expect(error.toString()).toContain('editedArguments.unknownField');
+    expect(error.toString()).toContain('extra_forbidden');
+    expect(error.toString()).not.toContain('[object Object]');
   });
 });
