@@ -31,6 +31,12 @@ export const useTranslation = () => {
 
   return {
     t: (path: string | string[], options?: options) => {
+      // i18n.exists() ignores defaultValue, so call t() when a fallback is
+      // provided instead of returning the missing-translation placeholder.
+      if (options?.defaultValue !== undefined) {
+        return t(path, options);
+      }
+
       if (!i18n.exists(path, options)) {
         return '...';
       }

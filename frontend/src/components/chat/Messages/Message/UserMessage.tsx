@@ -1,7 +1,8 @@
-import { cn } from '@/lib/utils';
+import { MESSAGE_TOO_LARGE, cn, isMessageTooLarge } from '@/lib/utils';
 import { MessageContext } from 'contexts/MessageContext';
 import { Star } from 'lucide-react';
 import { memo, useContext, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 import {
   IMessageElement,
@@ -15,7 +16,7 @@ import AutoResizeTextarea from '@/components/AutoResizeTextarea';
 import { BookmarkButton } from '@/components/chat/Messages/Message/Buttons/BookmarkButton';
 import { Pencil } from '@/components/icons/Pencil';
 import { Button } from '@/components/ui/button';
-import { Translator } from 'components/i18n';
+import { Translator, useTranslation } from 'components/i18n';
 
 import { InlinedElements } from './Content/InlinedElements';
 
@@ -31,6 +32,7 @@ const UserMessage = memo(function UserMessage({
 }: React.PropsWithChildren<Props>) {
   const { askUser, loading, editable } = useContext(MessageContext);
   const { editMessage, toggleMessageFavorite } = useChatInteract();
+  const { t } = useTranslation();
   const { config } = useConfig();
   const setMessages = useSetChainlitState('messages');
   const disabled = loading || !!askUser;
@@ -47,6 +49,14 @@ const UserMessage = memo(function UserMessage({
 
   const handleEdit = () => {
     if (editValue) {
+      const editedMessage = { ...message, output: editValue };
+      if (isMessageTooLarge(editedMessage)) {
+        // Keep the editor open so the oversized draft is not dropped.
+        toast.error(
+          t('chat.input.errors.tooLarge', { defaultValue: MESSAGE_TOO_LARGE })
+        );
+        return;
+      }
       setMessages((prev) => {
         const index = prev.findIndex((m) => m.id === message.id);
         if (index === -1) {
@@ -57,7 +67,7 @@ const UserMessage = memo(function UserMessage({
         return slice;
       });
       setIsEditing(false);
-      editMessage({ ...message, output: editValue });
+      editMessage(editedMessage);
     }
   };
 

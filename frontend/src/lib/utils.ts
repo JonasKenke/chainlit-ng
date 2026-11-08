@@ -14,6 +14,10 @@ const MAX_FRAME_BYTES = 1_000_000;
 // Engine.IO packet prefix, socket.io event name and JSON separators.
 const FRAME_OVERHEAD_BYTES = 64;
 
+// English fallback for locales that do not yet ship the translation.
+export const MESSAGE_TOO_LARGE =
+  'Message is too large. The maximum message size is 1 MB.';
+
 export const isMessageTooLarge = (
   message: IStep,
   fileReferences: IFileRef[] = []
