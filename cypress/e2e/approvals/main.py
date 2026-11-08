@@ -1,6 +1,9 @@
 import os
 
 import chainlit as cl
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
+
 from chainlit.server import app, sio
 
 os.environ["CHAINLIT_AUTH_SECRET"] = "SUPER_SECRET"  # nosec B105
@@ -22,16 +25,16 @@ async def count_connections(sid):
     connections += 1
 
 
-@app.get("/test/connections")
-async def get_connections():
-    return {"count": connections}
-
-
-@app.get("/test/disconnect")
-async def disconnect_current_socket():
-    if last_socket_id:
-        await sio.disconnect(last_socket_id)
-    return {"ok": True}
+@app.middleware("http")
+async def test_endpoints(request: Request, call_next):
+    # Middleware runs before the SPA catch-all, unlike routes added after it.
+    if request.url.path == "/test/connections":
+        return JSONResponse({"count": connections})
+    if request.url.path == "/test/disconnect":
+        if last_socket_id:
+            await sio.disconnect(last_socket_id)
+        return JSONResponse({"ok": True})
+    return await call_next(request)
 
 
 @cl.on_chat_start
