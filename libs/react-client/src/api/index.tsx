@@ -57,11 +57,20 @@ export class ClientError extends Error {
   }
 
   toString() {
-    if (this.detail) {
-      return `${this.message}: ${this.detail}`;
-    } else {
-      return this.message;
+    const detail: unknown = this.detail;
+    if (!detail) return this.message;
+    if (typeof detail === 'string') {
+      return `${this.message}: ${detail}`;
     }
+    // A structured 422 (e.g. approvals) carries {error, field, type}; render
+    // the path and type instead of "[object Object]".
+    const structured = detail as { field?: unknown; type?: unknown };
+    if (typeof structured.field === 'string') {
+      const type =
+        typeof structured.type === 'string' ? ` (${structured.type})` : '';
+      return `${this.message}: ${structured.field}${type}`;
+    }
+    return `${this.message}: ${JSON.stringify(detail)}`;
   }
 }
 

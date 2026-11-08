@@ -62,6 +62,20 @@ const diffPreviews = (before: Preview, after: Preview): string[] => {
   return lines.sort();
 };
 
+const approvalErrorMessage = (error: unknown): string => {
+  const detail = (error as { payload?: { detail?: unknown } })?.payload?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (detail && typeof detail === 'object') {
+    // 422 ApprovalInvalidArguments carries the schema field path and the
+    // Pydantic error type; never the submitted value.
+    const { field, type } = detail as { field?: unknown; type?: unknown };
+    if (typeof field === 'string') {
+      return typeof type === 'string' ? `${field} (${type})` : field;
+    }
+  }
+  return error instanceof Error ? error.message : 'Unable to decide approval';
+};
+
 interface Props {
   approval: IApproval;
 }
@@ -110,9 +124,7 @@ export const ApprovalCard = ({ approval }: Props) => {
         )
       );
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : 'Unable to decide approval'
-      );
+      toast.error(approvalErrorMessage(error));
     } finally {
       setBusy(false);
     }

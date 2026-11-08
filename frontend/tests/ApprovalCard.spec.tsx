@@ -8,6 +8,9 @@ import { ChainlitContext } from '@chainlit/react-client';
 import { ApprovalCard } from '@/components/chat/Approvals/ApprovalCard';
 
 const respondToApproval = vi.fn();
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+
+vi.mock('sonner', () => ({ toast: { error: toastError } }));
 
 vi.mock('@chainlit/react-client', async () => {
   const ReactModule = await import('react');
@@ -169,6 +172,36 @@ describe('ApprovalCard', () => {
       '~ to: "person@example.com" → "other@example.com"'
     );
     expect(diff).not.toHaveTextContent('apiKey');
+  });
+
+  it('shows the field path and error type for an invalid edit', async () => {
+    respondToApproval.mockRejectedValueOnce({
+      message: 'Unprocessable Entity',
+      payload: {
+        detail: {
+          error: 'ApprovalInvalidArguments',
+          field: 'editedArguments.unknownField',
+          type: 'extra_forbidden'
+        }
+      }
+    });
+    render(
+      <ChainlitContext.Provider value={{ respondToApproval } as any}>
+        <ApprovalCard approval={{ ...approval, editAllowed: true }} />
+      </ChainlitContext.Provider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Edited arguments JSON'), {
+      target: { value: '{"to": "other@example.com"}' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save edit' }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    const message = String(toastError.mock.calls.at(-1)?.[0]);
+    expect(message).toContain('editedArguments.unknownField');
+    expect(message).toContain('extra_forbidden');
+    expect(message).not.toContain('[object Object]');
   });
 
   it('does not offer buttons for a terminal approval', () => {
