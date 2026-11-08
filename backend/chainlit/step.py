@@ -5,7 +5,9 @@ import time
 import uuid
 from copy import deepcopy
 from functools import wraps
-from typing import Callable, Dict, List, Literal, TypedDict, Union
+from typing import Callable, Dict, List, Literal, Optional, Type, TypedDict, Union
+
+from pydantic import BaseModel
 
 from chainlit.config import config
 from chainlit.context import CL_RUN_NAMES, context, local_steps
@@ -80,6 +82,63 @@ def flatten_args_kwargs(func, args, kwargs):
     return {k: deepcopy(v) for k, v in bound_arguments.arguments.items()}
 
 
+def _approval_arguments(func, args, kwargs) -> Dict:
+    """Snapshot JSON-only arguments, excluding self/cls.
+
+    The snapshot is normalized to plain JSON values, so later copies are
+    identical. The tool executes this snapshot, not the caller's objects.
+    """
+    from chainlit.approval import ApprovalInvalidArguments, _canonical_json
+
+    signature = inspect.signature(func)
+    bound = signature.bind(*args, **kwargs)
+    bound.apply_defaults()
+    parameters = list(signature.parameters.values())
+    drop_first = bool(parameters) and parameters[0].name in ("self", "cls")
+    arguments: Dict = {}
+    for index, (key, value) in enumerate(bound.arguments.items()):
+        if index == 0 and drop_first:
+            continue
+        try:
+            arguments[key] = json.loads(_canonical_json(value))
+        except ApprovalInvalidArguments as exc:
+            raise ApprovalInvalidArguments(
+                "approval arguments must be JSON-compatible",
+                field=key,
+                error_type="json_invalid",
+            ) from exc
+    return arguments
+
+
+def _approval_call_arguments(func, args, kwargs, arguments: Dict, *, edited: bool):
+    """Overlay the approved snapshot onto the original call."""
+    from chainlit.approval import ApprovalInvalidArguments
+
+    bound = inspect.signature(func).bind(*args, **kwargs)
+    bound.apply_defaults()
+    for key, value in arguments.items():
+        if key not in bound.arguments:
+            raise ApprovalInvalidArguments(
+                "approved arguments do not match the function signature",
+                field=f"editedArguments.{key}" if edited else key,
+                error_type="unknown_field",
+            )
+        bound.arguments[key] = value
+    return bound.args, bound.kwargs
+
+
+def _approval_preview_input(name: str, arguments: Dict) -> Dict:
+    from chainlit.approval import _arguments_preview
+
+    return {
+        "approval": {
+            "tool": name,
+            "argumentsPreview": _arguments_preview(arguments),
+            "redacted": True,
+        }
+    }
+
+
 def step(
     original_function: Callable | None = None,
     *,
@@ -95,6 +154,8 @@ def step(
     show_input: Union[bool, str] = "json",
     default_open: bool = False,
     auto_collapse: bool = False,
+    requires_approval: bool = False,
+    approval_schema: Optional[Type[BaseModel]] = None,
 ):
     """Step decorator for async and sync functions."""
 
@@ -103,13 +164,25 @@ def step(
         if not name:
             name = func.__name__
 
+        if requires_approval and not inspect.iscoroutinefunction(func):
+            from chainlit.approval import ApprovalUnsupported
+
+            raise ApprovalUnsupported(
+                "requires_approval is only supported on async functions"
+            )
+
         # Handle async decorator
 
         if inspect.iscoroutinefunction(func):
 
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
-                async with Step(
+                approval_arguments: Dict = {}
+                if requires_approval:
+                    # Snapshot and validate before creating a step or a card.
+                    approval_arguments = _approval_arguments(func, args, kwargs)
+
+                step_instance = Step(
                     type=type,
                     name=name,
                     id=id,
@@ -122,12 +195,49 @@ def step(
                     default_open=default_open,
                     auto_collapse=auto_collapse,
                     metadata=metadata,
-                ) as step:
-                    try:
-                        step.input = flatten_args_kwargs(func, args, kwargs)
-                    except Exception as e:
-                        logger.exception(e)
-                    result = await func(*args, **kwargs)
+                    requires_approval=requires_approval,
+                    approval_schema=approval_schema,
+                )
+                if requires_approval:
+                    step_instance.input = _approval_preview_input(
+                        step_instance.name, approval_arguments
+                    )
+                    # The decorator alone may satisfy the manual-flag guard.
+                    step_instance._approval_decorated = True
+                    step_instance._approval_managed = True
+
+                async with step_instance as step:
+                    if requires_approval:
+                        from chainlit.approval import Approval
+
+                        decision = await Approval(
+                            step=step,
+                            arguments=approval_arguments,
+                            arguments_schema=approval_schema,
+                        ).ask()
+                        if not decision.approved:
+                            step.is_error = True
+                            label = (
+                                "rejected"
+                                if decision.decision == "reject"
+                                else decision.decision
+                            )
+                            step.output = f"Approval {label}"
+                            return None
+                        call_args, call_kwargs = _approval_call_arguments(
+                            func,
+                            args,
+                            kwargs,
+                            decision.arguments,
+                            edited=decision.decision == "edit",
+                        )
+                        result = await func(*call_args, **call_kwargs)
+                    else:
+                        try:
+                            step.input = flatten_args_kwargs(func, args, kwargs)
+                        except Exception as e:
+                            logger.exception(e)
+                        result = await func(*args, **kwargs)
                     try:
                         if result is not None and not step.output:
                             step.output = result
@@ -219,6 +329,8 @@ class Step:
         auto_collapse: bool | None = False,
         show_input: Union[bool, str] = "json",
         thread_id: str | None = None,
+        requires_approval: bool = False,
+        approval_schema: Optional[Type[BaseModel]] = None,
     ):
         if metadata and "approval" in metadata:
             raise ValueError("metadata['approval'] is reserved")
@@ -228,6 +340,9 @@ class Step:
         self._output = ""
         self._persistence_tasks: set[asyncio.Task] = set()
         self._approval_managed = False
+        self._approval_decorated = False
+        self.requires_approval = requires_approval
+        self.approval_schema = approval_schema
         self.thread_id = thread_id or context.session.thread_id
         self.name = name or ""
         self.type = type
@@ -509,10 +624,21 @@ class Step:
             id=self.id,
             parent_id=self.parent_id,
             thread_id=self.thread_id,
+            requires_approval=self.requires_approval,
+            approval_schema=self.approval_schema,
         )
+
+    def _check_manual_approval(self) -> None:
+        if self.requires_approval and not self._approval_decorated:
+            from chainlit.approval import ApprovalUnsupported
+
+            raise ApprovalUnsupported(
+                "Step(requires_approval=True) is only supported through @step"
+            )
 
     # Handle Context Manager Protocol
     async def __aenter__(self):
+        self._check_manual_approval()
         self.start = utc_now()
         previous_steps = local_steps.get() or []
         parent_step = previous_steps[-1] if previous_steps else None
@@ -539,6 +665,7 @@ class Step:
         await self.update()
 
     def __enter__(self):
+        self._check_manual_approval()
         self.start = utc_now()
 
         previous_steps = local_steps.get() or []

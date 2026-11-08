@@ -40,7 +40,7 @@ from chainlit.context import ChainlitContext, context_var
 from chainlit.message import Message
 from chainlit.server import app
 from chainlit.session import HTTPSession, WebsocketSession
-from chainlit.step import Step
+from chainlit.step import Step, step as step_decorator
 from chainlit.types import ApprovalDecisionRequest
 from chainlit.user import User
 
@@ -1739,3 +1739,430 @@ async def test_route_edit_errors_never_echo_the_value(
 
         await _decide(mock_session, entry, "rejected")
         await task
+
+
+async def _next_entry():
+    for _ in range(200):
+        if approval_module._pending_by_approval:
+            return next(iter(approval_module._pending_by_approval.values()))
+        await asyncio.sleep(0.01)
+    raise AssertionError("approval entry was not registered")
+
+
+async def test_decorator_persists_only_redacted_preview_and_runs_on_approve(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def send_email(amount: int, apiKey: str):
+            calls.append((amount, apiKey))
+            return "sent"
+
+        task = asyncio.create_task(send_email(amount=5, apiKey="sk-super-secret"))
+        entry = await _next_entry()
+        row = layer.steps[entry.step_id]
+
+        assert "sk-super-secret" not in json.dumps(row)
+        assert json.loads(row["input"]) == {
+            "approval": {
+                "tool": "send_email",
+                "argumentsPreview": {"amount": 5, "apiKey": "[redacted]"},
+                "redacted": True,
+            }
+        }
+        assert row["metadata"]["approval"]["argumentsPreview"] == {
+            "amount": 5,
+            "apiKey": "[redacted]",
+        }
+
+        await _decide(mock_session, entry)
+        result = await task
+
+    assert result == "sent"
+    assert calls == [(5, "sk-super-secret")]
+    assert entry.step.is_error is False
+    assert layer.steps[entry.step_id]["metadata"]["approval"]["status"] == "approved"
+
+
+async def test_decorator_returns_none_without_running_on_reject(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(amount: int):
+            calls.append(amount)
+            return "ran"
+
+        task = asyncio.create_task(tool(amount=1))
+        entry = await _next_entry()
+        await _decide(mock_session, entry, "rejected", reason="not now")
+        result = await task
+
+    assert result is None
+    assert calls == []
+    assert entry.step.is_error is True
+    assert entry.step.output == "Approval rejected"
+    assert layer.steps[entry.step_id]["metadata"]["approval"]["status"] == "rejected"
+
+
+async def test_decorator_returns_none_without_running_on_expiry(
+    layer, mock_chainlit_context, mock_session, monkeypatch
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    monkeypatch.setattr(config.project, "session_timeout", 0.05)
+    calls = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(amount: int):
+            calls.append(amount)
+            return "ran"
+
+        task = asyncio.create_task(tool(amount=1))
+        entry = await _next_entry()
+        result = await asyncio.wait_for(task, 2)
+
+    assert result is None
+    assert calls == []
+    assert entry.step.is_error is True
+    assert entry.step.output == "Approval expired"
+    assert layer.steps[entry.step_id]["metadata"]["approval"]["status"] == "expired"
+
+
+async def test_decorator_returns_none_without_running_on_supersede(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(amount: int):
+            calls.append(amount)
+            return "ran"
+
+        task = asyncio.create_task(tool(amount=1))
+        entry = await _next_entry()
+        await transition(
+            entry.approval_id,
+            "superseded",
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            reason="replaced",
+        )
+        result = await task
+
+    assert result is None
+    assert calls == []
+    assert entry.step.output == "Approval superseded"
+    assert layer.steps[entry.step_id]["metadata"]["approval"]["status"] == "superseded"
+
+
+async def test_decorator_does_not_run_when_request_write_fails(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+    layer.fail_writes = 1
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(amount: int):
+            calls.append(amount)
+            return "ran"
+
+        task = asyncio.create_task(tool(amount=1))
+        with pytest.raises(ApprovalPersistenceError):
+            await task
+
+    assert calls == []
+    assert not approval_module._pending_by_approval
+    assert all(
+        "approval" not in row.get("metadata", {}) for row in layer.steps.values()
+    )
+
+
+async def test_decorator_edit_runs_with_validated_arguments_only(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True, approval_schema=_EditArgs)
+        async def tool(amount: int, note: str = "", apiKey: str = ""):
+            calls.append((amount, note, apiKey))
+            return "ran"
+
+        task = asyncio.create_task(tool(amount=1, apiKey="sk-original"))
+        entry = await _next_entry()
+        await _decide(mock_session, entry, "edited", edited_arguments={"amount": 7})
+        result = await task
+
+    assert result == "ran"
+    assert calls == [(7, "", "")]
+    assert entry.step.output == "ran"
+    row = layer.steps[entry.step_id]
+    assert "sk-original" not in json.dumps(row)
+    assert json.loads(row["input"]) == {
+        "approval": {
+            "tool": "tool",
+            "argumentsPreview": {
+                "amount": 7,
+                "note": "",
+                "apiKey": "[redacted]",
+            },
+            "edited": True,
+            "redacted": True,
+        }
+    }
+
+
+async def test_decorator_invalid_edit_does_not_run(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True, approval_schema=_EditArgs)
+        async def tool(amount: int, note: str = "", apiKey: str = ""):
+            calls.append(amount)
+            return "ran"
+
+        task = asyncio.create_task(tool(amount=1))
+        entry = await _next_entry()
+        with pytest.raises(ApprovalInvalidArguments):
+            await _decide(
+                mock_session,
+                entry,
+                "edited",
+                edited_arguments={"amount": "super-secret-value"},
+            )
+        assert not task.done()
+        assert calls == []
+
+        await _decide(mock_session, entry, "rejected")
+        assert await task is None
+    assert calls == []
+
+
+async def test_approval_route_never_calls_action_callbacks(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+    called = []
+
+    async def action_callback(action):
+        called.append(action)
+
+    monkeypatch.setattr(
+        config.code, "action_callbacks", {"fake_action": action_callback}
+    )
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        response = await _route(
+            monkeypatch,
+            {
+                "sessionId": mock_session.id,
+                "approvalId": entry.approval_id,
+                "decision": "approve",
+                "decisionRequestId": "request-1",
+            },
+            mock_session.user,
+            mock_session,
+        )
+        await task
+
+    assert response.status_code == 200
+    assert called == []
+
+
+@pytest.mark.parametrize("metadata_as_json", [False, True], ids=["dict", "string"])
+async def test_resume_normalizes_string_and_dict_step_metadata(
+    monkeypatch, metadata_as_json
+):
+    approval_id = str(uuid.uuid4())
+    pending = {
+        "version": 1,
+        "revision": 1,
+        "id": approval_id,
+        "stepId": "step-1",
+        "threadId": "thread-1",
+        "tool": "tool",
+        "title": "<b>title</b>",
+        "status": "pending",
+        "requestedBy": "test_user_identifier",
+        "requestedAt": "2026-01-01T00:00:00Z",
+        "expiresAt": "2026-01-01T00:05:00Z",
+        "editAllowed": False,
+        "digestSalt": "salt",
+        "argumentsDigest": "hmac-sha256:digest",
+        "argumentsPreview": {"amount": 1},
+        "decidedBy": None,
+        "decidedAt": None,
+        "decision": None,
+        "editedArgumentsPreview": None,
+        "editedArgumentsDigest": None,
+        "reason": None,
+        "decisionRequestId": None,
+        "terminalReason": None,
+        "terminalAt": None,
+    }
+    metadata = {"approval": pending, "keep": "me"}
+    if metadata_as_json:
+        metadata = json.dumps(metadata)
+    thread = {
+        "id": "thread-1",
+        "metadata": {},
+        "steps": [{"id": "step-1", "metadata": metadata}],
+    }
+    written = []
+
+    class Layer:
+        async def write_approval(
+            self, *, thread_id, step_id, record, expected_revision
+        ):
+            written.append((thread_id, step_id, record, expected_revision))
+            return True
+
+    monkeypatch.setattr(approval_module, "get_data_layer", lambda: Layer())
+
+    await orphan_thread_approvals(thread)
+
+    stored = thread["steps"][0]["metadata"]
+    assert isinstance(stored, dict)
+    assert stored["keep"] == "me"
+    assert stored["approval"]["status"] == "orphaned"
+    assert stored["approval"]["title"] == "<b>title</b>"
+    assert written
+    assert written[0][2]["status"] == "orphaned"
+
+
+async def test_decorator_edit_on_a_method_keeps_self_out_of_the_record(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        class Tool:
+            @step_decorator(
+                type="tool", requires_approval=True, approval_schema=_EditArgs
+            )
+            async def run(self, amount: int, note: str = "", apiKey: str = ""):
+                assert self is tool
+                calls.append(amount)
+                return "ran"
+
+        tool = Tool()
+        task = asyncio.create_task(tool.run(amount=1, apiKey="sk-original"))
+        entry = await _next_entry()
+        record = layer.steps[entry.step_id]["metadata"]["approval"]
+        assert record["argumentsPreview"] == {
+            "amount": 1,
+            "note": "",
+            "apiKey": "[redacted]",
+        }
+
+        await _decide(mock_session, entry, "edited", edited_arguments={"amount": 7})
+        assert await task == "ran"
+
+    assert calls == [7]
+
+
+async def test_decorator_rejects_non_json_arguments_before_creating_a_step(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    class Blob:
+        def __repr__(self):
+            return "Blob(secret=sk-nonjson-secret)"
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(payload):
+            calls.append(payload)
+            return "ran"
+
+        with pytest.raises(ApprovalInvalidArguments) as exc:
+            await tool(payload=Blob())
+
+    assert exc.value.field == "payload"
+    assert exc.value.error_type == "json_invalid"
+    assert "sk-nonjson-secret" not in str(exc.value)
+    assert calls == []
+    assert layer.steps == {}
+
+
+async def test_decorator_executes_the_normalized_snapshot(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    calls = []
+
+    class DivergentStr(str):
+        def __deepcopy__(self, memo):
+            return "runs-unseen"
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True)
+        async def tool(value):
+            calls.append((type(value).__name__, value))
+            return "ran"
+
+        task = asyncio.create_task(tool(value=DivergentStr("shown-to-approver")))
+        entry = await _next_entry()
+        assert entry.step.metadata["approval"]["argumentsPreview"] == {
+            "value": "shown-to-approver"
+        }
+
+        await _decide(mock_session, entry)
+        assert await task == "ran"
+
+    assert calls == [("str", "shown-to-approver")]

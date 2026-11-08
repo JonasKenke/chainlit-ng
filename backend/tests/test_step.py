@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from chainlit.approval import ApprovalUnsupported
 from chainlit.context import local_steps
 from chainlit.element import Element
 from chainlit.step import (
@@ -24,6 +25,32 @@ class TestStepClass:
         async with mock_chainlit_context:
             with pytest.raises(ValueError, match="reserved"):
                 Step(name="test_step", metadata={"approval": {}})
+
+    async def test_manual_requires_approval_raises_at_aenter(
+        self, mock_chainlit_context
+    ):
+        async with mock_chainlit_context:
+            with pytest.raises(ApprovalUnsupported, match="through @step"):
+                async with Step(name="manual_tool", requires_approval=True):
+                    pass
+
+    async def test_manual_requires_approval_raises_at_enter(
+        self, mock_chainlit_context
+    ):
+        async with mock_chainlit_context:
+            with pytest.raises(ApprovalUnsupported, match="through @step"):
+                with Step(name="manual_tool", requires_approval=True):
+                    pass
+
+    async def test_previous_approval_management_does_not_unlock_manual_flag(
+        self, mock_chainlit_context
+    ):
+        async with mock_chainlit_context:
+            step = Step(name="manual_tool", requires_approval=True)
+            step._approval_managed = True
+            with pytest.raises(ApprovalUnsupported, match="through @step"):
+                async with step:
+                    pass
 
     async def test_step_initialization_with_defaults(self, mock_chainlit_context):
         """Test Step initialization with default values."""
@@ -561,6 +588,13 @@ class TestStepDecorator:
 
             assert result == 6
             ctx.emitter.send_step.assert_called()
+
+    async def test_sync_function_with_requires_approval_raises_at_decoration(self):
+        with pytest.raises(ApprovalUnsupported, match="async functions"):
+
+            @step(requires_approval=True)
+            def sync_tool():
+                return "result"
 
     async def test_step_decorator_forwards_thread_id(self, mock_chainlit_context):
         """Test @step(thread_id=...) reaches the Step it creates."""
