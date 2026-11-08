@@ -43,6 +43,7 @@ import CommandButton from './CommandPopoverButton';
 import FavoriteButton from './FavoriteButton';
 import Input, { InputMethods } from './Input';
 import McpButton from './Mcp';
+import { McpLibraryButton } from './Mcp/Library';
 import ModePicker from './ModePicker';
 import PromptGalleryButton from './PromptGalleryButton';
 import PromptSchedulingButton from './PromptSchedulingButton';
@@ -345,6 +346,10 @@ export default function MessageComposer({
             />
           ))}
           <McpButton disabled={disabled} />
+          <McpLibraryButton
+            disabled={disabled}
+            onInsertPrompt={(text) => inputRef.current?.setValueExtern(text)}
+          />
           <CommandButton
             disabled={disabled}
             selectedCommandId={selectedCommand?.id}

@@ -195,6 +195,38 @@ class TestElementBase:
             assert element.name == "test_file"
             assert element.url == "https://example.com/file.pdf"
 
+    async def test_element_props_survive_a_dict_round_trip(self, mock_chainlit_context):
+        """Provenance (for example an MCP server/URI) is persisted with the element."""
+        async with mock_chainlit_context:
+            props = {"mcp": {"server": "docs", "uri": "file:///readme.md"}}
+            element = File(
+                name="README",
+                url="https://example.com/readme.md",
+                mime="text/markdown",
+                props=props,
+            )
+
+            restored = Element.from_dict(element.to_dict())
+
+            assert restored.props == props
+            assert restored.to_dict()["props"] == props
+
+    async def test_custom_element_without_props_still_loads(
+        self, mock_chainlit_context
+    ):
+        """Older persisted custom elements have no props key; default to {}."""
+        async with mock_chainlit_context:
+            restored = Element.from_dict(
+                {
+                    "id": "custom-legacy",
+                    "type": "custom",
+                    "name": "Sources",
+                    "url": "https://example.com/sources",
+                }
+            )
+
+            assert restored.props == {}
+
     async def test_element_from_dict_preserves_bytes_content(
         self, mock_chainlit_context
     ):

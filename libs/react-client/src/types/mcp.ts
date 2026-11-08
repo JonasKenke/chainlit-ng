@@ -1,6 +1,30 @@
+export interface IMcpPromptArgument {
+  name: string;
+  description?: string | null;
+  required?: boolean;
+}
+
+/** A prompt published by a connected MCP server. */
+export interface IMcpPrompt {
+  name: string;
+  description?: string | null;
+  arguments?: IMcpPromptArgument[];
+}
+
+/** A resource published by a connected MCP server. */
+export interface IMcpResource {
+  uri: string;
+  name: string;
+  description?: string | null;
+  mimeType?: string | null;
+  size?: number | null;
+}
+
 export interface IMcp {
   name: string;
   tools: { name: string }[];
+  prompts?: IMcpPrompt[];
+  resources?: IMcpResource[];
   status: 'connected' | 'connecting' | 'failed';
   /** Transport of a server declared in `[[features.mcp.servers]]`. */
   type?: 'sse' | 'stdio' | 'streamable-http';
@@ -26,4 +50,14 @@ export interface IMcpConnectResponse {
   mcp?: IMcp;
   status?: 'authorization_required';
   url?: string;
+}
+
+/** Body of `POST /mcp/prompt`: the rendered prompt text for the composer. */
+export interface IMcpPromptResponse {
+  text: string;
+}
+
+/** Body of `POST /mcp/resource`: the element shown in the chat. */
+export interface IMcpResourceResponse {
+  element: Record<string, unknown>;
 }

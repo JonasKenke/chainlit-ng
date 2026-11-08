@@ -58,6 +58,9 @@ vi.mock('@/components/chat/MessageComposer/FavoriteButton', () => ({
 vi.mock('@/components/chat/MessageComposer/Mcp', () => ({
   default: () => null
 }));
+vi.mock('@/components/chat/MessageComposer/Mcp/Library', () => ({
+  McpLibraryButton: () => null
+}));
 vi.mock('@/components/chat/MessageComposer/ModePicker', () => ({
   default: () => null
 }));

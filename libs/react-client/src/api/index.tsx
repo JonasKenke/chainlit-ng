@@ -1,4 +1,11 @@
-import { IElement, IMcpConnectResponse, IThread, IUser } from 'src/types';
+import {
+  IElement,
+  IMcpConnectResponse,
+  IMcpPromptResponse,
+  IMcpResourceResponse,
+  IThread,
+  IUser
+} from 'src/types';
 
 import { IAction } from 'src/types/action';
 import {
@@ -375,6 +382,38 @@ export class ChainlitAPI extends APIBase {
 
   async disconnectMcp(sessionId: string, name: string) {
     const res = await this.delete(`/mcp`, { sessionId, name });
+    return res.json();
+  }
+
+  /** Render one prompt published by a connected MCP server. */
+  async getMcpPrompt(
+    sessionId: string,
+    name: string,
+    prompt: string,
+    args?: Record<string, string>
+  ): Promise<IMcpPromptResponse> {
+    const res = await this.post(`/mcp/prompt`, {
+      sessionId,
+      name,
+      prompt,
+      ...(args && Object.keys(args).length ? { arguments: args } : {})
+    });
+    return res.json();
+  }
+
+  /** Read one resource published by a connected MCP server. */
+  async readMcpResource(
+    sessionId: string,
+    name: string,
+    uri: string,
+    resourceName?: string
+  ): Promise<IMcpResourceResponse> {
+    const res = await this.post(`/mcp/resource`, {
+      sessionId,
+      name,
+      uri,
+      ...(resourceName ? { resourceName } : {})
+    });
     return res.json();
   }
 

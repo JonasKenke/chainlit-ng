@@ -103,6 +103,9 @@ class Element:
     language: Optional[str] = None
     # Mime type, inferred based on content if not provided
     mime: Optional[str] = None
+    # Free-form metadata, already serialised as "props" for every element
+    # type. MCP resources use it to record which server and URI they came from.
+    props: Optional[Dict] = Field(default=None, kw_only=True)
     # Whether a live update may open the side panel. Defaults to True.
     # Excluded from persistence to avoid schema migrations.
     auto_expand: bool = Field(default=True, kw_only=True)
@@ -164,6 +167,10 @@ class Element:
         chainlit_key = e_dict.get("chainlitKey")
         display = e_dict.get("display", "inline")
         mime_type = e_dict.get("mime", "")
+        props = e_dict.get("props")
+        if type == "custom" and props is None:
+            # CustomElement.props is required; older persisted dicts omit it.
+            props = {}
 
         # Common parameters for all element types
         common_params = {
@@ -177,6 +184,7 @@ class Element:
             "chainlit_key": chainlit_key,
             "display": display,
             "mime": mime_type,
+            "props": props,
         }
 
         if type == "image":
@@ -195,7 +203,7 @@ class Element:
             return Plotly(size=e_dict.get("size", "medium"), **common_params)  # type: ignore[arg-type]
 
         elif type == "custom":
-            return CustomElement(props=e_dict.get("props", {}), **common_params)  # type: ignore[arg-type]
+            return CustomElement(**common_params)  # type: ignore[arg-type]
         else:
             # Default to File for any other type
             return File(**common_params)  # type: ignore[arg-type]

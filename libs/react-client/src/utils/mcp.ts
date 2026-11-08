@@ -13,6 +13,8 @@ export const markMcpConnected = (mcps: IMcp[], mcp?: IMcp): IMcp[] =>
     ? updateMcp(mcps, mcp.name, {
         status: 'connected',
         tools: mcp.tools,
+        prompts: mcp.prompts ?? [],
+        resources: mcp.resources ?? [],
         authorizationUrl: undefined,
         detail: undefined
       })
