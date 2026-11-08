@@ -1,6 +1,10 @@
 import { IElement, IMcpConnectResponse, IThread, IUser } from 'src/types';
 
 import { IAction } from 'src/types/action';
+import {
+  IApprovalDecisionPayload,
+  IApprovalDecisionResponse
+} from 'src/types/approval';
 import { IFeedback } from 'src/types/feedback';
 import { IPrompt } from 'src/types/prompt';
 import {
@@ -312,6 +316,14 @@ export class ChainlitAPI extends APIBase {
 
   async callAction(action: IAction, sessionId: string) {
     const res = await this.post(`/project/action`, { sessionId, action });
+
+    return res.json();
+  }
+
+  async respondToApproval(
+    payload: IApprovalDecisionPayload
+  ): Promise<IApprovalDecisionResponse> {
+    const res = await this.post(`/project/approval`, payload);
 
     return res.json();
   }

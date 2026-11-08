@@ -16,6 +16,7 @@ import {
   useSetChainlitState
 } from '@chainlit/react-client';
 
+import { ApprovalCard } from '@/components/chat/Approvals/ApprovalCard';
 import { Messages } from '@/components/chat/Messages';
 import { useTranslation } from 'components/i18n/Translator';
 
@@ -34,6 +35,7 @@ const MessagesContainer = ({ navigate }: Props) => {
   const setMessages = useSetChainlitState('messages');
   const setSideView = useSetChainlitState('sideView');
   const sessionId = useChainlitStore((state) => state.sessionId);
+  const approvals = useChainlitStore((state) => state.approvals);
 
   const { t } = useTranslation();
 
@@ -154,6 +156,13 @@ const MessagesContainer = ({ navigate }: Props) => {
 
   return (
     <MessageContext.Provider value={memoizedContext}>
+      {approvals.length ? (
+        <div className="flex flex-col gap-2 py-2">
+          {approvals.map((approval) => (
+            <ApprovalCard key={approval.id} approval={approval} />
+          ))}
+        </div>
+      ) : null}
       <Messages
         indent={0}
         isRunning={loading}

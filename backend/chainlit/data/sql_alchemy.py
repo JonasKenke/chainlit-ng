@@ -474,6 +474,91 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             logger.info(f"SQLAlchemy: update_step, step_id={step_dict.get('id')}")
         await self.create_step(step_dict)
 
+    async def write_approval(
+        self,
+        *,
+        thread_id: str,
+        step_id: str,
+        record: Dict[str, Any],
+        expected_revision: Optional[int],
+    ) -> bool:
+        dialect = self.engine.dialect.name
+        parameters: Dict[str, Any] = {
+            "id": step_id,
+            "thread_id": thread_id,
+            "approval_id": record.get("id"),
+            "record": json.dumps(record),
+        }
+
+        if dialect == "sqlite":
+            no_pending = (
+                "json_extract(metadata, '$.approval.id') IS NULL OR "
+                "COALESCE("
+                "json_extract(metadata, '$.approval.status'), 'terminal'"
+                ") != 'pending' OR ("
+                "json_extract(metadata, '$.approval.id') = :approval_id AND "
+                "json_extract(metadata, '$.approval.status') = 'pending')"
+            )
+            revision_match = (
+                "json_extract(metadata, '$.approval.revision') = :expected_revision"
+            )
+            query = f"""
+                UPDATE steps
+                SET metadata = json_set(
+                    COALESCE(metadata, '{{}}'), '$.approval', json(:record)
+                )
+                WHERE id = :id
+                  AND "threadId" = :thread_id
+                  AND ({
+                no_pending
+                if expected_revision is None
+                else "(json_extract(metadata, '$.approval.id') = :approval_id AND "
+                + revision_match
+                + ")"
+            })
+            """
+        elif dialect == "postgresql":
+            no_pending = (
+                "metadata -> 'approval' IS NULL OR "
+                "COALESCE("
+                "metadata #>> '{{approval,status}}', 'terminal'"
+                ") != 'pending' OR ("
+                "metadata #>> '{{approval,id}}' = :approval_id AND "
+                "metadata #>> '{{approval,status}}' = 'pending')"
+            )
+            revision_match = (
+                "(metadata #>> '{{approval,revision}}')::int = :expected_revision"
+            )
+            query = f"""
+                UPDATE steps
+                SET metadata = jsonb_set(
+                    COALESCE(metadata, '{{}}'::jsonb),
+                    '{{approval}}',
+                    CAST(:record AS jsonb)
+                )
+                WHERE id = :id
+                  AND "threadId" = :thread_id
+                  AND ({
+                no_pending
+                if expected_revision is None
+                else "(metadata #>> '{{approval,id}}' = :approval_id AND "
+                + revision_match
+                + ")"
+            })
+            """
+        else:
+            return await super().write_approval(
+                thread_id=thread_id,
+                step_id=step_id,
+                record=record,
+                expected_revision=expected_revision,
+            )
+
+        if expected_revision is not None:
+            parameters["expected_revision"] = expected_revision
+        rowcount = await self.execute_sql(query=query, parameters=parameters)
+        return isinstance(rowcount, int) and rowcount == 1
+
     @queue_until_user_message()
     async def delete_step(self, step_id: str):
         if self.show_logger:

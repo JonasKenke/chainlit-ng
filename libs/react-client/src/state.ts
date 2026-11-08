@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useStore } from 'zustand';
 import { type StoreApi, createStore } from 'zustand/vanilla';
 
+import { IApproval } from './types/approval';
 import { ICommand } from './types/command';
 import { IMode } from './types/mode';
 
@@ -45,6 +46,7 @@ export interface ChainlitState {
   sessionId: string;
   session: ISession | undefined;
   actions: IAction[];
+  approvals: IApproval[];
   messages: IStep[];
   commands: ICommand[];
   modes: IMode[];
@@ -108,6 +110,7 @@ function initialState(): ChainlitState {
     sessionId: uuidv4(),
     session: undefined,
     actions: [],
+    approvals: [],
     messages: [],
     commands: [],
     modes: [],
