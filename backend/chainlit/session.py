@@ -241,7 +241,7 @@ class BaseSession:
         path: Optional[str] = None,
         content: Optional[Union[bytes, str]] = None,
     ) -> FileReference:
-        if not path and not content:
+        if not path and content is None:
             raise ValueError(
                 "Either path or content must be provided to persist a file"
             )
@@ -264,7 +264,7 @@ class BaseSession:
                 aiofiles.open(file_path, "wb") as dst,
             ):
                 await dst.write(await src.read())
-        elif content:
+        elif content is not None:
             # Write the provided content to the file
             async with aiofiles.open(file_path, "wb") as buffer:
                 if isinstance(content, str):
