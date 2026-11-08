@@ -1,3 +1,4 @@
+import { isMessageTooLarge } from '@/lib/utils';
 import {
   MutableRefObject,
   useCallback,
@@ -5,6 +6,7 @@ import {
   useRef,
   useState
 } from 'react';
+import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
@@ -157,11 +159,11 @@ export default function MessageComposer({
   );
 
   const onSubmit = useCallback(
-    async (
+    (
       msg: string,
       attachments?: IAttachment[],
       selectedCommand?: string
-    ) => {
+    ): boolean => {
       // Build modes dict: only include modes that have selections
       const modesDict: Record<string, string> = {};
       modes.forEach((mode) => {
@@ -187,16 +189,22 @@ export default function MessageComposer({
         ?.filter((a) => !!a.serverId)
         .map((a) => ({ id: a.serverId! }));
 
+      if (isMessageTooLarge(message, fileReferences)) {
+        toast.error(t('chat.input.errors.tooLarge'));
+        return false;
+      }
+
       if (autoScrollRef) {
         autoScrollRef.current = true;
       }
       sendMessage(message, fileReferences);
+      return true;
     },
-    [user, sendMessage, autoScrollRef, modes, getSelectedOptionId]
+    [user, sendMessage, autoScrollRef, modes, getSelectedOptionId, t]
   );
 
   const onReply = useCallback(
-    async (msg: string) => {
+    (msg: string): boolean => {
       const message: IStep = {
         threadId: '',
         id: uuidv4(),
@@ -207,12 +215,18 @@ export default function MessageComposer({
         metadata: { location: window.location.href }
       };
 
+      if (isMessageTooLarge(message)) {
+        toast.error(t('chat.input.errors.tooLarge'));
+        return false;
+      }
+
       replyMessage(message);
       if (autoScrollRef) {
         autoScrollRef.current = true;
       }
+      return true;
     },
-    [user, replyMessage, autoScrollRef]
+    [user, replyMessage, autoScrollRef, t]
   );
 
   const submit = useCallback(() => {
@@ -223,10 +237,11 @@ export default function MessageComposer({
       return;
     }
 
-    if (askUser) {
-      onReply(value);
-    } else {
-      onSubmit(value, attachments, selectedCommand?.id);
+    const sent = askUser
+      ? onReply(value)
+      : onSubmit(value, attachments, selectedCommand?.id);
+    if (!sent) {
+      return;
     }
 
     setAttachments([]);

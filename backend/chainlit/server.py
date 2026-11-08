@@ -316,7 +316,12 @@ copilot_build_dir = get_build_dir(os.path.join("libs", "copilot"), "copilot")
 
 app = FastAPI(lifespan=lifespan)
 
-sio = socketio.AsyncServer(cors_allowed_origins=[], async_mode="asgi")
+# Engine.IO silently drops frames above this limit. The composer enforces the
+# same limit (isMessageTooLarge in frontend/src/lib/utils.ts) so an oversized
+# message is reported instead of being rendered and lost.
+sio = socketio.AsyncServer(
+    cors_allowed_origins=[], async_mode="asgi", max_http_buffer_size=1_000_000
+)
 
 asgi_app = socketio.ASGIApp(socketio_server=sio, socketio_path="")
 

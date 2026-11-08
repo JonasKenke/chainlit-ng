@@ -1,11 +1,26 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-import { IStep } from '@chainlit/react-client';
+import { IFileRef, IStep } from '@chainlit/react-client';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+// Engine.IO closes the socket without an error for frames above its
+// max_http_buffer_size (1 MB, see backend/chainlit/server.py), so an oversized
+// message is rendered optimistically and then lost.
+const MAX_FRAME_BYTES = 1_000_000;
+// Engine.IO packet prefix, socket.io event name and JSON separators.
+const FRAME_OVERHEAD_BYTES = 64;
+
+export const isMessageTooLarge = (
+  message: IStep,
+  fileReferences: IFileRef[] = []
+): boolean =>
+  new TextEncoder().encode(JSON.stringify({ message, fileReferences })).length +
+    FRAME_OVERHEAD_BYTES >
+  MAX_FRAME_BYTES;
 
 export const hasMessage = (messages: IStep[]): boolean => {
   const validTypes = ['user_message', 'assistant_message', 'tool'];
