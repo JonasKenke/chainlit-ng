@@ -52,10 +52,7 @@ describe('Skills', () => {
     cy.get('[role="dialog"]').contains('Skills').should('be.visible');
 
     cy.get('#skill-import-input').selectFile(
-      {
-        contents: '---\ndescription: no name\n---\n',
-        fileName: 'broken.md'
-      },
+      'cypress/fixtures/skill-invalid.md',
       { force: true }
     );
     cy.get('#skill-error').should(
@@ -64,18 +61,14 @@ describe('Skills', () => {
     );
 
     cy.get('#skill-import-input').selectFile(
-      {
-        contents:
-          '---\nname: imported-one\ndescription: Imported from a file\n---\n# Body\n',
-        fileName: 'review.md'
-      },
+      'cypress/fixtures/skill-import.md',
       { force: true }
     );
     cy.wait('@importSkill');
 
     row('imported-one').within(() => {
       cy.contains('Imported').should('be.visible');
-      cy.contains('review.md').should('be.visible');
+      cy.contains('skill-import.md').should('be.visible');
       cy.contains('Disabled — review before enabling').should('be.visible');
       cy.get('[role="switch"]').should('have.attr', 'aria-checked', 'false');
     });
