@@ -113,9 +113,8 @@ class TestThreadAcl:
         ):
             response = raw_client.get("/project/thread/thread-404")
 
-        # The route currently answers 500 for an unknown thread. The security
-        # property under test is that no thread body is returned.
-        assert response.status_code == 500
+        # An unknown thread is a 404 and must not return a thread body.
+        assert response.status_code == 404
         data_layer.get_thread.assert_not_awaited()
 
 
