@@ -597,3 +597,37 @@ async def test_delete_all_threads_only_deletes_target_user(
         ).fetchone()[0]
         assert target_count == 0
         assert other_count == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_removes_step_rows_without_a_cascade(
+    sqlite_chainlit_layer,
+):
+    layer, conn = sqlite_chainlit_layer
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute(
+        'INSERT INTO "User" (id, identifier) VALUES (?, ?)',
+        ("owner", "owner"),
+    )
+    conn.execute(
+        'INSERT INTO "Thread" (id, "userId") VALUES (?, ?)',
+        ("thread-1", "owner"),
+    )
+    conn.execute(
+        'INSERT INTO "Step" (id, "threadId") VALUES (?, ?)',
+        ("step-1", "thread-1"),
+    )
+    conn.execute(
+        'INSERT INTO "Element" (id, "threadId", "stepId") VALUES (?, ?, ?)',
+        ("element-1", "thread-1", "step-1"),
+    )
+    conn.execute(
+        'INSERT INTO "Feedback" (id, "stepId") VALUES (?, ?)',
+        ("feedback-1", "step-1"),
+    )
+    conn.commit()
+
+    await layer.delete_thread("thread-1")
+
+    for table in ("Thread", "Step", "Element", "Feedback"):
+        assert conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] == 0

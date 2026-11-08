@@ -2433,13 +2433,13 @@ async def delete_thread(
 
     await is_thread_author(current_user.identifier, thread_id)
 
+    await supersede_thread_approvals(thread_id)
     mark_thread_deleted(thread_id)
     try:
         await data_layer.delete_thread(thread_id)
     except Exception:
         clear_thread_deleted(thread_id)
         raise
-    await supersede_thread_approvals(thread_id)
     return JSONResponse(content={"success": True})
 
 
@@ -2461,6 +2461,7 @@ async def delete_user_threads(current_user: UserParam):
 
     pending_thread_ids = managed_thread_ids_for(identifier)
     for thread_id in pending_thread_ids:
+        await supersede_thread_approvals(thread_id)
         mark_thread_deleted(thread_id)
     try:
         deleted = await data_layer.delete_all_threads(user_id)
@@ -2476,9 +2477,6 @@ async def delete_user_threads(current_user: UserParam):
         for thread_id in pending_thread_ids:
             clear_thread_deleted(thread_id)
         raise
-
-    for thread_id in pending_thread_ids:
-        await supersede_thread_approvals(thread_id)
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     logger.info(

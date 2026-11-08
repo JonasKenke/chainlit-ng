@@ -228,6 +228,34 @@ class TestSharedThreadExposure:
         ]["approval"]
         assert owner_approval == approval
 
+    @pytest.mark.parametrize(
+        "metadata",
+        [
+            "not-json",
+            '{"approval": "unexpected", "other": "kept"}',
+            '{"approval": null, "argumentsPreview": {"secret": "x"}}',
+            '{"approval": ["not", "a", "dict"]}',
+            ["not", "a", "dict"],
+        ],
+    )
+    def test_share_view_fails_closed_on_unexpected_metadata(
+        self, client, data_layer, metadata
+    ):
+        stored = thread(metadata={"is_shared": True})
+        stored["steps"] = [
+            {"id": "step-1", "threadId": "thread-1", "metadata": metadata}
+        ]
+        data_layer.get_thread.return_value = stored
+
+        with patch("chainlit.server.get_data_layer", return_value=data_layer):
+            response = client.get("/project/share/thread-1")
+
+        assert response.status_code == 200
+        public_metadata = response.json()["steps"][0]["metadata"]
+        assert "approval" not in public_metadata
+        assert "argumentsPreview" not in public_metadata
+        assert "unexpected" not in response.text
+
     def test_callback_denial_wins_over_missing_share_flag(self, client, data_layer):
         async def deny(_thread, _user):
             return False

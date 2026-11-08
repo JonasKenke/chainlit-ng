@@ -15,6 +15,7 @@ import json
 import os
 import secrets
 import uuid
+import weakref
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -119,6 +120,11 @@ class ApprovalLimitReached(ApprovalError):
     status_code = 429
 
 
+class ApprovalPending(ApprovalError):
+    code = "ApprovalPending"
+    status_code = 409
+
+
 @dataclass(frozen=True)
 class ApprovalDecision:
     approval_id: str
@@ -151,7 +157,9 @@ class _Entry:
 # sessions (KRE-188 tracks multi-worker).
 _pending_by_approval: Dict[str, _Entry] = {}
 _pending_by_step: Dict[tuple[str, str], str] = {}
-_step_locks: Dict[tuple[str, str], asyncio.Lock] = {}
+_step_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
 _terminal_records: Dict[str, tuple[str, Dict[str, Any]]] = {}
 
 # Thread ids deleted while an approval step may still write. In-process, like
@@ -209,21 +217,162 @@ def managed_thread_ids_for(identifier: str) -> set[str]:
     }
 
 
-async def supersede_thread_approvals(thread_id: str) -> None:
-    """Resolve waiters after a delete; the row is gone, so no write is durable."""
-    entries = [
+def pending_approvals_for_thread(thread_id: str) -> list[_Entry]:
+    return [
         entry for entry in _pending_by_approval.values() if entry.thread_id == thread_id
+    ]
+
+
+def guard_pending_approval(thread_id: Optional[str]) -> None:
+    """Refuse a new run while an approval owns the thread."""
+    if thread_id and pending_approvals_for_thread(thread_id):
+        raise ApprovalPending("Resolve the pending approval before starting a run")
+
+
+async def supersede_thread_approvals(thread_id: str, reason: str = "deleted") -> None:
+    """Resolve waiters before a delete; the row is gone, so no write is durable."""
+    for entry in pending_approvals_for_thread(thread_id):
+        try:
+            await transition(
+                entry.approval_id,
+                "superseded",
+                reason=reason,
+                retry_on_failure=True,
+            )
+        except ApprovalError:
+            continue
+
+
+async def orphan_session_approvals(generation: str) -> None:
+    """Drop waiters that belong to a session that no longer exists."""
+    entries = [
+        entry
+        for entry in _pending_by_approval.values()
+        if entry.session_generation == generation
     ]
     for entry in entries:
         try:
             await transition(
                 entry.approval_id,
-                "superseded",
-                reason="deleted",
+                "orphaned",
+                reason="session_ended",
                 retry_on_failure=True,
             )
         except ApprovalError:
             continue
+
+
+def _metadata_dict(value: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def _set_persisted_approval(
+    thread: Dict[str, Any], step_id: str, record: Dict[str, Any]
+) -> None:
+    for step in thread.get("steps") or []:
+        if not isinstance(step, dict) or step.get("id") != step_id:
+            continue
+        metadata = _metadata_dict(step.get("metadata")) or {}
+        step["metadata"] = {**metadata, APPROVAL_METADATA_KEY: deepcopy(record)}
+        return
+
+
+async def orphan_thread_approvals(
+    thread: Dict[str, Any], *, keep_generation: Optional[str] = None
+) -> None:
+    """Mark persisted pending records orphaned, unless this session owns them.
+
+    A page reload or a restarted worker has no live waiter for the old record.
+    A same-session reconnect does, and keeps it.
+    """
+    thread_id = thread.get("id")
+    if not isinstance(thread_id, str):
+        return
+
+    live = {
+        entry.approval_id: entry for entry in pending_approvals_for_thread(thread_id)
+    }
+    for entry in list(live.values()):
+        if keep_generation is not None and entry.session_generation == keep_generation:
+            continue
+        try:
+            record = await transition(
+                entry.approval_id,
+                "orphaned",
+                reason="server_restart",
+                retry_on_failure=True,
+            )
+        except ApprovalError:
+            continue
+        _set_persisted_approval(thread, entry.step_id, record)
+
+    data_layer = get_data_layer()
+    if data_layer is None:
+        return
+    for step in thread.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        metadata = _metadata_dict(step.get("metadata"))
+        persisted_record = metadata.get(APPROVAL_METADATA_KEY) if metadata else None
+        if (
+            not isinstance(persisted_record, dict)
+            or persisted_record.get("status") != "pending"
+        ):
+            continue
+        approval_id = persisted_record.get("id")
+        if not isinstance(approval_id, str):
+            continue
+        live_entry = live.get(approval_id)
+        if live_entry and live_entry.session_generation == keep_generation:
+            continue
+        orphaned = deepcopy(persisted_record)
+        orphaned.update(
+            {
+                "revision": int(persisted_record.get("revision", 1)) + 1,
+                "status": "orphaned",
+                "decidedBy": None,
+                "decidedAt": None,
+                "decision": None,
+                "reason": None,
+                "decisionRequestId": None,
+                "terminalReason": "server_restart",
+                "terminalAt": _iso(datetime.now(timezone.utc)),
+            }
+        )
+        persisted = await _write_persisted(
+            data_layer, thread_id, step, orphaned, persisted_record
+        )
+        if persisted:
+            step["metadata"] = {**(metadata or {}), APPROVAL_METADATA_KEY: orphaned}
+
+
+async def _write_persisted(
+    data_layer: Any,
+    thread_id: str,
+    step: Dict[str, Any],
+    record: Dict[str, Any],
+    previous: Dict[str, Any],
+) -> bool:
+    step_id = step.get("id")
+    if not isinstance(step_id, str):
+        return False
+    try:
+        return bool(
+            await data_layer.write_approval(
+                thread_id=thread_id,
+                step_id=step_id,
+                record=deepcopy(record),
+                expected_revision=previous.get("revision"),
+            )
+        )
+    except Exception:
+        logger.exception("Approval orphan persistence failed")
+        return False
 
 
 def _canonical_json(value: Any) -> str:
@@ -324,6 +473,8 @@ def _raise_missing(approval_id: str, thread_id: Optional[str]) -> NoReturn:
 async def _write(
     entry: _Entry, record: Dict[str, Any], expected_revision: Optional[int]
 ) -> bool:
+    if is_thread_deleted(entry.thread_id):
+        return False
     data_layer = get_data_layer()
     if data_layer is None:
         return True
@@ -398,7 +549,17 @@ async def _transition_locked(
     entry.step.metadata[APPROVAL_METADATA_KEY] = record
     attempts = 3 if retry_on_failure and not is_thread_deleted(entry.thread_id) else 1
     for attempt in range(attempts):
-        if await _write(entry, record, expected_revision=pending.get("revision")):
+        try:
+            written = await _write(
+                entry, record, expected_revision=pending.get("revision")
+            )
+        except asyncio.CancelledError:
+            # Cancelled before the write was observed: keep pending. A write
+            # that committed anyway stays terminal in storage; the future is
+            # never resolved, so nothing executes.
+            entry.step.metadata[APPROVAL_METADATA_KEY] = pending
+            raise
+        if written:
             break
         if attempt + 1 == attempts:
             entry.step.metadata[APPROVAL_METADATA_KEY] = pending
@@ -408,6 +569,10 @@ async def _transition_locked(
                     entry.approval_id,
                 )
                 break
+            if is_thread_deleted(entry.thread_id):
+                raise ApprovalNotPending(
+                    "Approval was deleted", record=deepcopy(pending)
+                )
             raise ApprovalPersistenceError("Approval persistence failed")
         await asyncio.sleep(0.05 * (attempt + 1))
 
@@ -617,7 +782,10 @@ class Approval:
                 arguments=deepcopy(self.arguments),
             )
             if not await _write(entry, record, expected_revision=None):
-                self.step.metadata[APPROVAL_METADATA_KEY] = previous_record
+                if previous_record is None:
+                    self.step.metadata.pop(APPROVAL_METADATA_KEY, None)
+                else:
+                    self.step.metadata[APPROVAL_METADATA_KEY] = previous_record
                 raise ApprovalPersistenceError("Approval persistence failed")
 
             _pending_by_approval[record["id"]] = entry

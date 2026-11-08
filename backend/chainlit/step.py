@@ -304,8 +304,6 @@ class Step:
         return task
 
     def _approval_persistence_suppressed(self) -> bool:
-        if not self._approval_managed:
-            return False
         from chainlit.approval import is_thread_deleted
 
         return is_thread_deleted(self.thread_id)
@@ -379,11 +377,12 @@ class Step:
         if data_layer and not self._approval_persistence_suppressed():
             try:
                 if self._approval_managed:
-                    from chainlit.approval import step_lock
+                    from chainlit.approval import is_thread_deleted, step_lock
 
                     async with step_lock(self.thread_id, self.id):
-                        step_dict = self.to_dict()
-                        await data_layer.update_step(step_dict.copy())
+                        if not is_thread_deleted(self.thread_id):
+                            step_dict = self.to_dict()
+                            await data_layer.update_step(step_dict.copy())
                 else:
                     self._track_persistence(data_layer.update_step(step_dict.copy()))
             except Exception as e:
@@ -443,13 +442,15 @@ class Step:
         if data_layer and not self._approval_persistence_suppressed():
             try:
                 if self._approval_managed:
-                    from chainlit.approval import step_lock
+                    from chainlit.approval import is_thread_deleted, step_lock
 
                     async with step_lock(self.thread_id, self.id):
-                        await data_layer.create_step(step_dict.copy())
+                        if not is_thread_deleted(self.thread_id):
+                            await data_layer.create_step(step_dict.copy())
+                            self.persisted = True
                 else:
                     self._track_persistence(data_layer.create_step(step_dict.copy()))
-                self.persisted = True
+                    self.persisted = True
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e

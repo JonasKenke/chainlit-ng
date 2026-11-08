@@ -31,11 +31,16 @@ def _public_steps(steps: Any) -> Any:
             except (TypeError, ValueError):
                 raw_metadata = None
         if not isinstance(raw_metadata, dict):
+            result.append({**step, "metadata": {}})
+            continue
+        if "approval" not in raw_metadata:
             result.append(step)
             continue
-        approval = raw_metadata.get("approval")
+        approval = raw_metadata["approval"]
         if not isinstance(approval, dict):
-            result.append(step)
+            # An unexpected shape may carry detail outside the nested record;
+            # drop the whole step metadata rather than guessing.
+            result.append({**step, "metadata": {}})
             continue
         result.append(
             {

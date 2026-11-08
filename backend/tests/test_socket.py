@@ -1,20 +1,29 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+import chainlit.approval as approval_module
+from chainlit.approval import ApprovalPending
+from chainlit.config import config
 from chainlit.session import WebsocketSession
 from chainlit.socket import (
     _authenticate_connection,
     _get_token,
     _get_token_from_cookie,
+    audio_end,
     clean_session,
     connect,
     connection_successful,
+    edit_message,
     load_user_env,
+    message,
     persist_user_session,
     restore_existing_session,
     resume_thread,
+    stop,
+    window_message,
 )
 from chainlit.types import ChatProfile
 
@@ -356,6 +365,7 @@ class TestResumeThread:
 
         metadata_dict = {"chat_profile": "gpt-4"}
         thread = {
+            "id": "thread-123",
             "userIdentifier": "user123",
             "metadata": json.dumps(metadata_dict),
         }
@@ -752,3 +762,238 @@ class TestConnectThreadIdValidation:
             assert await connect("sid", {}, auth) is True
 
         mock_session.assert_called_once()
+
+
+@pytest.fixture(autouse=True)
+def clean_approval_registry():
+    approval_module._pending_by_approval.clear()
+    approval_module._pending_by_step.clear()
+    approval_module._step_locks.clear()
+    approval_module._terminal_records.clear()
+    approval_module._deleted_threads.clear()
+    approval_module._managed_thread_users.clear()
+    yield
+    approval_module._pending_by_approval.clear()
+    approval_module._pending_by_step.clear()
+    approval_module._step_locks.clear()
+    approval_module._terminal_records.clear()
+    approval_module._deleted_threads.clear()
+    approval_module._managed_thread_users.clear()
+
+
+class TestApprovalEntryGuard:
+    @pytest.fixture
+    def context(self):
+        mock_context = Mock()
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    @pytest.fixture(autouse=True)
+    def bind_session(self, mock_session, context):
+        mock_session.unavailable_chat_profile = None
+        mock_session.current_task = None
+        mock_session.thread_id = "thread-1"
+        with (
+            patch(
+                "chainlit.socket.WebsocketSession.require", return_value=mock_session
+            ),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch(
+                "chainlit.socket.guard_pending_approval",
+                side_effect=ApprovalPending("pending"),
+            ),
+        ):
+            yield context
+
+    async def test_client_message_is_refused(self, context, mock_session):
+        on_message = AsyncMock()
+        with patch.object(config.code, "on_message", on_message):
+            await message("sid", {"message": {"output": "hi"}})
+
+        assert mock_session.current_task is None
+        on_message.assert_not_awaited()
+        context.emitter.process_message.assert_not_awaited()
+        context.emitter.send_toast.assert_awaited_once()
+
+    async def test_edit_message_is_refused_before_chat_context_changes(self):
+        on_message = AsyncMock()
+        with (
+            patch.object(config.code, "on_message", on_message),
+            patch("chainlit.socket.chat_context") as chat_context,
+        ):
+            await edit_message("sid", {"message": {"id": "m1", "output": "edited"}})
+
+        on_message.assert_not_awaited()
+        chat_context.get.assert_not_called()
+        chat_context.delete_session.assert_not_called()
+
+    async def test_window_message_is_refused(self):
+        on_window_message = AsyncMock()
+        with patch.object(config.code, "on_window_message", on_window_message):
+            await window_message("sid", {"data": 1})
+
+        on_window_message.assert_not_awaited()
+
+    async def test_audio_end_is_refused_before_first_interaction(self, mock_session):
+        on_audio_end = AsyncMock()
+        mock_session.has_first_interaction = False
+        with patch.object(config.code, "on_audio_end", on_audio_end):
+            await audio_end("sid")
+
+        on_audio_end.assert_not_awaited()
+        assert mock_session.has_first_interaction is False
+
+
+class TestRunOwnership:
+    @pytest.fixture
+    def context(self):
+        mock_context = Mock()
+        mock_context.emitter = AsyncMock()
+        return mock_context
+
+    async def test_client_message_binds_current_task(self, mock_session, context):
+        started = asyncio.Event()
+
+        async def run(session, payload):
+            started.set()
+            await asyncio.Future()
+
+        mock_session.unavailable_chat_profile = None
+        mock_session.current_task = None
+        with (
+            patch(
+                "chainlit.socket.WebsocketSession.require", return_value=mock_session
+            ),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.guard_pending_approval"),
+            patch("chainlit.socket.process_message", run),
+        ):
+            await message("sid", {"message": {"output": "hi"}})
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+            assert mock_session.current_task is not None
+            mock_session.current_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await mock_session.current_task
+
+    async def test_edit_message_binds_current_task(self, mock_session, context):
+        started = asyncio.Event()
+
+        async def run(session, payload):
+            started.set()
+            await asyncio.Future()
+
+        mock_session.unavailable_chat_profile = None
+        mock_session.current_task = None
+        with (
+            patch(
+                "chainlit.socket.WebsocketSession.require", return_value=mock_session
+            ),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.guard_pending_approval"),
+            patch("chainlit.socket.process_edit_message", run),
+        ):
+            await edit_message("sid", {"message": {"id": "m1", "output": "edited"}})
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+            assert mock_session.current_task is not None
+            mock_session.current_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await mock_session.current_task
+
+    async def test_stop_supersedes_before_cancelling(self, mock_session, context):
+        order = []
+
+        async def supersede(thread_id, reason="deleted"):
+            order.append(("supersede", thread_id, reason))
+
+        run_task = asyncio.create_task(asyncio.sleep(60))
+        run_task.add_done_callback(lambda _: order.append(("cancelled",)))
+        mock_session.unavailable_chat_profile = None
+        mock_session.current_task = run_task
+        with (
+            patch("chainlit.socket.WebsocketSession.get", return_value=mock_session),
+            patch("chainlit.socket.init_ws_context", return_value=context),
+            patch("chainlit.socket.supersede_thread_approvals", supersede),
+            patch("chainlit.socket.Message") as message_cls,
+        ):
+            message_cls.return_value.send = AsyncMock()
+            await stop("sid")
+            with pytest.raises(asyncio.CancelledError):
+                await run_task
+
+        assert order[0] == ("supersede", "test_thread_id", "stopped")
+        assert ("cancelled",) in order
+
+
+class TestApprovalReconnect:
+    async def test_reconnect_does_not_reemit_an_approval(self, mock_session_factory):
+        session = mock_session_factory(has_first_interaction=True)
+        session.socket_id = "sid-1"
+        session.restored = True
+        session.thread_id_to_resume = None
+
+        mock_context = Mock()
+        mock_context.session = session
+        mock_context.emitter = AsyncMock()
+
+        mock_config = Mock()
+        mock_config.code.on_chat_start = None
+        mock_config.code.on_chat_resume = None
+
+        with (
+            patch("chainlit.socket.init_ws_context", return_value=mock_context),
+            patch("chainlit.socket.config", mock_config),
+        ):
+            await connection_successful("sid-1")
+
+        mock_context.emitter.send_approval.assert_not_awaited()
+
+
+class TestResumeOrphan:
+    async def test_resume_marks_a_persisted_pending_record_orphaned(self):
+        session = Mock(spec=WebsocketSession)
+        session.user = Mock(identifier="user123")
+        session.thread_id_to_resume = "thread-123"
+        session.id = "session-123"
+        session.generation = "generation-new"
+        session.language = "en-US"
+
+        thread = {
+            "id": "thread-123",
+            "userIdentifier": "user123",
+            "metadata": {},
+            "steps": [
+                {
+                    "id": "step-1",
+                    "metadata": {
+                        "approval": {
+                            "id": "approval-1",
+                            "revision": 1,
+                            "status": "pending",
+                        }
+                    },
+                }
+            ],
+        }
+        mock_data_layer = AsyncMock()
+        mock_data_layer.get_thread.return_value = thread
+        mock_data_layer.write_approval.return_value = True
+
+        from chainlit.user_session import user_sessions
+
+        original_sessions = user_sessions.copy()
+        try:
+            with (
+                patch("chainlit.socket.get_data_layer", return_value=mock_data_layer),
+                patch("chainlit.approval.get_data_layer", return_value=mock_data_layer),
+            ):
+                result = await resume_thread(session)
+        finally:
+            user_sessions.clear()
+            user_sessions.update(original_sessions)
+
+        assert result["steps"][0]["metadata"]["approval"]["status"] == "orphaned"
+        kwargs = mock_data_layer.write_approval.call_args.kwargs
+        assert kwargs["expected_revision"] == 1
+        assert kwargs["record"]["terminalReason"] == "server_restart"

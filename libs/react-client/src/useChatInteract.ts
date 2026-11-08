@@ -33,6 +33,7 @@ const useChatInteract = () => {
   const setElements = useSetChainlitState('elements');
   const setTasklists = useSetChainlitState('tasklists');
   const setActions = useSetChainlitState('actions');
+  const setApprovals = useSetChainlitState('approvals');
   const setTokenCount = useSetChainlitState('tokenCount');
   const setIdToResume = useSetChainlitState('threadIdToResume');
   const setSideView = useSetChainlitState('sideView');
@@ -58,12 +59,13 @@ const useChatInteract = () => {
     setElements([]);
     setTasklists([]);
     setActions([]);
+    setApprovals([]);
     setTokenCount(0);
     resetChatSettings();
     resetChatSettingsValue();
     setSideView(undefined);
     setCurrentThreadId(undefined);
-  }, [session, unavailableThreadId, config, setChatProfile]);
+  }, [session, unavailableThreadId, config, setChatProfile, setApprovals]);
 
   const sendMessage = useCallback(
     (

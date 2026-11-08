@@ -505,6 +505,10 @@ class WebsocketSession(BaseSession):
         ws_sessions_sid.pop(self.socket_id, None)
         ws_sessions_id.pop(self.id, None)
 
+        from chainlit.approval import orphan_session_approvals
+
+        await orphan_session_approvals(self.generation)
+
         from chainlit.mcp_oauth import get_pending_authorizations
 
         get_pending_authorizations().cancel_session(self.id)

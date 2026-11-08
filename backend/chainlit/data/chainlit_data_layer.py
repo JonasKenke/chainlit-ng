@@ -460,11 +460,7 @@ class ChainlitDataLayer(BaseDataLayer):
             )
             WHERE id = $2
               AND "threadId" = {thread_placeholder}
-              AND (
-                metadata IS NULL
-                OR metadata -> 'approval' IS NULL
-                OR ({condition_match})
-              )
+              AND ({condition_match})
             RETURNING id
         """
         try:
@@ -530,6 +526,19 @@ class ChainlitDataLayer(BaseDataLayer):
                 (elem["objectKey"] for elem in elements_results if elem["objectKey"]),
             )
 
+        # Do not rely on the database cascade: a schema without it must not
+        # keep step rows (including approval records) after a delete.
+        await self.execute_query(
+            'DELETE FROM "Feedback" WHERE "stepId" IN '
+            '(SELECT id FROM "Step" WHERE "threadId" = $1)',
+            {"thread_id": thread_id},
+        )
+        await self.execute_query(
+            'DELETE FROM "Element" WHERE "threadId" = $1', {"thread_id": thread_id}
+        )
+        await self.execute_query(
+            'DELETE FROM "Step" WHERE "threadId" = $1', {"thread_id": thread_id}
+        )
         await self.execute_query(
             'DELETE FROM "Thread" WHERE id = $1', {"thread_id": thread_id}
         )
@@ -557,6 +566,22 @@ class ChainlitDataLayer(BaseDataLayer):
                 (elem["objectKey"] for elem in elements if elem["objectKey"]),
             )
 
+        await self.execute_query(
+            'DELETE FROM "Feedback" WHERE "stepId" IN ('
+            'SELECT id FROM "Step" WHERE "threadId" IN '
+            '(SELECT id FROM "Thread" WHERE "userId" = $1))',
+            {"user_id": user_id},
+        )
+        await self.execute_query(
+            'DELETE FROM "Element" WHERE "threadId" IN '
+            '(SELECT id FROM "Thread" WHERE "userId" = $1)',
+            {"user_id": user_id},
+        )
+        await self.execute_query(
+            'DELETE FROM "Step" WHERE "threadId" IN '
+            '(SELECT id FROM "Thread" WHERE "userId" = $1)',
+            {"user_id": user_id},
+        )
         await self.execute_query(
             'DELETE FROM "Thread" WHERE "userId" = $1', {"user_id": user_id}
         )

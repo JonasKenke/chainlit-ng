@@ -47,11 +47,13 @@ export interface IPagination {
 export class ClientError extends Error {
   status: number;
   detail?: string;
+  payload?: any;
 
-  constructor(message: string, status: number, detail?: string) {
+  constructor(message: string, status: number, detail?: string, payload?: any) {
     super(message);
     this.status = status;
     this.detail = detail;
+    this.payload = payload;
   }
 
   toString() {
@@ -93,12 +95,9 @@ export class APIBase {
     return url.toString();
   }
 
-  private async getDetailFromErrorResponse(
-    res: Response
-  ): Promise<string | undefined> {
+  private async getErrorResponse(res: Response): Promise<any> {
     try {
-      const body = await res.json();
-      return body?.detail;
+      return await res.json();
     } catch (error: any) {
       console.error('Unable to parse error response', error);
     }
@@ -161,9 +160,14 @@ export class APIBase {
       });
 
       if (!res.ok) {
-        const detail = await this.getDetailFromErrorResponse(res);
+        const payload = await this.getErrorResponse(res);
 
-        throw new ClientError(res.statusText, res.status, detail);
+        throw new ClientError(
+          res.statusText,
+          res.status,
+          payload?.detail,
+          payload
+        );
       }
 
       return res;
@@ -336,9 +340,21 @@ export class ChainlitAPI extends APIBase {
   async respondToApproval(
     payload: IApprovalDecisionPayload
   ): Promise<IApprovalDecisionResponse> {
-    const res = await this.post(`/project/approval`, payload);
-
-    return res.json();
+    try {
+      const res = await this.post(`/project/approval`, payload);
+      return res.json();
+    } catch (error) {
+      // A 409 carries the terminal record so a stale card can reconcile
+      // without waiting for another event.
+      if (
+        error instanceof ClientError &&
+        error.status === 409 &&
+        error.payload?.approvalId
+      ) {
+        return error.payload as IApprovalDecisionResponse;
+      }
+      throw error;
+    }
   }
 
   async updateElement(element: IElement, sessionId: string) {
