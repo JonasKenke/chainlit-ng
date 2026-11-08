@@ -4,6 +4,7 @@ The data layer is mocked so each test can assert two things at once: the
 caller gets a denial, and the data-layer mutator is never reached.
 """
 
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -194,6 +195,16 @@ class TestSharedThreadExposure:
             {
                 "id": "step-1",
                 "threadId": "thread-1",
+                "input": json.dumps(
+                    {
+                        "approval": {
+                            "argumentsPreview": {
+                                "to": "person@example.com",
+                                "edited": "edited@example.com",
+                            }
+                        }
+                    }
+                ),
                 "metadata": {"keep": "step-meta", "approval": approval},
             }
         ]
@@ -214,8 +225,10 @@ class TestSharedThreadExposure:
                 "terminalReason": None,
             },
         }
+        assert "input" not in response.json()["steps"][0]
         for hidden in (
             "person@example.com",
+            "edited@example.com",
             "secret-digest",
             "secret-salt",
             "request-1",

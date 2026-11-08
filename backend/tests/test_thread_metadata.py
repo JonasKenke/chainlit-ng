@@ -72,6 +72,19 @@ def _approval_thread():
             {
                 "id": "step-1",
                 "name": "tool",
+                "input": json.dumps(
+                    {
+                        "approval": {
+                            "tool": "dangerous_tool",
+                            "argumentsPreview": {
+                                "amount": 2,
+                                "recipient": "bob@example.com",
+                            },
+                            "edited": True,
+                            "redacted": True,
+                        }
+                    }
+                ),
                 "metadata": {
                     "approval": {
                         "version": 1,
@@ -116,6 +129,10 @@ def test_shared_thread_exposes_only_the_approval_whitelist():
         "decidedAt": "2026-01-01T00:00:00Z",
         "terminalReason": None,
     }
+    # The M11 input trace bypasses the metadata whitelist; it must not be
+    # served to share-link viewers either.
+    assert "input" not in result["steps"][0]
+    assert "bob@example.com" not in json.dumps(result)
     for hidden in (
         "argumentsPreview",
         "editedArgumentsPreview",
@@ -130,6 +147,7 @@ def test_shared_thread_exposes_only_the_approval_whitelist():
 
     # The stored thread is not mutated.
     assert thread["steps"][0]["metadata"]["approval"]["requestedBy"] == "user-1"
+    assert "bob@example.com" in thread["steps"][0]["input"]
 
 
 def test_owner_view_keeps_the_full_approval_record():
@@ -140,3 +158,4 @@ def test_owner_view_keeps_the_full_approval_record():
     approval = result["steps"][0]["metadata"]["approval"]
     assert approval["requestedBy"] == "user-1"
     assert approval["editedArgumentsPreview"] == {"apiKey": "[redacted]", "amount": 2}
+    assert result["steps"][0]["input"] == thread["steps"][0]["input"]

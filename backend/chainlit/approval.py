@@ -30,7 +30,13 @@ from typing import (
     Sequence,
 )
 
-from pydantic import BaseModel, ValidationError
+from pydantic import (
+    BaseModel,
+    SecretBytes,
+    SecretStr,
+    TypeAdapter,
+    ValidationError,
+)
 
 from chainlit.config import config
 from chainlit.context import context
@@ -201,6 +207,7 @@ _deleted_threads: Dict[str, None] = {}
 _managed_thread_users: Dict[str, str] = {}
 
 _PROCESS_DIGEST_KEY = secrets.token_bytes(32)
+_JSON_ADAPTER = TypeAdapter(Any)
 
 
 def step_lock(thread_id: str, step_id: str) -> asyncio.Lock:
@@ -431,7 +438,9 @@ def _arguments_digest(arguments: Mapping[str, Any], salt: str) -> str:
 def _redact(value: Any, depth: int = 0, extra_parts: Sequence[str] = ()) -> Any:
     if depth > _MAX_PREVIEW_DEPTH:
         return "[truncated]"
-    secret_parts = _SECRET_KEY_PARTS + tuple(part.lower() for part in extra_parts)
+    secret_parts = _SECRET_KEY_PARTS + tuple(
+        part.lower().replace("-", "_") for part in extra_parts
+    )
     if isinstance(value, dict):
         redacted: Dict[str, Any] = {}
         for key, item in value.items():
@@ -455,6 +464,16 @@ def _arguments_preview(
     return preview
 
 
+def _unwrap_secrets(value: Any) -> Any:
+    if isinstance(value, (SecretStr, SecretBytes)):
+        return value.get_secret_value()
+    if isinstance(value, dict):
+        return {key: _unwrap_secrets(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_unwrap_secrets(item) for item in value]
+    return value
+
+
 def _validate_edited(arguments: Any, schema: type[BaseModel]) -> Dict[str, Any]:
     """Type/shape validation only; the tool still re-authorizes final args."""
     if not isinstance(arguments, Mapping):
@@ -474,7 +493,18 @@ def _validate_edited(arguments: Any, schema: type[BaseModel]) -> Dict[str, Any]:
             # Pydantic's type only; the value and input are never echoed.
             error_type=str(error.get("type", "invalid")),
         ) from None
-    return validated.model_dump(mode="json")
+    try:
+        # JSON mode masks SecretStr/SecretBytes; unwrap first so the tool and
+        # the digest see the submitted value, not "**********".
+        return _JSON_ADAPTER.dump_python(
+            _unwrap_secrets(validated.model_dump(mode="python")), mode="json"
+        )
+    except (TypeError, ValueError) as exc:
+        raise ApprovalInvalidArguments(
+            "edited arguments must be JSON-compatible",
+            field="editedArguments",
+            error_type="json_invalid",
+        ) from exc
 
 
 def _iso(value: datetime) -> str:

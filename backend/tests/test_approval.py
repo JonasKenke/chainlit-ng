@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
 
 import chainlit.approval as approval_module
 from chainlit.approval import (
@@ -51,6 +51,12 @@ class _EditArgs(BaseModel):
     amount: int
     note: str = ""
     apiKey: str = ""
+
+
+class _SecretArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    apiKey: SecretStr
 
 
 class FakeDataLayer:
@@ -1497,14 +1503,48 @@ async def test_extra_redaction_keys_apply_to_the_preview(
         step = Step(name="tool", type="tool")
         await step.send()
         task, entry = await _pending_ask(
-            step, {"accountNumber": "1234", "amount": 1}, redact=("accountNumber",)
+            step,
+            {"accountNumber": "1234", "license-key": "abc", "amount": 1},
+            redact=("accountNumber", "license-key"),
         )
 
         preview = layer.steps[step.id]["metadata"]["approval"]["argumentsPreview"]
-        assert preview == {"accountNumber": "[redacted]", "amount": 1}
+        assert preview == {
+            "accountNumber": "[redacted]",
+            "license-key": "[redacted]",
+            "amount": 1,
+        }
 
         await _decide(mock_session, entry, "rejected")
         await task
+
+
+async def test_secretstr_edit_reaches_the_tool_and_digest_unmasked(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step, {"apiKey": "sk-original"}, arguments_schema=_SecretArgs
+        )
+
+        stored = await _decide(
+            mock_session, entry, "edited", edited_arguments={"apiKey": "sk-edited"}
+        )
+        decision = await task
+
+    assert decision.arguments == {"apiKey": "sk-edited"}
+    assert stored["editedArgumentsPreview"] == {"apiKey": "[redacted]"}
+    assert stored["editedArgumentsDigest"] == approval_module._arguments_digest(
+        {"apiKey": "sk-edited"}, stored["digestSalt"]
+    )
+    assert "**********" not in json.dumps(stored)
+    assert "sk-edited" not in json.dumps(stored)
 
 
 async def test_route_edit_succeeds_with_final_arguments_and_diff(
