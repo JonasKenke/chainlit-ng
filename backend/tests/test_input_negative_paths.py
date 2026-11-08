@@ -262,12 +262,8 @@ def _thread_page(count):
     return [dict(thread) for _ in range(count)]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F6: Pagination.first has no lower bound; -1 becomes a "
-    "negative SQLAlchemy slice and returns all but the last thread.",
-)
-def test_threads_negative_page_size_returns_422(api, monkeypatch):
+@pytest.fixture
+def sql_layer(monkeypatch):
     layer = SQLAlchemyDataLayer(conninfo="sqlite+aiosqlite://")
     monkeypatch.setattr(
         layer, "get_all_user_threads", AsyncMock(return_value=_thread_page(5))
@@ -275,15 +271,30 @@ def test_threads_negative_page_size_returns_422(api, monkeypatch):
     monkeypatch.setattr(data_mod, "_data_layer", layer)
     monkeypatch.setattr(data_mod, "_data_layer_initialized", True)
     monkeypatch.setattr("chainlit.server.get_data_layer", lambda: layer)
+    return layer
 
+
+@pytest.mark.parametrize("first", [0, -1])
+def test_threads_non_positive_page_size_returns_422(api, sql_layer, first):
     response = api.post(
         "/project/threads",
-        json={"pagination": {"first": -1}, "filter": {}},
+        json={"pagination": {"first": first}, "filter": {}},
     )
     assert response.status_code == 422, (
-        f"observed {response.status_code} with "
+        f"observed {response.status_code} for first={first} with "
         f"{len(response.json().get('data', []))} threads"
     )
+
+
+def test_threads_page_size_one_returns_first_thread(api, sql_layer):
+    response = api.post(
+        "/project/threads",
+        json={"pagination": {"first": 1}, "filter": {}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["data"]) == 1
+    assert body["pageInfo"]["hasNextPage"] is True
 
 
 @pytest.mark.parametrize(

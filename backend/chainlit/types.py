@@ -53,7 +53,7 @@ class ThreadDict(TypedDict):
 
 
 class Pagination(BaseModel):
-    first: int
+    first: int = Field(ge=1)
     cursor: Optional[str] = None
 
 
