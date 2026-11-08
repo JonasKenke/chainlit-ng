@@ -194,16 +194,19 @@ class BaseSession:
 
     @property
     def request(self) -> Optional[Request]:
-        """Return the Socket.IO handshake as an HTTP ``Request`` view.
+        """Return the HTTP request view of the connection, if there is one.
 
-        This is the request that opened the transport, not the browser page URL.
-        It reflects the latest handshake after a reconnect. ``environ`` remains
-        the raw source and is not modified.
+        For websocket sessions this is the handshake that opened the transport,
+        not the browser page URL. It reflects the latest handshake after a
+        reconnect. ``environ`` remains the raw source and is not modified.
 
         WebSocket scopes are normalized to an HTTP ``GET`` view (``ws`` ->
         ``http``, ``wss`` -> ``https``). The request body and form are
         unavailable because there is no receive channel; reading them raises
         ``RuntimeError``.
+
+        App code should normally use ``cl.request()``, which falls back to the
+        live HTTP request in plain HTTP routes.
         """
         scope = self.environ.get("asgi.scope")
         if scope is None:

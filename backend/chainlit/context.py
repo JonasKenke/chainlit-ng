@@ -4,6 +4,8 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from lazify import LazyProxy
+from starlette.requests import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from chainlit.session import ClientType, HTTPSession, WebsocketSession
 from chainlit.task_refs import create_persistence_task
@@ -60,6 +62,11 @@ context_var: ContextVar[ChainlitContext] = ContextVar("chainlit")
 local_steps: ContextVar[Optional[List["Step"]]] = ContextVar(
     "local_steps", default=None
 )
+# In-flight HTTP request for the current ASGI call. Websocket callbacks use the
+# session handshake instead; this only covers plain HTTP routes.
+request_var: ContextVar[Optional[Request]] = ContextVar(
+    "chainlit_request", default=None
+)
 
 
 def init_ws_context(session_or_sid: Union[WebsocketSession, str]) -> ChainlitContext:
@@ -111,6 +118,43 @@ def get_context() -> ChainlitContext:
         return context_var.get()
     except LookupError as e:
         raise ChainlitContextException from e
+
+
+def request() -> Optional[Request]:
+    """Return the HTTP request for the current connection, if there is one.
+
+    In websocket callbacks this is the handshake that opened the connection,
+    normalized to an HTTP ``GET`` view. In plain HTTP routes it is the request
+    being served. Returns ``None`` outside a web context, for example in a
+    scheduled task.
+
+    The request is built from the server-side ASGI scope. Headers and cookies
+    are values the server received on that connection, never values supplied
+    in a chat message. Reading the body or form is not supported.
+    """
+    try:
+        session_request = get_context().session.request
+    except ChainlitContextException:
+        session_request = None
+
+    return session_request if session_request is not None else request_var.get()
+
+
+class RequestContextMiddleware:
+    """Expose the in-flight HTTP request to app code through ``request()``."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        token = request_var.set(Request(scope))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            request_var.reset(token)
 
 
 context: ChainlitContext = LazyProxy(get_context, enable_cache=False)

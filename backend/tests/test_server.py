@@ -2417,3 +2417,66 @@ def test_cleanup_files_directory_keeps_external_directory(
     _cleanup_files_directory()
 
     assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_shared_thread_route_exposes_live_request(test_client, monkeypatch):
+    from chainlit.context import request
+
+    captured = {}
+
+    async def get_thread(thread_id):
+        captured["request"] = request()
+        return {
+            "id": thread_id,
+            "userIdentifier": "author",
+            "metadata": {"is_shared": True},
+            "steps": [],
+            "elements": [],
+        }
+
+    monkeypatch.setattr(
+        "chainlit.server.get_data_layer",
+        lambda: SimpleNamespace(get_thread=get_thread),
+    )
+
+    response = test_client.get("/project/share/thread-1", headers={"x-trace": "abc"})
+
+    assert response.status_code == 200
+    assert captured["request"] is not None
+    assert captured["request"].url.path == "/project/share/thread-1"
+    assert captured["request"].headers["x-trace"] == "abc"
+
+
+def test_thread_element_route_exposes_live_request(test_client, monkeypatch):
+    from chainlit.context import request
+
+    author = PersistedUser(
+        id="u1",
+        createdAt=dt.datetime.now().isoformat(),
+        identifier="author",
+    )
+    app.dependency_overrides[get_current_user] = lambda: author
+    captured = {}
+
+    async def get_element(thread_id, element_id):
+        captured["request"] = request()
+        return {"id": element_id, "name": "element", "type": "file", "url": "/x"}
+
+    monkeypatch.setattr(
+        "chainlit.server.get_data_layer",
+        lambda: SimpleNamespace(get_element=get_element),
+    )
+    monkeypatch.setattr("chainlit.server.is_thread_author", AsyncMock())
+
+    try:
+        response = test_client.get(
+            "/project/thread/thread-1/element/element-1",
+            headers={"x-trace": "abc"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert captured["request"] is not None
+    assert captured["request"].url.path == "/project/thread/thread-1/element/element-1"
+    assert captured["request"].headers["x-trace"] == "abc"
