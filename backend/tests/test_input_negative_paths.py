@@ -227,14 +227,19 @@ def test_get_missing_element_returns_404(api, layer):
     assert response.status_code == 404, response.text
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F10: rename accepts an empty name while the UI requires one.",
-)
-def test_rename_thread_rejects_blank_name(api, layer):
+@pytest.mark.parametrize("name", ["", "   ", " \n\t "])
+def test_rename_thread_rejects_blank_name(api, layer, name):
     layer.get_thread_author.return_value = USER.identifier
-    response = api.put("/project/thread", json={"threadId": "t1", "name": ""})
+    response = api.put("/project/thread", json={"threadId": "t1", "name": name})
     assert response.status_code == 422, response.text
+    layer.update_thread.assert_not_awaited()
+
+
+def test_rename_thread_accepts_valid_name_unchanged(api, layer):
+    layer.get_thread_author.return_value = USER.identifier
+    response = api.put("/project/thread", json={"threadId": "t1", "name": "  padded  "})
+    assert response.status_code == 200, response.text
+    layer.update_thread.assert_awaited_once_with("t1", name="  padded  ")
 
 
 def test_rename_thread_missing_fields_returns_422(api, layer):
@@ -605,7 +610,7 @@ def test_element_delete_does_not_trust_client_thread_id(api, session, layer):
 @pytest.fixture
 def gallery(monkeypatch, layer):
     monkeypatch.setattr(config.features, "prompt_gallery", True)
-    layer.create_prompt.return_value = {
+    prompt = {
         "id": "p1",
         "title": "t",
         "content": "c",
@@ -614,6 +619,9 @@ def gallery(monkeypatch, layer):
         "createdAt": "2024-01-01T00:00:00Z",
         "updatedAt": "2024-01-01T00:00:00Z",
     }
+    layer.create_prompt.return_value = prompt
+    layer.get_prompt.return_value = prompt
+    layer.update_prompt.side_effect = lambda updated: updated
     return layer
 
 
@@ -622,16 +630,41 @@ def test_create_prompt_requires_title_and_content(api, gallery):
     assert response.status_code == 422
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F9: the save dialog requires non-blank title/content, "
-    "but the API accepts them.",
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"title": "", "content": "real content"},
+        {"title": "   ", "content": "real content"},
+        {"title": "real title", "content": ""},
+        {"title": "real title", "content": " \n\t "},
+    ],
 )
-def test_create_prompt_rejects_blank_fields(api, gallery):
-    response = api.post(
-        "/project/prompts", json={"title": "   ", "content": "real content"}
-    )
+def test_create_prompt_rejects_blank_fields(api, gallery, payload):
+    response = api.post("/project/prompts", json=payload)
     assert response.status_code == 422, response.text
+    gallery.create_prompt.assert_not_awaited()
+
+
+def test_create_prompt_stores_values_unchanged(api, gallery):
+    response = api.post("/project/prompts", json={"title": "  t  ", "content": "  c  "})
+    assert response.status_code == 200, response.text
+    prompt = gallery.create_prompt.await_args.args[0]
+    assert (prompt["title"], prompt["content"]) == ("  t  ", "  c  ")
+
+
+@pytest.mark.parametrize("field", ["title", "content"])
+@pytest.mark.parametrize("blank", ["", "   ", " \n\t "])
+def test_update_prompt_rejects_blank_fields(api, gallery, field, blank):
+    response = api.put("/project/prompts/p1", json={field: blank})
+    assert response.status_code == 422, response.text
+    gallery.update_prompt.assert_not_awaited()
+
+
+def test_update_prompt_stores_value_unchanged(api, gallery):
+    response = api.put("/project/prompts/p1", json={"title": "  padded  "})
+    assert response.status_code == 200, response.text
+    updated = gallery.update_prompt.await_args.args[0]
+    assert updated["title"] == "  padded  "
 
 
 # ---------------------------------------------------------------------------
