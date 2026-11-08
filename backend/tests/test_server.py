@@ -2366,6 +2366,42 @@ def test_cleanup_files_directory_removes_uploads_under_app_root(
     assert not uploads.exists()
 
 
+def test_cleanup_files_directory_keeps_configured_directory_under_app_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    app_root = tmp_path / "app"
+    uploads = app_root / "uploads"
+    uploads.mkdir(parents=True)
+    marker = uploads / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr("chainlit.server.APP_ROOT", str(app_root))
+    monkeypatch.setattr("chainlit.server.FILES_DIRECTORY", uploads)
+
+    _cleanup_files_directory()
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_cleanup_files_directory_keeps_explicitly_configured_default_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    app_root = tmp_path / "app"
+    uploads = app_root / ".files"
+    uploads.mkdir(parents=True)
+    marker = uploads / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr("chainlit.server.APP_ROOT", str(app_root))
+    monkeypatch.setattr("chainlit.server.FILES_DIRECTORY", uploads)
+    monkeypatch.setattr(
+        "chainlit.server.config.features.spontaneous_file_upload",
+        SpontaneousFileUploadFeature(enabled=True, directory=".files"),
+    )
+
+    _cleanup_files_directory()
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
 def test_cleanup_files_directory_keeps_external_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
