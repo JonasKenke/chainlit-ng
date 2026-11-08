@@ -1,7 +1,13 @@
 export type ApprovalStatus =
-  'pending' | 'approved' | 'rejected' | 'expired' | 'superseded' | 'orphaned';
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'edited'
+  | 'expired'
+  | 'superseded'
+  | 'orphaned';
 
-export type ApprovalDecision = 'approve' | 'reject' | null;
+export type ApprovalDecision = 'approve' | 'reject' | 'edit' | null;
 
 export interface IApproval {
   id: string;
@@ -14,6 +20,9 @@ export interface IApproval {
   requestedAt?: string | null;
   expiresAt?: string | null;
   arguments?: Record<string, unknown>;
+  argumentsPreview?: Record<string, unknown> | null;
+  editedArgumentsPreview?: Record<string, unknown> | null;
+  editAllowed?: boolean;
   decidedBy?: string | null;
   decidedAt?: string | null;
   decision?: ApprovalDecision;
@@ -24,7 +33,8 @@ export interface IApproval {
 export interface IApprovalDecisionPayload {
   sessionId: string;
   approvalId: string;
-  decision: 'approve' | 'reject';
+  decision: 'approve' | 'reject' | 'edit';
+  editedArguments?: Record<string, unknown>;
   decisionRequestId: string;
   reason?: string;
 }

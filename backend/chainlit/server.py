@@ -40,7 +40,9 @@ from watchfiles import awatch
 
 from chainlit.approval import (
     ApprovalError,
+    ApprovalInvalidArguments,
     ApprovalNotPending,
+    ApprovalStatus,
     clear_thread_deleted,
     managed_thread_ids_for,
     mark_thread_deleted,
@@ -2499,6 +2501,13 @@ def _is_json_same_origin(request: Request) -> bool:
     return parsed.scheme == request.url.scheme and parsed.netloc == host
 
 
+_APPROVAL_STATUS_BY_DECISION: Dict[str, ApprovalStatus] = {
+    "approve": "approved",
+    "reject": "rejected",
+    "edit": "edited",
+}
+
+
 def _approval_response(record: dict, *, error: Optional[str] = None) -> dict:
     return ApprovalDecisionResponse(
         approvalId=record["id"],
@@ -2536,14 +2545,21 @@ async def decide_approval(
         )
 
     try:
+        if payload.decision != "edit" and payload.editedArguments is not None:
+            raise ApprovalInvalidArguments(
+                "editedArguments requires decision=edit",
+                field="editedArguments",
+                error_type="not_allowed",
+            )
         record = await transition(
             payload.approvalId,
-            "approved" if payload.decision == "approve" else "rejected",
+            _APPROVAL_STATUS_BY_DECISION[payload.decision],
             actor=session.user,
             thread_id=session.thread_id,
             session_generation=session.generation,
             reason=payload.reason,
             decision_request_id=payload.decisionRequestId,
+            edited_arguments=payload.editedArguments,
         )
     except ApprovalNotPending as exc:
         if exc.record is None:
@@ -2551,6 +2567,18 @@ async def decide_approval(
         return JSONResponse(
             status_code=exc.status_code,
             content=_approval_response(exc.record, error=exc.code),
+        )
+    except ApprovalInvalidArguments as exc:
+        # Field path and error type only; never the offending value.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": {
+                    "error": exc.code,
+                    "field": exc.field,
+                    "type": exc.error_type,
+                }
+            },
         )
     except ApprovalError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.code)

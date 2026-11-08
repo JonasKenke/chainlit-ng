@@ -19,7 +19,18 @@ import weakref
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Dict, Literal, Mapping, NoReturn, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Literal,
+    Mapping,
+    NoReturn,
+    Optional,
+    Sequence,
+)
+
+from pydantic import BaseModel, ValidationError
 
 from chainlit.config import config
 from chainlit.context import context
@@ -37,11 +48,11 @@ MAX_PENDING_APPROVALS_PER_SESSION = 8
 _TERMINAL_RECORD_LIMIT = 256
 
 ApprovalStatus = Literal[
-    "pending", "approved", "rejected", "expired", "superseded", "orphaned"
+    "pending", "approved", "rejected", "edited", "expired", "superseded", "orphaned"
 ]
-Decision = Literal["approve", "reject", "expired", "superseded", "orphaned"]
+Decision = Literal["approve", "reject", "edit", "expired", "superseded", "orphaned"]
 
-_USER_STATUSES = {"approved", "rejected"}
+_USER_STATUSES = {"approved", "rejected", "edited"}
 _SYSTEM_STATUSES = {"expired", "superseded", "orphaned"}
 
 _SECRET_KEY_PARTS = (
@@ -114,6 +125,23 @@ class ApprovalInvalidArguments(ApprovalError):
     code = "ApprovalInvalidArguments"
     status_code = 422
 
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        *,
+        field: Optional[str] = None,
+        error_type: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        # Path and type only: the offending value never leaves the server.
+        self.field = field
+        self.error_type = error_type
+
+
+class ApprovalEditNotAllowed(ApprovalError):
+    code = "ApprovalEditNotAllowed"
+    status_code = 422
+
 
 class ApprovalLimitReached(ApprovalError):
     code = "ApprovalLimitReached"
@@ -151,6 +179,9 @@ class _Entry:
     revision: int
     expires_at_ts: float
     arguments: Mapping[str, Any] = field(default_factory=dict)
+    arguments_schema: Optional[type[BaseModel]] = None
+    redact: tuple[str, ...] = ()
+    decided_arguments: Optional[Dict[str, Any]] = None
 
 
 # Module-level, in-process registry. S1 runs in one worker with sticky
@@ -397,28 +428,53 @@ def _arguments_digest(arguments: Mapping[str, Any], salt: str) -> str:
     return f"hmac-sha256:{digest}"
 
 
-def _redact(value: Any, depth: int = 0) -> Any:
+def _redact(value: Any, depth: int = 0, extra_parts: Sequence[str] = ()) -> Any:
     if depth > _MAX_PREVIEW_DEPTH:
         return "[truncated]"
+    secret_parts = _SECRET_KEY_PARTS + tuple(part.lower() for part in extra_parts)
     if isinstance(value, dict):
         redacted: Dict[str, Any] = {}
         for key, item in value.items():
             lower = str(key).lower().replace("-", "_")
-            if any(part in lower for part in _SECRET_KEY_PARTS):
+            if any(part in lower for part in secret_parts):
                 redacted[str(key)] = "[redacted]"
             else:
-                redacted[str(key)] = _redact(item, depth + 1)
+                redacted[str(key)] = _redact(item, depth + 1, extra_parts)
         return redacted
     if isinstance(value, (list, tuple)):
-        return [_redact(item, depth + 1) for item in value]
+        return [_redact(item, depth + 1, extra_parts) for item in value]
     return value
 
 
-def _arguments_preview(arguments: Mapping[str, Any]) -> Dict[str, Any]:
-    preview = _redact(arguments)
+def _arguments_preview(
+    arguments: Mapping[str, Any], extra_parts: Sequence[str] = ()
+) -> Dict[str, Any]:
+    preview = _redact(arguments, extra_parts=extra_parts)
     if len(json.dumps(preview, default=str)) > _MAX_PREVIEW_CHARS:
         return {"truncated": True}
     return preview
+
+
+def _validate_edited(arguments: Any, schema: type[BaseModel]) -> Dict[str, Any]:
+    """Type/shape validation only; the tool still re-authorizes final args."""
+    if not isinstance(arguments, Mapping):
+        raise ApprovalInvalidArguments(
+            "edited arguments must be an object",
+            field="editedArguments",
+            error_type="object_type",
+        )
+    try:
+        validated = schema.model_validate(dict(arguments))
+    except ValidationError as exc:
+        error = exc.errors()[0]
+        path = ".".join(str(part) for part in error.get("loc", ()))
+        raise ApprovalInvalidArguments(
+            "edited arguments are invalid",
+            field=f"editedArguments.{path}" if path else "editedArguments",
+            # Pydantic's type only; the value and input are never echoed.
+            error_type=str(error.get("type", "invalid")),
+        ) from None
+    return validated.model_dump(mode="json")
 
 
 def _iso(value: datetime) -> str:
@@ -441,6 +497,9 @@ def _payload(record: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict[st
         "decidedAt": record.get("decidedAt"),
         "decision": record.get("decision"),
         "terminalReason": record.get("terminalReason"),
+        "editAllowed": bool(record.get("editAllowed")),
+        "argumentsPreview": record.get("argumentsPreview"),
+        "editedArgumentsPreview": record.get("editedArgumentsPreview"),
         "arguments": dict(arguments),
     }
 
@@ -500,6 +559,7 @@ async def _transition_locked(
     reason: Optional[str] = None,
     decision_request_id: Optional[str] = None,
     retry_on_failure: bool = False,
+    edited_arguments: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Persist one terminal record for a live pending entry."""
     pending = entry.step.metadata.get(APPROVAL_METADATA_KEY)
@@ -522,6 +582,27 @@ async def _transition_locked(
         raise ApprovalNotPending("Approval has expired", record=stored)
 
     record = deepcopy(pending)
+    final_arguments: Mapping[str, Any] = entry.arguments
+    if to_status == "edited":
+        if entry.arguments_schema is None:
+            raise ApprovalEditNotAllowed("This approval does not accept edits")
+        if edited_arguments is None:
+            raise ApprovalInvalidArguments(
+                "edited arguments are required",
+                field="editedArguments",
+                error_type="missing",
+            )
+        validated = _validate_edited(edited_arguments, entry.arguments_schema)
+        final_arguments = validated
+        record.update(
+            {
+                "editedArgumentsPreview": _arguments_preview(validated, entry.redact),
+                "editedArgumentsDigest": _arguments_digest(
+                    validated, pending["digestSalt"]
+                ),
+            }
+        )
+
     record.update(
         {
             "revision": int(pending.get("revision", entry.revision)) + 1,
@@ -533,6 +614,8 @@ async def _transition_locked(
                 if to_status == "approved"
                 else "reject"
                 if to_status == "rejected"
+                else "edit"
+                if to_status == "edited"
                 else None
             ),
             "reason": reason if to_status in _USER_STATUSES else None,
@@ -577,6 +660,17 @@ async def _transition_locked(
         await asyncio.sleep(0.05 * (attempt + 1))
 
     entry.revision = int(record["revision"])
+    entry.decided_arguments = dict(final_arguments) if to_status == "edited" else None
+    if to_status == "edited":
+        # M11: the trace carries the final, redacted arguments, never raw ones.
+        entry.step.input = {
+            "approval": {
+                "tool": record["tool"],
+                "argumentsPreview": record["editedArgumentsPreview"],
+                "edited": True,
+                "redacted": True,
+            }
+        }
     _pending_by_approval.pop(entry.approval_id, None)
     if _pending_by_step.get((entry.thread_id, entry.step_id)) == entry.approval_id:
         _pending_by_step.pop((entry.thread_id, entry.step_id), None)
@@ -584,7 +678,7 @@ async def _transition_locked(
 
     if not entry.future.done():
         entry.future.set_result(record)
-    await _emit(entry, record, entry.arguments)
+    await _emit(entry, record, final_arguments)
     return record
 
 
@@ -598,6 +692,7 @@ async def transition(
     reason: Optional[str] = None,
     decision_request_id: Optional[str] = None,
     retry_on_failure: bool = False,
+    edited_arguments: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """The only terminal writer for an approval.
 
@@ -636,6 +731,7 @@ async def transition(
             reason=reason,
             decision_request_id=decision_request_id,
             retry_on_failure=retry_on_failure,
+            edited_arguments=edited_arguments,
         )
 
 
@@ -650,6 +746,8 @@ def _decision_from_record(
         if status == "approved"
         else "reject"
         if status == "rejected"
+        else "edit"
+        if status == "edited"
         else status
     )
     decided_at = record.get("decidedAt") or record.get("terminalAt") or ""
@@ -658,7 +756,7 @@ def _decision_from_record(
         thread_id=record["threadId"],
         step_id=record["stepId"],
         decision=decision,
-        approved=status == "approved",
+        approved=status in _USER_STATUSES,
         arguments=deepcopy(arguments),
         user=user if status in _USER_STATUSES else None,
         decided_at=decided_at,
@@ -680,12 +778,27 @@ class Approval:
         arguments: Mapping[str, Any],
         tool: Optional[str] = None,
         title: Optional[str] = None,
+        arguments_schema: Optional[type[BaseModel]] = None,
+        redact: Sequence[str] = (),
         timeout: Optional[float] = None,
     ) -> None:
+        if arguments_schema is not None and not (
+            isinstance(arguments_schema, type)
+            and issubclass(arguments_schema, BaseModel)
+        ):
+            raise ValueError("arguments_schema must be a pydantic BaseModel")
+        if arguments_schema is not None and (
+            arguments_schema.model_config.get("extra") != "forbid"
+        ):
+            raise ValueError(
+                "arguments_schema must set model_config = ConfigDict(extra='forbid')"
+            )
         self.step = step
         self.arguments = deepcopy(dict(arguments))
         self.tool = tool or step.name
         self.title = title[:200] if title else None
+        self.arguments_schema = arguments_schema
+        self.redact = tuple(redact)
         self.timeout = timeout
 
     async def ask(self) -> ApprovalDecision:
@@ -735,10 +848,10 @@ class Approval:
             "requestedBy": session.user.identifier,
             "requestedAt": requested_at,
             "expiresAt": expires_at,
-            "editAllowed": False,
+            "editAllowed": self.arguments_schema is not None,
             "digestSalt": salt,
             "argumentsDigest": _arguments_digest(self.arguments, salt),
-            "argumentsPreview": _arguments_preview(self.arguments),
+            "argumentsPreview": _arguments_preview(self.arguments, self.redact),
             "decidedBy": None,
             "decidedAt": None,
             "decision": None,
@@ -780,6 +893,8 @@ class Approval:
                 revision=1,
                 expires_at_ts=expires_at_ts,
                 arguments=deepcopy(self.arguments),
+                arguments_schema=self.arguments_schema,
+                redact=self.redact,
             )
             if not await _write(entry, record, expected_revision=None):
                 if previous_record is None:
@@ -818,4 +933,13 @@ class Approval:
             )
 
         stored = entry.future.result()
-        return _decision_from_record(stored, self.arguments, session.user)
+        if stored["status"] == "edited":
+            # Persist the final-argument trace; the record write already landed.
+            await self.step.update()
+        return _decision_from_record(
+            stored,
+            self.arguments
+            if entry.decided_arguments is None
+            else entry.decided_arguments,
+            session.user,
+        )

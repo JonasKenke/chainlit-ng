@@ -9,12 +9,14 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 import chainlit.approval as approval_module
 from chainlit.approval import (
     Approval,
     ApprovalAuthRequired,
+    ApprovalEditNotAllowed,
+    ApprovalInvalidArguments,
     ApprovalLimitReached,
     ApprovalNotFound,
     ApprovalNotPending,
@@ -41,6 +43,14 @@ from chainlit.session import HTTPSession, WebsocketSession
 from chainlit.step import Step
 from chainlit.types import ApprovalDecisionRequest
 from chainlit.user import User
+
+
+class _EditArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount: int
+    note: str = ""
+    apiKey: str = ""
 
 
 class FakeDataLayer:
@@ -151,10 +161,15 @@ async def _entry_for(step: Step):
     raise AssertionError("approval entry was not registered")
 
 
-async def _pending_ask(step: Step, arguments=None, timeout=30):
+async def _pending_ask(step: Step, arguments=None, timeout=30, **kwargs):
     before = set(approval_module._pending_by_approval)
     task = asyncio.create_task(
-        Approval(step=step, arguments=arguments or {"amount": 1}, timeout=timeout).ask()
+        Approval(
+            step=step,
+            arguments=arguments or {"amount": 1},
+            timeout=timeout,
+            **kwargs,
+        ).ask()
     )
     for _ in range(100):
         new_ids = set(approval_module._pending_by_approval) - before
@@ -688,9 +703,13 @@ def test_decision_request_rejects_extra_fields():
     with pytest.raises(ValidationError):
         ApprovalDecisionRequest(**base, arguments={"amount": 10})
     with pytest.raises(ValidationError):
-        ApprovalDecisionRequest(**{**base, "decision": "edit"})
+        ApprovalDecisionRequest(**{**base, "decision": "unknown"})
     with pytest.raises(ValidationError):
         ApprovalDecisionRequest(**{**base, "decisionRequestId": "bad id!"})
+    edit = ApprovalDecisionRequest(
+        **{**base, "decision": "edit", "editedArguments": {"amount": 2}}
+    )
+    assert edit.editedArguments == {"amount": 2}
 
 
 async def _route(
@@ -1231,3 +1250,423 @@ async def test_bulk_delete_supersedes_a_pending_approval(
 
         await step.__aexit__(None, None, None)
         assert step.id not in layer.steps
+
+
+async def test_edit_is_offered_only_with_a_schema(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        record = layer.steps[step.id]["metadata"]["approval"]
+        assert record["editAllowed"] is False
+
+        with pytest.raises(ApprovalEditNotAllowed):
+            await _decide(mock_session, entry, "edited", edited_arguments={"amount": 2})
+        assert not task.done()
+        assert layer.steps[step.id]["metadata"]["approval"]["status"] == "pending"
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
+async def test_edit_schema_must_be_a_forbidding_basemodel(layer, mock_chainlit_context):
+    async with mock_chainlit_context:
+        step = Step(name="tool", type="tool")
+        with pytest.raises(ValueError, match="BaseModel"):
+            Approval(step=step, arguments={}, arguments_schema=dict)
+
+        class Loose(BaseModel):
+            amount: int
+
+        with pytest.raises(ValueError, match="extra='forbid'"):
+            Approval(step=step, arguments={}, arguments_schema=Loose)
+
+
+async def test_edit_validates_and_returns_the_final_arguments(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    sent = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock(side_effect=lambda p: sent.append(p))
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step,
+            {"amount": 1, "apiKey": "sk-original"},
+            arguments_schema=_EditArgs,
+        )
+
+        record = layer.steps[step.id]["metadata"]["approval"]
+        assert record["editAllowed"] is True
+        assert record["argumentsPreview"]["apiKey"] == "[redacted]"
+        assert "sk-original" not in json.dumps(record)
+
+        stored = await _decide(
+            mock_session, entry, "edited", edited_arguments={"amount": 7}
+        )
+        decision = await task
+
+    assert stored["status"] == "edited"
+    assert stored["decision"] == "edit"
+    assert stored["editedArgumentsPreview"] == {
+        "amount": 7,
+        "note": "",
+        "apiKey": "[redacted]",
+    }
+    assert stored["editedArgumentsDigest"].startswith("hmac-sha256:")
+    assert stored["decidedBy"] == mock_session.user.identifier
+
+    assert decision.approved is True
+    assert decision.decision == "edit"
+    assert decision.arguments == {"amount": 7, "note": "", "apiKey": ""}
+
+    # M11: the step trace carries the final, redacted arguments.
+    assert decision.step_id == step.id
+    assert json.loads(step.input) == {
+        "approval": {
+            "tool": "tool",
+            "argumentsPreview": {
+                "amount": 7,
+                "note": "",
+                "apiKey": "[redacted]",
+            },
+            "edited": True,
+            "redacted": True,
+        }
+    }
+    persisted_input = json.loads(layer.steps[step.id]["input"])
+    assert persisted_input["approval"]["argumentsPreview"] == {
+        "amount": 7,
+        "note": "",
+        "apiKey": "[redacted]",
+    }
+    assert "sk-original" not in json.dumps(layer.steps[step.id])
+
+    # The terminal card event carries the final args and the diff previews.
+    terminal = sent[-1]
+    assert terminal["status"] == "edited"
+    assert terminal["arguments"] == {"amount": 7, "note": "", "apiKey": ""}
+    assert terminal["editedArgumentsPreview"] == {
+        "amount": 7,
+        "note": "",
+        "apiKey": "[redacted]",
+    }
+    assert terminal["editAllowed"] is True
+
+
+@pytest.mark.parametrize(
+    ("edited", "field", "error_type"),
+    [
+        ({"amount": "super-secret-value"}, "editedArguments.amount", "int_parsing"),
+        (
+            {"amount": 1, "extra": "super-secret-value"},
+            "editedArguments.extra",
+            "extra_forbidden",
+        ),
+        ({"note": "super-secret-value"}, "editedArguments.amount", "missing"),
+    ],
+)
+async def test_invalid_edit_reports_field_and_type_without_the_value(
+    layer, mock_chainlit_context, mock_session, edited, field, error_type
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step, {"amount": 1}, arguments_schema=_EditArgs
+        )
+        writes = layer.write_calls
+
+        with pytest.raises(ApprovalInvalidArguments) as exc:
+            await _decide(mock_session, entry, "edited", edited_arguments=edited)
+
+        assert exc.value.field == field
+        assert exc.value.error_type == error_type
+        assert "super-secret-value" not in str(exc.value)
+        assert "super-secret-value" not in repr(exc.value)
+        assert layer.write_calls == writes
+        assert layer.steps[step.id]["metadata"]["approval"]["status"] == "pending"
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
+async def test_edit_requires_edited_arguments(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step, {"amount": 1}, arguments_schema=_EditArgs
+        )
+
+        with pytest.raises(ApprovalInvalidArguments) as exc:
+            await _decide(mock_session, entry, "edited")
+        assert exc.value.field == "editedArguments"
+        assert exc.value.error_type == "missing"
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
+async def test_non_json_arguments_are_rejected_before_any_write(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        with pytest.raises(ApprovalInvalidArguments):
+            await Approval(
+                step=Step(name="tool", type="tool"),
+                arguments={"amount": {1, 2}},
+            ).ask()
+
+    assert layer.write_calls == 0
+    assert not approval_module._pending_by_approval
+
+
+def test_canonical_digest_is_stable_across_key_orders():
+    first = approval_module._arguments_digest(
+        {"b": 2, "a": {"y": 1, "x": [3, 4]}}, "salt"
+    )
+    second = approval_module._arguments_digest(
+        {"a": {"x": [3, 4], "y": 1}, "b": 2}, "salt"
+    )
+    assert first == second
+    assert first.startswith("hmac-sha256:")
+
+
+def test_preview_redaction_is_recursive_case_varied_and_capped():
+    deep = value = {}
+    for _ in range(12):
+        value["child"] = {}
+        value = value["child"]
+    value["leaf"] = "hidden"
+
+    preview = approval_module._arguments_preview(
+        {
+            "Authorization": "Bearer top-secret",
+            "apiKey": "sk-live",
+            "nested": {"client_secret": "shh", "keep": 1},
+            "list": [{"X-Api-Key": "k"}, {"keep": 2}],
+            "deep": deep,
+        }
+    )
+    assert preview["Authorization"] == "[redacted]"
+    assert preview["apiKey"] == "[redacted]"
+    assert preview["nested"] == {"client_secret": "[redacted]", "keep": 1}
+    assert preview["list"] == [{"X-Api-Key": "[redacted]"}, {"keep": 2}]
+    assert "[truncated]" in json.dumps(preview)
+    assert "top-secret" not in json.dumps(preview)
+    assert "sk-live" not in json.dumps(preview)
+    assert "shh" not in json.dumps(preview)
+
+    oversized = approval_module._arguments_preview({"blob": "x" * (17 * 1024)})
+    assert oversized == {"truncated": True}
+
+
+async def test_extra_redaction_keys_apply_to_the_preview(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step, {"accountNumber": "1234", "amount": 1}, redact=("accountNumber",)
+        )
+
+        preview = layer.steps[step.id]["metadata"]["approval"]["argumentsPreview"]
+        assert preview == {"accountNumber": "[redacted]", "amount": 1}
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
+async def test_route_edit_succeeds_with_final_arguments_and_diff(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step, {"amount": 1, "apiKey": "sk-original"}, arguments_schema=_EditArgs
+        )
+
+        response = await _route(
+            monkeypatch,
+            {
+                "sessionId": mock_session.id,
+                "approvalId": entry.approval_id,
+                "decision": "edit",
+                "editedArguments": {"amount": 9, "note": "n", "apiKey": "sk-edited"},
+                "decisionRequestId": "request-edit",
+            },
+            mock_session.user,
+            mock_session,
+        )
+        decision = await task
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "edited"
+    assert body["decision"] == "edit"
+    assert "arguments" not in body
+
+    assert decision.decision == "edit"
+    assert decision.arguments == {"amount": 9, "note": "n", "apiKey": "sk-edited"}
+
+    record = layer.steps[step.id]["metadata"]["approval"]
+    assert record["editedArgumentsPreview"] == {
+        "amount": 9,
+        "note": "n",
+        "apiKey": "[redacted]",
+    }
+    assert "sk-edited" not in json.dumps(record)
+
+
+async def test_route_edit_without_a_schema_is_422_edit_not_allowed(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        response = await _route(
+            monkeypatch,
+            {
+                "sessionId": mock_session.id,
+                "approvalId": entry.approval_id,
+                "decision": "edit",
+                "editedArguments": {"amount": 2},
+                "decisionRequestId": "request-edit",
+            },
+            mock_session.user,
+            mock_session,
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "ApprovalEditNotAllowed"
+        assert layer.steps[step.id]["metadata"]["approval"]["status"] == "pending"
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
+async def test_route_edit_errors_never_echo_the_value(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step, {"amount": 1}, arguments_schema=_EditArgs
+        )
+
+        invalid = await _route(
+            monkeypatch,
+            {
+                "sessionId": mock_session.id,
+                "approvalId": entry.approval_id,
+                "decision": "edit",
+                "editedArguments": {"amount": "super-secret-value"},
+                "decisionRequestId": "request-edit",
+            },
+            mock_session.user,
+            mock_session,
+        )
+        assert invalid.status_code == 422
+        detail = invalid.json()["detail"]
+        assert detail["error"] == "ApprovalInvalidArguments"
+        assert detail["field"] == "editedArguments.amount"
+        assert detail["type"] == "int_parsing"
+        assert "super-secret-value" not in invalid.text
+
+        missing = await _route(
+            monkeypatch,
+            {
+                "sessionId": mock_session.id,
+                "approvalId": entry.approval_id,
+                "decision": "edit",
+                "decisionRequestId": "request-edit-2",
+            },
+            mock_session.user,
+            mock_session,
+        )
+        assert missing.status_code == 422
+        assert missing.json()["detail"]["type"] == "missing"
+
+        extra = await _route(
+            monkeypatch,
+            {
+                "sessionId": mock_session.id,
+                "approvalId": entry.approval_id,
+                "decision": "approve",
+                "editedArguments": {"amount": 2},
+                "decisionRequestId": "request-approve",
+            },
+            mock_session.user,
+            mock_session,
+        )
+        assert extra.status_code == 422
+        assert extra.json()["detail"]["field"] == "editedArguments"
+        assert extra.json()["detail"]["type"] == "not_allowed"
+
+        not_object = await _route(
+            monkeypatch,
+            {
+                "sessionId": mock_session.id,
+                "approvalId": entry.approval_id,
+                "decision": "edit",
+                "editedArguments": "super-secret-value",
+                "decisionRequestId": "request-edit-3",
+            },
+            mock_session.user,
+            mock_session,
+        )
+        assert not_object.status_code == 422
+        assert not_object.json()["detail"]["error"] == "ApprovalInvalidArguments"
+        assert not_object.json()["detail"]["type"] == "object_type"
+        assert "super-secret-value" not in not_object.text
+
+        await _decide(mock_session, entry, "rejected")
+        await task
