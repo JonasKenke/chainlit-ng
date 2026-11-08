@@ -321,14 +321,37 @@ const useChatSession = () => {
         const restored = (thread.steps || [])
           .map(approvalFromStep)
           .filter((approval): approval is IApproval => approval !== null);
-        setApprovals((old) => [
-          ...old.filter(
-            (approval) =>
-              approval.threadId === thread.id &&
-              !restored.some((item) => item.id === approval.id)
-          ),
-          ...restored
-        ]);
+        setApprovals((old) => {
+          const next = old.filter(
+            (approval) => approval.threadId === thread.id
+          );
+          for (const item of restored) {
+            const index = next.findIndex((approval) => approval.id === item.id);
+            if (index === -1) {
+              next.push(item);
+              continue;
+            }
+            const existing = next[index];
+            if (existing.status === 'pending' && item.status === 'pending') {
+              // The persisted record only has the redacted preview. Keep the
+              // live arguments the user is actually approving.
+              next[index] = {
+                ...item,
+                arguments: existing.arguments ?? item.arguments,
+                revision: Math.max(existing.revision ?? 0, item.revision ?? 0)
+              };
+            } else if (
+              existing.status !== 'pending' &&
+              item.status === 'pending'
+            ) {
+              // A stale persisted pending row must not reopen a terminal card.
+              continue;
+            } else {
+              next[index] = item;
+            }
+          }
+          return next;
+        });
         const elements = (thread.elements || []).filter(
           (e): e is IElement => e != null
         );

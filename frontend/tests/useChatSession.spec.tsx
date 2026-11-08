@@ -146,6 +146,30 @@ describe('useChatSession approval events', () => {
   });
 });
 
+async function connectWithResumeHandler() {
+  vi.useFakeTimers();
+  const client = new ChainlitAPI('http://localhost:8000', 'webapp');
+  const store = getChainlitStore(client);
+  store.setState({ threadIdToResume: undefined, sessionId: 'session-a' });
+  const pending = deferredStickyCookie(client);
+  const session = renderSession(client);
+
+  act(() => {
+    session.connect({ userEnv: {} });
+  });
+  await act(() => vi.advanceTimersByTimeAsync(200));
+  await act(async () => {
+    pending.get('session-a')!();
+  });
+
+  const socket = sockets[0];
+  const resumeHandler = socket.on.mock.calls.find(
+    ([event]: [string]) => event === 'resume_thread'
+  )?.[1] as (thread: unknown) => void;
+
+  return { store, resumeHandler };
+}
+
 describe('useChatSession approval resume', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -155,25 +179,7 @@ describe('useChatSession approval resume', () => {
   });
 
   it('hydrates a terminal approval from the resumed thread as read-only', async () => {
-    vi.useFakeTimers();
-    const client = new ChainlitAPI('http://localhost:8000', 'webapp');
-    const store = getChainlitStore(client);
-    store.setState({ threadIdToResume: undefined, sessionId: 'session-a' });
-    const pending = deferredStickyCookie(client);
-    const session = renderSession(client);
-
-    act(() => {
-      session.connect({ userEnv: {} });
-    });
-    await act(() => vi.advanceTimersByTimeAsync(200));
-    await act(async () => {
-      pending.get('session-a')!();
-    });
-
-    const socket = sockets[0];
-    const resumeHandler = socket.on.mock.calls.find(
-      ([event]: [string]) => event === 'resume_thread'
-    )?.[1] as (thread: unknown) => void;
+    const { store, resumeHandler } = await connectWithResumeHandler();
 
     act(() => {
       resumeHandler({
@@ -205,6 +211,113 @@ describe('useChatSession approval resume', () => {
     expect(approval.id).toBe('approval-1');
     expect(approval.status).toBe('orphaned');
     expect(approval.arguments).toEqual({ to: 'person@example.com' });
+  });
+
+  it('keeps the live arguments when a pending record is restored', async () => {
+    const { store, resumeHandler } = await connectWithResumeHandler();
+    act(() => {
+      store.setState({
+        approvals: [
+          {
+            id: 'approval-1',
+            stepId: 'step-1',
+            threadId: 'thread-1',
+            tool: 'send_email',
+            status: 'pending',
+            revision: 1,
+            arguments: {
+              apiKey: 'server-held-secret',
+              to: 'person@example.com'
+            }
+          }
+        ]
+      });
+    });
+
+    act(() => {
+      resumeHandler({
+        id: 'thread-1',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'send_email',
+            type: 'tool',
+            metadata: {
+              approval: {
+                id: 'approval-1',
+                stepId: 'step-1',
+                threadId: 'thread-1',
+                tool: 'send_email',
+                status: 'pending',
+                revision: 1,
+                argumentsPreview: {
+                  apiKey: '[redacted]',
+                  to: 'person@example.com'
+                }
+              }
+            }
+          }
+        ],
+        elements: []
+      });
+    });
+
+    const approvals = store.getState().approvals;
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0].status).toBe('pending');
+    expect(approvals[0].arguments).toEqual({
+      apiKey: 'server-held-secret',
+      to: 'person@example.com'
+    });
+  });
+
+  it('applies a terminal record to an existing live card', async () => {
+    const { store, resumeHandler } = await connectWithResumeHandler();
+    act(() => {
+      store.setState({
+        approvals: [
+          {
+            id: 'approval-1',
+            stepId: 'step-1',
+            threadId: 'thread-1',
+            tool: 'send_email',
+            status: 'pending',
+            revision: 1,
+            arguments: { apiKey: 'server-held-secret' }
+          }
+        ]
+      });
+    });
+
+    act(() => {
+      resumeHandler({
+        id: 'thread-1',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'send_email',
+            type: 'tool',
+            metadata: {
+              approval: {
+                id: 'approval-1',
+                stepId: 'step-1',
+                threadId: 'thread-1',
+                tool: 'send_email',
+                status: 'superseded',
+                revision: 2,
+                terminalReason: 'stopped',
+                argumentsPreview: { apiKey: '[redacted]' }
+              }
+            }
+          }
+        ],
+        elements: []
+      });
+    });
+
+    const [approval] = store.getState().approvals;
+    expect(approval.status).toBe('superseded');
+    expect(approval.terminalReason).toBe('stopped');
   });
 });
 
