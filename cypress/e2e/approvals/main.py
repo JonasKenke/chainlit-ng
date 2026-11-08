@@ -1,6 +1,7 @@
 import os
 
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 from starlette.requests import Request
 
 import chainlit as cl
@@ -10,6 +11,12 @@ from chainlit.socket import connection_successful as chainlit_connection_success
 os.environ["CHAINLIT_AUTH_SECRET"] = "SUPER_SECRET"  # nosec B105
 
 connections = 0
+
+
+class EmailArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    to: str
 
 
 @cl.header_auth_callback
@@ -37,16 +44,22 @@ async def test_endpoints(request: Request, call_next):
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    if message.content != "ask":
+    if message.content not in {"ask", "schema"}:
         await cl.Message(content="ready").send()
         return
 
+    schema = EmailArguments if message.content == "schema" else None
     async with cl.Step(name="send_email", type="tool") as step:
         decision = await cl.Approval(
-            step=step, arguments={"to": "person@example.com"}, timeout=120
+            step=step,
+            arguments={"to": "person@example.com"},
+            arguments_schema=schema,
+            timeout=120,
         ).ask()
 
-    if decision.approved:
+    if decision.decision == "edit":
+        await cl.Message(content=f"edited to {decision.arguments['to']}").send()
+    elif decision.approved:
         await cl.Message(content="executed").send()
     else:
         await cl.Message(content=f"not executed: {decision.decision}").send()
