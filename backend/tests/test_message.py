@@ -848,3 +848,56 @@ class TestRemoveChildren:
             await msg.remove_children()
 
         assert events == [("get_thread", "thread_1")]
+
+
+class TestMessageElementsPosition:
+    """Tests for the per-message content/element order."""
+
+    def test_elements_position_defaults_to_below_without_metadata(self):
+        with mock_chainlit_context():
+            msg = Message(content="test")
+
+            assert msg.to_dict()["metadata"] == {}
+
+    def test_elements_position_above_is_persisted_in_metadata(self):
+        with mock_chainlit_context():
+            msg = Message(content="test", elements_position="above")
+
+            assert msg.to_dict()["metadata"] == {"elementsPosition": "above"}
+
+    def test_elements_position_explicit_below_is_not_persisted(self):
+        with mock_chainlit_context():
+            msg = Message(
+                content="test",
+                metadata={"key": "value"},
+                elements_position="below",
+            )
+
+            assert msg.to_dict()["metadata"] == {"key": "value"}
+
+    def test_elements_position_invalid_raises(self):
+        with mock_chainlit_context():
+            with pytest.raises(ValueError, match="elements_position"):
+                Message(content="test", elements_position="sideways")  # type: ignore[arg-type]
+
+    def test_elements_position_from_dict_restores_above(self):
+        with mock_chainlit_context():
+            original = Message(content="test", elements_position="above")
+
+            restored = MessageBase.from_dict(original.to_dict())
+
+            assert restored.to_dict()["metadata"] == {"elementsPosition": "above"}
+
+    def test_elements_position_from_dict_falls_back_for_unknown_metadata(self):
+        step_dict = {
+            "id": "msg_123",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "output": "Hello",
+            "name": "Assistant",
+            "metadata": {"elementsPosition": "sideways"},
+        }
+
+        with mock_chainlit_context():
+            restored = MessageBase.from_dict(step_dict)
+
+            assert restored.to_dict()["metadata"] == {}

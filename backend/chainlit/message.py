@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 from abc import ABC
-from typing import Dict, List, Optional, Union, cast
+from typing import Dict, List, Literal, Optional, Union, cast
 
 from chainlit.action import Action
 from chainlit.chat_context import chat_context
@@ -60,6 +60,12 @@ class MessageBase(ABC):
     @classmethod
     def from_dict(self, _dict: StepDict):
         type = _dict.get("type", "assistant_message")
+        metadata = _dict.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        elements_position = metadata.get("elementsPosition", "below")
+        if elements_position not in ("above", "below"):
+            elements_position = "below"
         return Message(
             id=_dict["id"],
             parent_id=_dict.get("parentId"),
@@ -70,8 +76,9 @@ class MessageBase(ABC):
             modes=_dict.get("modes"),
             type=type,  # type: ignore
             language=_dict.get("language"),
-            metadata=_dict.get("metadata", {}),
+            metadata=metadata,
             tags=_dict.get("tags"),
+            elements_position=elements_position,
         )
 
     def to_dict(self) -> StepDict:
@@ -260,6 +267,7 @@ class Message(MessageBase):
         language (str, optional): Language of the code is the content is code. See https://react-code-blocks-rajinwonderland.vercel.app/?path=/story/codeblock--supported-languages for a list of supported languages.
         actions (List[Action], optional): A list of actions to send with the message.
         elements (List[ElementBased], optional): A list of elements to send with the message.
+        elements_position (Literal["above", "below"], optional): Whether inline elements render above or below the message content. Defaults to "below".
     """
 
     def __init__(
@@ -277,7 +285,13 @@ class Message(MessageBase):
         command: Optional[str] = None,
         modes: Optional[Dict[str, str]] = None,
         created_at: Union[str, None] = None,
+        elements_position: Literal["above", "below"] = "below",
     ):
+        if elements_position not in ("above", "below"):
+            raise ValueError(
+                f"elements_position must be 'above' or 'below', got {elements_position!r}"
+            )
+
         time.sleep(0.001)
         self.language = language
         if isinstance(content, dict):
@@ -308,7 +322,11 @@ class Message(MessageBase):
         if created_at:
             self.created_at = created_at
 
-        self.metadata = metadata
+        # Stored in metadata so the order survives thread reload without a schema change.
+        self.metadata = dict(metadata or {})
+        self.metadata.pop("elementsPosition", None)
+        if elements_position == "above":
+            self.metadata["elementsPosition"] = elements_position
         self.tags = tags
 
         self.author = author or config.ui.name
