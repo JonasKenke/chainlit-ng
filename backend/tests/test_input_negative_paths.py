@@ -408,6 +408,32 @@ def test_upload_accepts_zero_byte_file(api, session):
     assert session.persist_file.await_args.kwargs["content"] == b""
 
 
+def test_upload_persists_zero_byte_file(api, monkeypatch, tmp_path):
+    """The route must persist b"" instead of tripping persist_file's guard."""
+    session = WebsocketSession(
+        id="sess-zero",
+        socket_id="sid-zero",
+        emit=AsyncMock(),
+        emit_call=AsyncMock(),
+        user_env={},
+        client_type="webapp",
+        user=USER,
+    )
+    monkeypatch.setattr(WebsocketSession, "get_by_id", staticmethod(lambda _: session))
+    monkeypatch.setattr("chainlit.config.FILES_DIRECTORY", tmp_path)
+
+    response = api.post(
+        "/project/file",
+        files={"file": ("empty.txt", b"", "text/plain")},
+        params={"session_id": session.id},
+    )
+
+    assert response.status_code == 200
+    file_id = response.json()["id"]
+    assert session.files[file_id]["size"] == 0
+    assert session.files[file_id]["path"].read_bytes() == b""
+
+
 async def test_upload_without_filename_returns_400(session):
     file = UploadFile(
         file=io.BytesIO(b"x"),
