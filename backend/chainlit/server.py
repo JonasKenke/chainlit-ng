@@ -128,6 +128,16 @@ mimetypes.add_type("application/javascript", ".mjs")
 mimetypes.add_type("text/css", ".css")
 
 
+def _cleanup_files_directory() -> None:
+    """Remove uploads on reload, but never a directory outside APP_ROOT."""
+    if not FILES_DIRECTORY.is_dir():
+        return
+    resolved = FILES_DIRECTORY.resolve()
+    app_root = Path(APP_ROOT).resolve()
+    if resolved != app_root and app_root in resolved.parents:
+        shutil.rmtree(FILES_DIRECTORY)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Context manager to handle app start and shutdown."""
@@ -248,8 +258,7 @@ async def lifespan(app: FastAPI):
         except asyncio.exceptions.CancelledError:
             pass
 
-        if FILES_DIRECTORY.is_dir():
-            shutil.rmtree(FILES_DIRECTORY)
+        _cleanup_files_directory()
 
         # Force exit the process to avoid potential AnyIO threads still running
         os._exit(0)
