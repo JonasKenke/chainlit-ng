@@ -17,6 +17,7 @@ import { MessageAvatar } from './Avatar';
 import { MessageButtons } from './Buttons';
 import { MessageContent } from './Content';
 import Step from './Step';
+import { MessageTimestamp } from './Timestamp';
 import UserMessage from './UserMessage';
 
 interface Props {
@@ -105,6 +106,10 @@ const Message = memo(
                   <UserMessage message={message} elements={elements}>
                     {userMessageContent}
                   </UserMessage>
+                  <MessageTimestamp
+                    createdAt={message.createdAt}
+                    className="self-end mt-1"
+                  />
                 </div>
               ) : (
                 <div className="ai-message flex gap-4 w-full">
@@ -167,6 +172,10 @@ const Message = memo(
                         latex={latex}
                         renderMarkdown={true}
                       />
+
+                      {message.type === 'assistant_message' ? (
+                        <MessageTimestamp createdAt={message.createdAt} />
+                      ) : null}
 
                       <AskFileButton messageId={message.id} onError={onError} />
                       <AskActionButtons

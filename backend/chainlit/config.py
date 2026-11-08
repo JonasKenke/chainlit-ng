@@ -224,6 +224,9 @@ name = "Assistant"
 # If not set, the browser's language will be used
 # language = "en-US"
 
+# Show local timestamps on user and assistant messages.
+# show_message_timestamps = false
+
 # layout = "wide"
 
 # default_sidebar_state = "open"  # Options: "open", "closed", "hidden"
@@ -511,6 +514,7 @@ class UISettings(BaseModel):
     cot_display: Literal["list", "compact"] = "list"
     default_theme: Optional[Literal["light", "dark"]] = "dark"
     language: Optional[str] = None
+    show_message_timestamps: bool = False
     layout: Optional[Literal["default", "wide"]] = "default"
     default_sidebar_state: Optional[Literal["open", "closed", "hidden"]] = "open"
     chat_settings_location: Optional[Literal["message_composer", "sidebar"]] = (

@@ -40,6 +40,7 @@ export interface IChainlitConfig {
     name: string;
     description?: string;
     default_theme?: 'light' | 'dark';
+    show_message_timestamps?: boolean;
     layout?: 'default' | 'wide';
     default_sidebar_state?: 'open' | 'closed' | 'hidden';
     chat_settings_location?: 'message_composer' | 'sidebar';
