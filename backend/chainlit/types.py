@@ -2,6 +2,7 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Annotated,
     Any,
     Dict,
     Generic,
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 from dataclasses import field
 
 from dataclasses_json import DataClassJsonMixin
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from pydantic.dataclasses import dataclass
 from typing_extensions import NotRequired
 
@@ -218,9 +219,19 @@ class AskElementResponse(TypedDict, total=False):
     submitted: bool
 
 
+def _reject_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value
+
+
+# Validates without rewriting, so valid values are stored byte-for-byte.
+NonBlankStr = Annotated[str, AfterValidator(_reject_blank)]
+
+
 class UpdateThreadRequest(BaseModel):
     threadId: str
-    name: str
+    name: NonBlankStr
 
 
 class ShareThreadRequest(BaseModel):
@@ -387,13 +398,13 @@ class PromptDict(TypedDict):
 
 
 class CreatePromptRequest(BaseModel):
-    title: str
-    content: str
+    title: NonBlankStr
+    content: NonBlankStr
 
 
 class UpdatePromptRequest(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
+    title: Optional[NonBlankStr] = None
+    content: Optional[NonBlankStr] = None
 
 
 class SharePromptRequest(BaseModel):
