@@ -39,6 +39,38 @@ import { ClientError } from './api';
 import { ChainlitContext } from './context';
 import type { IToken } from './useChatData';
 
+function approvalFromStep(step: IStep): IApproval | null {
+  const raw = (step.metadata as Record<string, any> | undefined)?.approval;
+  let record = raw;
+  if (typeof raw === 'string') {
+    try {
+      record = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!record || typeof record !== 'object' || !record.id) return null;
+  return {
+    id: record.id,
+    stepId: record.stepId ?? step.id,
+    threadId: record.threadId ?? '',
+    tool: record.tool ?? step.name,
+    title: record.title ?? null,
+    status: record.status ?? 'orphaned',
+    requestedBy: record.requestedBy ?? null,
+    requestedAt: record.requestedAt ?? null,
+    expiresAt: record.expiresAt ?? null,
+    // Arguments are not persisted; the read-only card shows the redacted
+    // preview. The live event is the only source of full arguments.
+    arguments: record.argumentsPreview ?? {},
+    decidedBy: record.decidedBy ?? null,
+    decidedAt: record.decidedAt ?? null,
+    decision: record.decision ?? null,
+    terminalReason: record.terminalReason ?? null,
+    revision: record.revision
+  };
+}
+
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const sessionId = useChainlitStore((state) => state.sessionId);
@@ -286,9 +318,17 @@ const useChatSession = () => {
           setChatSettingsValue(thread.metadata?.chat_settings);
         }
         setMessages(messages);
-        setApprovals((old) =>
-          old.filter((approval) => approval.threadId === thread.id)
-        );
+        const restored = (thread.steps || [])
+          .map(approvalFromStep)
+          .filter((approval): approval is IApproval => approval !== null);
+        setApprovals((old) => [
+          ...old.filter(
+            (approval) =>
+              approval.threadId === thread.id &&
+              !restored.some((item) => item.id === approval.id)
+          ),
+          ...restored
+        ]);
         const elements = (thread.elements || []).filter(
           (e): e is IElement => e != null
         );

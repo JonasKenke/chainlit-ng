@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import importlib
 import json
 import uuid
@@ -18,15 +19,23 @@ from chainlit.approval import (
     ApprovalNotFound,
     ApprovalNotPending,
     ApprovalNotReady,
+    ApprovalPending,
     ApprovalPersistenceError,
     ApprovalSessionMismatch,
     ApprovalThreadMismatch,
     ApprovalUnsupported,
+    guard_pending_approval,
     is_thread_deleted,
+    mark_thread_deleted,
+    orphan_session_approvals,
+    orphan_thread_approvals,
+    supersede_thread_approvals,
     transition,
 )
 from chainlit.auth import get_current_user
+from chainlit.config import config
 from chainlit.context import ChainlitContext, context_var
+from chainlit.message import Message
 from chainlit.server import app
 from chainlit.session import HTTPSession, WebsocketSession
 from chainlit.step import Step
@@ -43,6 +52,8 @@ class FakeDataLayer:
         self.fail_writes = 0
         self.create_delay = 0.0
         self.update_delay = 0.0
+        self.write_delay = 0.0
+        self.threads: Dict[str, Dict[str, Any]] = {}
 
     async def create_step(self, step_dict: Dict[str, Any]):
         if self.create_delay:
@@ -56,6 +67,9 @@ class FakeDataLayer:
 
     async def get_thread_author(self, thread_id: str) -> str:
         return "test_user_identifier"
+
+    async def get_thread(self, thread_id: str):
+        return deepcopy(self.threads.get(thread_id))
 
     async def delete_thread(self, thread_id: str):
         for step_id, step in list(self.steps.items()):
@@ -76,6 +90,8 @@ class FakeDataLayer:
         expected_revision: Optional[int],
     ) -> bool:
         self.write_calls += 1
+        if self.write_delay:
+            await asyncio.sleep(self.write_delay)
         if self.fail_writes:
             self.fail_writes -= 1
             return False
@@ -187,6 +203,7 @@ async def test_request_write_failure_raises_and_never_executes(
     assert executed == []
     assert not approval_module._pending_by_approval
     assert "approval" not in layer.steps[step.id]["metadata"]
+    assert "approval" not in step.metadata
 
 
 async def test_decision_write_failure_keeps_pending_and_retry_succeeds(
@@ -931,6 +948,285 @@ async def test_delete_all_threads_after_decision_never_resurrects(
 
         response = await _delete_route(mock_session.user, path="/project/threads")
         assert response.status_code == 200
+        assert layer.steps == {}
+
+        await step.__aexit__(None, None, None)
+        assert step.id not in layer.steps
+
+
+async def test_guard_refuses_a_thread_until_the_approval_is_terminal(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        with pytest.raises(ApprovalPending):
+            guard_pending_approval(step.thread_id)
+        assert guard_pending_approval("another-thread") is None
+
+        await _decide(mock_session, entry)
+        await task
+        guard_pending_approval(step.thread_id)
+
+
+async def test_session_delete_orphans_its_waiters(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        await orphan_session_approvals("another-generation")
+        assert entry.approval_id in approval_module._pending_by_approval
+
+        await orphan_session_approvals("gen-1")
+        decision = await task
+
+    assert decision.decision == "orphaned"
+    assert decision.approved is False
+    assert entry.approval_id not in approval_module._pending_by_approval
+    stored = layer.steps[step.id]["metadata"]["approval"]
+    assert stored["status"] == "orphaned"
+    assert stored["terminalReason"] == "session_ended"
+
+
+async def test_resume_orphans_a_persisted_pending_record(layer):
+    """A reloaded page has no waiter, so the old record becomes orphaned."""
+    step = Step(name="tool", type="tool", thread_id="thread-reload")
+    layer.steps[step.id] = step.to_dict()
+    pending = {
+        "version": 1,
+        "revision": 1,
+        "id": "approval-reload",
+        "stepId": step.id,
+        "threadId": "thread-reload",
+        "tool": "tool",
+        "status": "pending",
+        "requestedBy": "test_user_identifier",
+        "requestedAt": "2026-01-01T00:00:00Z",
+        "expiresAt": "2026-01-01T00:05:00Z",
+        "argumentsPreview": {"amount": 1},
+    }
+    layer.steps[step.id]["metadata"] = {"approval": pending}
+    thread = {
+        "id": "thread-reload",
+        "userIdentifier": "test_user_identifier",
+        "metadata": {},
+        "steps": [deepcopy(layer.steps[step.id])],
+    }
+
+    await orphan_thread_approvals(thread)
+
+    assert thread["steps"][0]["metadata"]["approval"]["status"] == "orphaned"
+    assert layer.steps[step.id]["metadata"]["approval"]["status"] == "orphaned"
+    assert (
+        layer.steps[step.id]["metadata"]["approval"]["terminalReason"]
+        == "server_restart"
+    )
+
+
+async def test_on_message_wrapper_refuses_a_pending_thread(
+    layer, mock_chainlit_context, mock_session
+):
+    from chainlit import callbacks
+
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    called = []
+
+    async def handler(message):
+        called.append(message.content)
+
+    previous = config.code.on_message
+    callbacks.on_message(handler)
+    try:
+        async with mock_chainlit_context as ctx:
+            ctx.emitter.send_approval = AsyncMock()
+            step = Step(name="tool", type="tool")
+            await step.send()
+            task, _ = await _pending_ask(step)
+
+            with pytest.raises(ApprovalPending):
+                await config.code.on_message(Message(content="run again"))
+
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    finally:
+        config.code.on_message = previous
+
+    assert called == []
+
+
+async def test_on_message_wrapper_binds_and_clears_current_task(
+    layer, mock_chainlit_context, mock_session
+):
+    from chainlit import callbacks
+
+    seen = {}
+
+    async def handler(message):
+        seen["is_current"] = mock_session.current_task is asyncio.current_task()
+
+    previous = config.code.on_message
+    callbacks.on_message(handler)
+    try:
+        async with mock_chainlit_context:
+            await config.code.on_message(Message(content="hello"))
+    finally:
+        config.code.on_message = previous
+
+    assert seen["is_current"] is True
+    assert mock_session.current_task is None
+
+
+async def test_step_lock_is_not_retained_after_a_terminal(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+        await _decide(mock_session, entry)
+        await task
+
+    gc.collect()
+    assert (step.thread_id, step.id) not in approval_module._step_locks
+
+
+async def test_cancel_during_terminal_write_keeps_pending_and_never_executes(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        layer.write_delay = 1.0
+        decision_task = asyncio.create_task(_decide(mock_session, entry))
+        await asyncio.sleep(0.05)
+        decision_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await decision_task
+
+        assert step.metadata["approval"]["status"] == "pending"
+        assert entry.approval_id in approval_module._pending_by_approval
+        assert not entry.future.done()
+        assert layer.steps[step.id]["metadata"]["approval"]["status"] == "pending"
+
+        layer.write_delay = 0
+        await _decide(mock_session, entry)
+        decision = await task
+
+    assert decision.approved is True
+
+
+async def test_transition_after_delete_does_not_write_or_execute(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        mark_thread_deleted(step.thread_id)
+        with pytest.raises(ApprovalNotPending):
+            await _decide(mock_session, entry)
+
+        assert not entry.future.done()
+        assert entry.approval_id in approval_module._pending_by_approval
+        assert step.metadata["approval"]["status"] == "pending"
+        assert layer.steps[step.id]["metadata"]["approval"]["status"] == "pending"
+
+        approval_module._deleted_threads.clear()
+        await _decide(mock_session, entry)
+        assert (await task).approved is True
+
+
+async def test_delete_suppresses_a_normal_run_step(layer, mock_chainlit_context):
+    async with mock_chainlit_context:
+        mark_thread_deleted("deleted-thread")
+        step = Step(name="on_message", type="run", thread_id="deleted-thread")
+        await step.send()
+        await step.update()
+
+    assert step.id not in layer.steps
+
+
+async def test_stop_sweep_racing_a_decision_leaves_one_terminal(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    executed = []
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        layer.write_delay = 0.2
+        decision_task = asyncio.create_task(_decide(mock_session, entry))
+        await asyncio.sleep(0.05)
+
+        # The decision holds the step lock, so the stop sweep waits and then
+        # sees a terminal record instead of overwriting it.
+        await supersede_thread_approvals(step.thread_id, reason="stopped")
+        record = await decision_task
+        decision = await task
+
+    if decision.approved:
+        executed.append(True)
+    assert record["status"] == "approved"
+    assert decision.decision == "approve"
+    assert executed == [True]
+    assert layer.steps[step.id]["metadata"]["approval"]["status"] == "approved"
+    assert layer.steps[step.id]["metadata"]["approval"]["revision"] == 2
+
+
+async def test_bulk_delete_supersedes_a_pending_approval(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: layer)
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, _ = await _pending_ask(step)
+
+        response = await _delete_route(mock_session.user, path="/project/threads")
+        assert response.status_code == 200
+        decision = await task
+        assert decision.decision == "superseded"
+        assert is_thread_deleted(step.thread_id)
         assert layer.steps == {}
 
         await step.__aexit__(None, None, None)

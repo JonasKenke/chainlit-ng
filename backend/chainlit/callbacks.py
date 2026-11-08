@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overload
 
@@ -6,12 +7,14 @@ from mcp import ClientSession
 from starlette.datastructures import Headers
 
 from chainlit.action import Action
+from chainlit.approval import guard_pending_approval
 from chainlit.config import config
 from chainlit.context import context, request
 from chainlit.data.base import BaseDataLayer
 from chainlit.mcp import McpConnection
 from chainlit.message import Message
 from chainlit.oauth_providers import get_configured_oauth_providers
+from chainlit.session import WebsocketSession
 from chainlit.step import Step, step
 from chainlit.types import (
     ChatProfile,
@@ -200,15 +203,33 @@ def on_message(func: Callable) -> Callable:
     )
 
     async def with_parent_id(message: Message):
-        async with Step(name="on_message", type="run", parent_id=message.id) as s:
-            s.input = message.content
-            kwargs = {"request": request()} if wants_request else {}
-            if takes_message:
-                await _call_user_function(func, message, **kwargs)
-            else:
-                await _call_user_function(func, **kwargs)
+        session = context.session
+        run_task = (
+            asyncio.current_task() if isinstance(session, WebsocketSession) else None
+        )
+        if run_task is not None:
+            session.current_task = run_task
+        try:
+            async with Step(name="on_message", type="run", parent_id=message.id) as s:
+                s.input = message.content
+                kwargs = {"request": request()} if wants_request else {}
+                if takes_message:
+                    await _call_user_function(func, message, **kwargs)
+                else:
+                    await _call_user_function(func, **kwargs)
+        finally:
+            if run_task is not None and session.current_task is run_task:
+                session.current_task = None
 
-    config.code.on_message = wrap_user_function(with_parent_id)
+    wrapped = wrap_user_function(with_parent_id)
+
+    async def guard_then_run(message: Message) -> None:
+        # Outside the error-swallowing wrapper: the transports must see the
+        # refusal instead of a generic error message.
+        guard_pending_approval(getattr(context.session, "thread_id", None))
+        await wrapped(message)
+
+    config.code.on_message = guard_then_run
     return func
 
 

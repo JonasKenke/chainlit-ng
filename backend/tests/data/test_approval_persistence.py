@@ -320,7 +320,11 @@ async def test_dynamodb_conditional_write_uses_the_revision():
     )
 
     kwargs = client.update_item.call_args.kwargs
-    assert "#ap.#revision = :expected" in kwargs["ConditionExpression"]
+    condition = kwargs["ConditionExpression"]
+    assert "#ap.#revision = :expected" in condition
+    # A terminal write must not be accepted just because the approval key is
+    # absent: that is a different record, not the pending one we read.
+    assert "attribute_not_exists" not in condition
     assert kwargs["ExpressionAttributeValues"][":expected"] == {"N": "1"}
     assert kwargs["UpdateExpression"] == "SET #md.#ap = :record"
 
@@ -352,6 +356,20 @@ async def test_chainlit_data_layer_requires_returned_row():
         )
         is False
     )
+
+    layer.execute_query = AsyncMock(return_value=[{"id": "step-1"}])
+    assert (
+        await layer.write_approval(
+            thread_id="thread-1",
+            step_id="step-1",
+            record=_record("approval-1", "approved", 2),
+            expected_revision=1,
+        )
+        is True
+    )
+    query = layer.execute_query.call_args.args[0]
+    assert "metadata -> 'approval' IS NULL" not in query
+    assert "(metadata #>> '{approval,revision}')::int" in query
 
     layer.execute_query = AsyncMock(side_effect=RuntimeError("db down"))
     assert (

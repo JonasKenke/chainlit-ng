@@ -5,6 +5,7 @@ import {
   ChainlitAPI,
   ChainlitContext,
   getChainlitStore,
+  useChatInteract,
   useChatSession
 } from '@chainlit/react-client';
 
@@ -142,5 +143,102 @@ describe('useChatSession approval events', () => {
     });
 
     expect(store.getState().approvals[0].status).toBe('approved');
+  });
+});
+
+describe('useChatSession approval resume', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    io.mockClear();
+    sockets.length = 0;
+  });
+
+  it('hydrates a terminal approval from the resumed thread as read-only', async () => {
+    vi.useFakeTimers();
+    const client = new ChainlitAPI('http://localhost:8000', 'webapp');
+    const store = getChainlitStore(client);
+    store.setState({ threadIdToResume: undefined, sessionId: 'session-a' });
+    const pending = deferredStickyCookie(client);
+    const session = renderSession(client);
+
+    act(() => {
+      session.connect({ userEnv: {} });
+    });
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    await act(async () => {
+      pending.get('session-a')!();
+    });
+
+    const socket = sockets[0];
+    const resumeHandler = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'resume_thread'
+    )?.[1] as (thread: unknown) => void;
+
+    act(() => {
+      resumeHandler({
+        id: 'thread-1',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'send_email',
+            type: 'tool',
+            metadata: {
+              approval: {
+                id: 'approval-1',
+                stepId: 'step-1',
+                threadId: 'thread-1',
+                tool: 'send_email',
+                status: 'orphaned',
+                revision: 2,
+                terminalReason: 'server_restart',
+                argumentsPreview: { to: 'person@example.com' }
+              }
+            }
+          }
+        ],
+        elements: []
+      });
+    });
+
+    const [approval] = store.getState().approvals;
+    expect(approval.id).toBe('approval-1');
+    expect(approval.status).toBe('orphaned');
+    expect(approval.arguments).toEqual({ to: 'person@example.com' });
+  });
+});
+
+describe('useChatInteract clear', () => {
+  it('drops approvals from the previous chat', () => {
+    const client = new ChainlitAPI('http://localhost:8000', 'webapp');
+    const store = getChainlitStore(client);
+    store.setState({
+      sessionId: 'session-a',
+      approvals: [
+        {
+          id: 'approval-1',
+          stepId: 'step-1',
+          threadId: 'thread-1',
+          tool: 'send_email',
+          status: 'pending',
+          arguments: { amount: 1 }
+        }
+      ]
+    });
+
+    let interact!: ReturnType<typeof useChatInteract>;
+    function Harness() {
+      interact = useChatInteract();
+      return null;
+    }
+    render(
+      <ChainlitContext.Provider value={client}>
+        <Harness />
+      </ChainlitContext.Provider>
+    );
+
+    act(() => interact.clear());
+
+    expect(store.getState().approvals).toEqual([]);
   });
 });

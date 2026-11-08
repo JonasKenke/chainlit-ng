@@ -6,6 +6,12 @@ from urllib.parse import unquote
 from starlette.requests import cookie_parser
 from typing_extensions import TypeAlias
 
+from chainlit.approval import (
+    ApprovalPending,
+    guard_pending_approval,
+    orphan_thread_approvals,
+    supersede_thread_approvals,
+)
 from chainlit.auth import (
     get_current_user,
     get_token_from_cookies,
@@ -134,6 +140,9 @@ async def resume_thread(session: WebsocketSession):
     user_is_author = author == session.user.identifier
 
     if user_is_author:
+        await orphan_thread_approvals(
+            thread, keep_generation=getattr(session, "generation", None)
+        )
         metadata = thread.get("metadata") or {}
         if isinstance(metadata, str):
             metadata = json.loads(metadata)
@@ -432,6 +441,7 @@ async def stop(sid):
         if session.unavailable_chat_profile:
             return
         init_ws_context(session)
+        await supersede_thread_approvals(session.thread_id, reason="stopped")
         await Message(content="Task manually stopped.").send()
 
         if session.current_task:
@@ -439,6 +449,30 @@ async def stop(sid):
 
         if config.code.on_stop:
             await config.code.on_stop()
+
+
+def _start_run(session: WebsocketSession, coro) -> asyncio.Task:
+    """Start a run and make it the task that ``stop`` cancels."""
+    task = asyncio.create_task(coro)
+
+    def clear(completed: asyncio.Task) -> None:
+        if session.current_task is completed:
+            session.current_task = None
+
+    session.current_task = task
+    task.add_done_callback(clear)
+    return task
+
+
+async def _refuse_if_approval_pending(session: WebsocketSession, context) -> bool:
+    try:
+        guard_pending_approval(session.thread_id)
+    except ApprovalPending:
+        await context.emitter.send_toast(
+            "Resolve the pending approval before starting another run.", "warning"
+        )
+        return True
+    return False
 
 
 async def process_message(session: WebsocketSession, payload: MessagePayload):
@@ -464,12 +498,7 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
         await context.emitter.task_end()
 
 
-@sio.on("edit_message")  # pyright: ignore [reportOptionalCall]
-async def edit_message(sid, payload: MessagePayload):
-    """Handle a message sent by the User."""
-    session = WebsocketSession.require(sid)
-    if session.unavailable_chat_profile:
-        return
+async def process_edit_message(session: WebsocketSession, payload: MessagePayload):
     context = init_ws_context(session)
 
     messages = chat_context.get()
@@ -495,6 +524,18 @@ async def edit_message(sid, payload: MessagePayload):
             pass
         finally:
             await context.emitter.task_end()
+
+
+@sio.on("edit_message")  # pyright: ignore [reportOptionalCall]
+async def edit_message(sid, payload: MessagePayload):
+    """Handle an edited message without blocking the socket loop."""
+    session = WebsocketSession.require(sid)
+    if session.unavailable_chat_profile:
+        return
+    context = init_ws_context(session)
+    if await _refuse_if_approval_pending(session, context):
+        return
+    _start_run(session, process_edit_message(session, payload))
 
 
 @sio.on("message_favorite")  # pyright: ignore [reportOptionalCall]
@@ -560,9 +601,11 @@ async def message(sid, payload: MessagePayload):
     session = WebsocketSession.require(sid)
     if session.unavailable_chat_profile:
         return
+    context = init_ws_context(session)
+    if await _refuse_if_approval_pending(session, context):
+        return
 
-    task = asyncio.create_task(process_message(session, payload))
-    session.current_task = task
+    _start_run(session, process_message(session, payload))
 
 
 @sio.on("window_message")  # pyright: ignore [reportOptionalCall]
@@ -571,7 +614,9 @@ async def window_message(sid, data):
     session = WebsocketSession.require(sid)
     if session.unavailable_chat_profile:
         return
-    init_ws_context(session)
+    context = init_ws_context(session)
+    if await _refuse_if_approval_pending(session, context):
+        return
 
     if config.code.on_window_message:
         try:
@@ -622,8 +667,11 @@ async def audio_end(sid):
     if session.unavailable_chat_profile:
         return
 
+    context = init_ws_context(session)
+    if await _refuse_if_approval_pending(session, context):
+        return
+
     try:
-        context = init_ws_context(session)
         await context.emitter.task_start()
 
         if not session.has_first_interaction:

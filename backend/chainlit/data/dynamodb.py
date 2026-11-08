@@ -398,10 +398,7 @@ class DynamoDBDataLayer(BaseDataLayer):
             values.update(self._serialize_item({":pending": "pending"}))
         else:
             names["#revision"] = "revision"
-            condition = (
-                "attribute_not_exists(#md.#ap) OR "
-                "(#md.#ap.#id = :id AND #md.#ap.#revision = :expected)"
-            )
+            condition = "#md.#ap.#id = :id AND #md.#ap.#revision = :expected"
             values.update(self._serialize_item({":expected": expected_revision}))
 
         try:
