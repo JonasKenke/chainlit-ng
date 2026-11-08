@@ -224,11 +224,44 @@ class TestSpontaneousFileUploadDirectory:
 
         with pytest.raises(RuntimeError, match="Cannot use upload directory") as exc:
             resolve_files_directory(
-                SpontaneousFileUploadFeature(directory=str(occupied))
+                SpontaneousFileUploadFeature(enabled=True, directory=str(occupied))
             )
 
         assert str(occupied) in str(exc.value)
         assert "spontaneous_file_upload" in str(exc.value)
+
+    def test_disabled_feature_tolerates_unwritable_directory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        monkeypatch.setattr(chainlit_config, "APP_ROOT", str(tmp_path))
+
+        def deny_write(*args, **kwargs):
+            raise PermissionError("read-only filesystem")
+
+        monkeypatch.setattr(chainlit_config.tempfile, "TemporaryFile", deny_write)
+
+        path = resolve_files_directory(
+            SpontaneousFileUploadFeature(enabled=False, directory="uploads")
+        )
+
+        assert path == tmp_path / "uploads"
+        assert "uploads are disabled" in caplog.text
+
+    def test_disabled_feature_tolerates_uncreatable_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(chainlit_config, "APP_ROOT", str(tmp_path))
+        occupied = tmp_path / "occupied"
+        occupied.write_text("not a directory", encoding="utf-8")
+
+        path = resolve_files_directory(
+            SpontaneousFileUploadFeature(enabled=False, directory=str(occupied))
+        )
+
+        assert path == occupied
 
     def test_unwritable_directory_fails_with_actionable_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -134,6 +134,9 @@ reaction_on_message_received = false
     enabled = true
     # Directory for uploaded files. Relative paths resolve against APP_ROOT;
     # absolute paths are used as-is. Defaults to .files under APP_ROOT.
+    # Must be writable when uploads are enabled; startup fails otherwise.
+    # The default .files directory is removed on shutdown; a configured
+    # directory is preserved.
     # directory = ".files"
     # Define accepted file types using MIME types
     # Examples:
@@ -727,6 +730,9 @@ def resolve_files_directory(
     else:
         path = Path(APP_ROOT) / ".files"
 
+    # Only fail startup when uploads are on. An app that explicitly disables
+    # them must keep starting even if its old upload directory is read-only.
+    required = upload_feature is None or upload_feature.enabled
     try:
         path.mkdir(parents=True, exist_ok=True)
         # A write probe catches read-only mounts and permissions that mkdir
@@ -734,11 +740,16 @@ def resolve_files_directory(
         with tempfile.TemporaryFile(dir=path):
             pass
     except OSError as exc:
-        raise RuntimeError(
-            f"Cannot use upload directory '{path}': {exc}. "
-            "Set [features.spontaneous_file_upload] directory to a writable "
-            "directory (relative paths resolve against APP_ROOT)."
-        ) from exc
+        if required:
+            raise RuntimeError(
+                f"Cannot use upload directory '{path}': {exc}. "
+                "Set [features.spontaneous_file_upload] directory to a writable "
+                "directory (relative paths resolve against APP_ROOT)."
+            ) from exc
+        logger.warning(
+            f"Upload directory '{path}' is not usable: {exc}. Continuing "
+            "because spontaneous file uploads are disabled."
+        )
 
     return path
 
