@@ -442,11 +442,6 @@ def test_upload_unknown_ask_parent_returns_404(api, session):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F2: an unknown sessionId reaches WebsocketSession.require() "
-    "and returns 500 instead of 4xx.",
-)
 def test_action_unknown_session_returns_404(api, monkeypatch):
     monkeypatch.setattr(WebsocketSession, "get_by_id", staticmethod(lambda _: None))
     response = api.post(
@@ -464,11 +459,6 @@ def test_action_unknown_session_returns_404(api, monkeypatch):
         {"name": 1, "payload": {}},
         {"name": "x", "payload": "not-a-dict"},
     ],
-)
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F2: Action(**payload.action) raises TypeError/"
-    "ValidationError and returns 500 instead of 422.",
 )
 def test_action_malformed_action_returns_422(api, session, action):
     response = api.post(
@@ -503,20 +493,26 @@ def _custom_element(**overrides):
     return element
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F2: unknown sessionId raises ValueError from "
-    "WebsocketSession.require() and returns 500.",
-)
-def test_element_update_unknown_session_returns_4xx(api, monkeypatch):
+def test_element_update_unknown_session_returns_404(api, monkeypatch):
     monkeypatch.setattr(WebsocketSession, "get_by_id", staticmethod(lambda _: None))
     response = api.put(
         "/project/element",
         json={"sessionId": "missing", "element": _custom_element()},
     )
-    assert response.status_code in (400, 404), response.text
+    assert response.status_code == 404, response.text
 
 
+def test_element_delete_unknown_session_returns_404(api, monkeypatch):
+    monkeypatch.setattr(WebsocketSession, "get_by_id", staticmethod(lambda _: None))
+    response = api.request(
+        "DELETE",
+        "/project/element",
+        json={"sessionId": "missing", "element": _custom_element()},
+    )
+    assert response.status_code == 404, response.text
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
 @pytest.mark.parametrize(
     "element",
     [
@@ -526,14 +522,11 @@ def test_element_update_unknown_session_returns_4xx(api, monkeypatch):
         {**_custom_element(), "props": "not-a-dict"},
     ],
 )
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F2: _sanitize_custom_element indexes required keys and "
-    "returns 500 for a malformed element.",
-)
-def test_element_malformed_payload_returns_422(api, session, element):
-    response = api.put(
-        "/project/element", json={"sessionId": session.id, "element": element}
+def test_element_malformed_payload_returns_422(api, session, method, element):
+    response = api.request(
+        method.upper(),
+        "/project/element",
+        json={"sessionId": session.id, "element": element},
     )
     assert response.status_code == 422, response.text
 

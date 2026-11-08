@@ -31,6 +31,7 @@ from fastapi import (
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import ValidationError
 from starlette.datastructures import URL
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import Receive, Scope, Send
@@ -2146,6 +2147,16 @@ async def get_thread_element(
     return JSONResponse(content=res)
 
 
+def _get_ws_session(session_id: str) -> "WebsocketSession":
+    """Return the session or 404; an unknown id is caller input, not a fault."""
+    from chainlit.session import WebsocketSession
+
+    session = WebsocketSession.get_by_id(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
 @router.put("/project/element")
 async def update_thread_element(
     payload: ElementRequest,
@@ -2155,17 +2166,19 @@ async def update_thread_element(
 
     from chainlit.context import init_ws_context
     from chainlit.element import ElementDict
-    from chainlit.session import WebsocketSession
 
-    session = WebsocketSession.get_by_id(payload.sessionId)
+    session = _get_ws_session(payload.sessionId)
     context = init_ws_context(session)
 
     element_dict = cast(ElementDict, payload.element)
 
-    if element_dict["type"] != "custom":
-        return {"success": False}
+    try:
+        if element_dict["type"] != "custom":
+            return {"success": False}
 
-    element = _sanitize_custom_element(element_dict)
+        element = _sanitize_custom_element(element_dict)
+    except (KeyError, TypeError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid element payload") from exc
 
     if current_user:
         if (
@@ -2196,17 +2209,19 @@ async def delete_thread_element(
 
     from chainlit.context import init_ws_context
     from chainlit.element import ElementDict
-    from chainlit.session import WebsocketSession
 
-    session = WebsocketSession.get_by_id(payload.sessionId)
+    session = _get_ws_session(payload.sessionId)
     context = init_ws_context(session)
 
     element_dict = cast(ElementDict, payload.element)
 
-    if element_dict["type"] != "custom":
-        return {"success": False}
+    try:
+        if element_dict["type"] != "custom":
+            return {"success": False}
 
-    element = _sanitize_custom_element(element_dict)
+        element = _sanitize_custom_element(element_dict)
+    except (KeyError, TypeError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid element payload") from exc
 
     if current_user:
         if (
@@ -2405,9 +2420,8 @@ async def call_action(
 
     from chainlit.action import Action
     from chainlit.context import init_ws_context
-    from chainlit.session import WebsocketSession
 
-    session = WebsocketSession.get_by_id(payload.sessionId)
+    session = _get_ws_session(payload.sessionId)
     context = init_ws_context(session)
     config: ChainlitConfig = session.get_config()
 
@@ -2427,7 +2441,11 @@ async def call_action(
             detail="This conversation is read-only because its chat profile is unavailable.",
         )
 
-    action = Action(**payload.action)
+    try:
+        action = Action(**payload.action)
+    except (TypeError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid action payload") from exc
+
     callback = config.code.action_callbacks.get(action.name)
     if callback:
         if not context.session.has_first_interaction:
