@@ -24,6 +24,7 @@ import {
   IMessageElement,
   IPrompt,
   IScheduledTask,
+  ISkill,
   IStep,
   ITasklistElement,
   IUser,
@@ -72,6 +73,7 @@ export interface ChainlitState {
   mcps: IMcp[];
   favoriteMessages: IStep[];
   prompts: IPrompt[];
+  skills: ISkill[];
   scheduledTasks: IScheduledTask[];
 }
 
@@ -139,6 +141,7 @@ function initialState(): ChainlitState {
     mcps: readStoredMcps(),
     favoriteMessages: [],
     prompts: [],
+    skills: [],
     scheduledTasks: []
   };
 }

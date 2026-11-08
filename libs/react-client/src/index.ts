@@ -5,6 +5,7 @@ export * from './useChatSession';
 export * from './useAudio';
 export * from './useConfig';
 export * from './usePromptGallery';
+export * from './useSkills';
 export * from './useScheduledTasks';
 export * from './api';
 export * from './types';

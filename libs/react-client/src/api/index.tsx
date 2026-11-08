@@ -8,6 +8,12 @@ import {
   IScheduledTaskPayload,
   IScheduledTaskUpdate
 } from 'src/types/scheduledTask';
+import {
+  ISkill,
+  ISkillExport,
+  ISkillPayload,
+  ISkillUpdate
+} from 'src/types/skill';
 
 export * from './hooks/auth';
 export * from './hooks/api';
@@ -461,5 +467,47 @@ export class ChainlitAPI extends APIBase {
   async addSharedPrompt(id: string): Promise<IPrompt> {
     const res = await this.post(`/project/prompt/share/${id}/add`, {});
     return res.json();
+  }
+
+  // ---- Skills ----
+
+  async listSkills(): Promise<ISkill[]> {
+    const res = await this.get(`/project/skills`);
+    return res.json();
+  }
+
+  async createSkill(payload: ISkillPayload): Promise<ISkill> {
+    const res = await this.post(`/project/skills`, payload);
+    return res.json();
+  }
+
+  async updateSkill(id: string, fields: ISkillUpdate): Promise<ISkill> {
+    const res = await this.put(`/project/skills/${id}`, fields);
+    return res.json();
+  }
+
+  async deleteSkill(id: string): Promise<{ success: boolean }> {
+    const res = await this.delete(`/project/skills/${id}`, {});
+    return res.json();
+  }
+
+  async importSkill(markdown: string, importedFrom: string): Promise<ISkill> {
+    const res = await this.post(`/project/skills/import`, {
+      markdown,
+      imported_from: importedFrom
+    });
+    return res.json();
+  }
+
+  async exportSkill(id: string): Promise<ISkillExport> {
+    const res = await this.get(`/project/skills/${id}/export`);
+    const markdown = await res.text();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = /filename="([^"]+)"/.exec(disposition);
+    return {
+      markdown,
+      filename: match?.[1] || `${id}.md`,
+      contentHash: res.headers.get('X-Skill-Content-Hash') || undefined
+    };
   }
 }

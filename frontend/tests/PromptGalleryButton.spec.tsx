@@ -12,6 +12,7 @@ import { IPrompt, useConfig } from '@chainlit/react-client';
 import { PromptGalleryButton } from '@/components/chat/MessageComposer/PromptGalleryButton';
 
 const fetchPromptsMock = vi.fn().mockResolvedValue(undefined);
+const fetchSkillsMock = vi.fn().mockResolvedValue([]);
 const removePromptMock = vi.fn().mockResolvedValue(undefined);
 const sharePromptMock = vi.fn().mockResolvedValue('/prompt/some-id');
 const editPromptMock = vi.fn().mockResolvedValue({
@@ -50,6 +51,15 @@ vi.mock('@chainlit/react-client', () => ({
     removePrompt: removePromptMock,
     sharePrompt: sharePromptMock,
     savePrompt: savePromptMock
+  }),
+  useSkills: () => ({
+    skills: [],
+    fetchSkills: fetchSkillsMock,
+    createSkill: vi.fn(),
+    updateSkill: vi.fn(),
+    deleteSkill: vi.fn(),
+    importSkill: vi.fn(),
+    exportSkill: vi.fn()
   }),
   useChainlitStore: (selector: (state: typeof clientState) => unknown) =>
     selector(clientState)
@@ -95,6 +105,30 @@ describe('PromptGalleryButton', () => {
     (useConfig as any).mockReturnValue({ config: { promptGallery: false } });
     const { container } = renderComponent();
     expect(container.firstChild).toBeNull();
+    expect(fetchPromptsMock).not.toHaveBeenCalled();
+    expect(fetchSkillsMock).not.toHaveBeenCalled();
+  });
+
+  it('renders and opens skills when only skills is enabled', async () => {
+    (useConfig as any).mockReturnValue({
+      config: { promptGallery: false, features: { skills: true } }
+    });
+    renderComponent();
+    fireEvent.click(getGalleryBtn());
+
+    expect(await screen.findByText('chat.skills.new')).toBeInTheDocument();
+    expect(fetchPromptsMock).not.toHaveBeenCalled();
+  });
+
+  it('shows both tabs when prompts and skills are enabled', async () => {
+    (useConfig as any).mockReturnValue({
+      config: { promptGallery: true, features: { skills: true } }
+    });
+    renderComponent();
+    fireEvent.click(getGalleryBtn());
+
+    expect(await screen.findByText('chat.skills.tab')).toBeInTheDocument();
+    expect(screen.getByText('chat.promptGallery.tab')).toBeInTheDocument();
   });
 
   const getGalleryBtn = () => document.getElementById('prompt-gallery-open')!;
