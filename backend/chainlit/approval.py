@@ -786,7 +786,7 @@ def _decision_from_record(
         thread_id=record["threadId"],
         step_id=record["stepId"],
         decision=decision,
-        approved=status in _USER_STATUSES,
+        approved=status in {"approved", "edited"},
         arguments=deepcopy(arguments),
         user=user if status in _USER_STATUSES else None,
         decided_at=decided_at,

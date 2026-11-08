@@ -284,6 +284,35 @@ async def test_timeout_uses_the_same_transition_and_executes_nothing(
     assert (step.thread_id, step.id) not in approval_module._pending_by_step
 
 
+async def test_rejection_never_authorises_execution(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="dangerous_tool", type="tool")
+        await step.send()
+        executed = []
+
+        async def run_tool():
+            decision = await Approval(step=step, arguments={"x": 1}).ask()
+            if decision.approved:
+                executed.append(True)
+            return decision
+
+        task = asyncio.create_task(run_tool())
+        entry = await _entry_for(step)
+        record = await _decide(mock_session, entry, "rejected", reason="not now")
+        decision = await task
+
+    assert record["status"] == "rejected"
+    assert decision.decision == "reject"
+    assert decision.approved is False
+    assert executed == []
+
+
 async def test_second_transition_returns_stored_record_and_changes_nothing(
     layer, mock_chainlit_context, mock_session
 ):
