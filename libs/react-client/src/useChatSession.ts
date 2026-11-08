@@ -500,6 +500,8 @@ const useChatSession = () => {
           const index = old.findIndex((item) => item.id === approval.id);
           if (index === -1) return [...old, approval];
           const previous = old[index];
+          // A late pending event must not overwrite a terminal decision.
+          if ((approval.revision ?? 0) < (previous.revision ?? 0)) return old;
           const merged = {
             ...previous,
             ...approval,

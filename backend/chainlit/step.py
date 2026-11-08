@@ -303,6 +303,13 @@ class Step:
         task.add_done_callback(self._persistence_tasks.discard)
         return task
 
+    def _approval_persistence_suppressed(self) -> bool:
+        if not self._approval_managed:
+            return False
+        from chainlit.approval import is_thread_deleted
+
+        return is_thread_deleted(self.thread_id)
+
     async def flush_persistence(self) -> None:
         """Await every write scheduled for this step so far."""
         while self._persistence_tasks:
@@ -369,7 +376,7 @@ class Step:
         step_dict = self.to_dict()
         data_layer = get_data_layer()
 
-        if data_layer:
+        if data_layer and not self._approval_persistence_suppressed():
             try:
                 if self._approval_managed:
                     from chainlit.approval import step_lock
@@ -433,7 +440,7 @@ class Step:
 
         data_layer = get_data_layer()
 
-        if data_layer:
+        if data_layer and not self._approval_persistence_suppressed():
             try:
                 if self._approval_managed:
                     from chainlit.approval import step_lock

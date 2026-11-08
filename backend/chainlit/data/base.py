@@ -146,12 +146,13 @@ class BaseDataLayer(ABC):
         """Persist ``metadata['approval']`` and return True only if durable.
 
         Portable default for custom layers: read the step, merge the approval
-        key, update, then read back and require ``(id, status, revision)`` to
+        key, update, then read back and require the full normalized record to
         match. Any exception or mismatch is a failure; a normal return from
         ``update_step`` is not proof. Layers with a conditional write override
         this.
         """
         try:
+            expected = _normalized_record(record)
             thread = await self.get_thread(thread_id)
             step = _find_step(thread, step_id)
             if step is None:
@@ -183,15 +184,7 @@ class BaseDataLayer(ABC):
             stored = _normalize_metadata(stored_step.get("metadata")).get("approval")
             if not isinstance(stored, dict):
                 return False
-            return (
-                stored.get("id"),
-                stored.get("status"),
-                stored.get("revision"),
-            ) == (
-                record.get("id"),
-                record.get("status"),
-                record.get("revision"),
-            )
+            return _normalized_record(stored) == expected
         except Exception:
             return False
 
@@ -302,6 +295,10 @@ def _normalize_metadata(value: Any) -> Dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return value if isinstance(value, dict) else {}
+
+
+def _normalized_record(value: Dict[str, Any]) -> Any:
+    return json.loads(json.dumps(value, sort_keys=True, default=str))
 
 
 def _find_step(thread: Optional["ThreadDict"], step_id: str) -> Optional["StepDict"]:

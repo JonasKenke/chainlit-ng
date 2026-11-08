@@ -86,3 +86,61 @@ describe('useChatSession connect ordering', () => {
     expect(sockets).toHaveLength(1);
   });
 });
+
+describe('useChatSession approval events', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    io.mockClear();
+    sockets.length = 0;
+  });
+
+  it('ignores a late pending event after a terminal decision', async () => {
+    vi.useFakeTimers();
+    const client = new ChainlitAPI('http://localhost:8000', 'webapp');
+    const store = getChainlitStore(client);
+    store.setState({ threadIdToResume: undefined, sessionId: 'session-a' });
+    const pending = deferredStickyCookie(client);
+    const session = renderSession(client);
+
+    act(() => {
+      session.connect({ userEnv: {} });
+    });
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    await act(async () => {
+      pending.get('session-a')!();
+    });
+
+    const socket = sockets[0];
+    const handler = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'approval'
+    )?.[1] as (approval: unknown) => void;
+    expect(handler).toBeTruthy();
+
+    const base = {
+      id: 'approval-1',
+      stepId: 'step-1',
+      threadId: 'thread-1',
+      tool: 'send_email',
+      requestedBy: 'alice',
+      arguments: { amount: 1 }
+    };
+    act(() => {
+      store.setState({
+        approvals: [
+          {
+            ...base,
+            status: 'approved',
+            decision: 'approve',
+            revision: 2
+          }
+        ]
+      });
+    });
+    act(() => {
+      handler({ ...base, status: 'pending', revision: 1 });
+    });
+
+    expect(store.getState().approvals[0].status).toBe('approved');
+  });
+});

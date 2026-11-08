@@ -230,8 +230,9 @@ async def test_default_layer_detects_a_silent_drop():
     )
 
 
-async def test_default_layer_read_back_matches_id_status_and_revision():
+async def test_default_layer_read_back_requires_the_full_record():
     state: Dict[str, Any] = {"step": {"id": "step-1", "metadata": {}, "type": "tool"}}
+    lossy = {"value": False}
 
     async def get_thread(thread_id):
         return {
@@ -247,6 +248,8 @@ async def test_default_layer_read_back_matches_id_status_and_revision():
         }
 
     async def update_step(step):
+        if lossy["value"]:
+            step["metadata"]["approval"].pop("requestedBy", None)
         state["step"] = deepcopy(step)
 
     layer = Mock(spec=BaseDataLayer)
@@ -265,6 +268,20 @@ async def test_default_layer_read_back_matches_id_status_and_revision():
         is True
     )
     assert state["step"]["metadata"]["approval"]["status"] == "pending"
+
+    # A layer that drops any field is not durable, even with the same id,
+    # status and revision.
+    lossy["value"] = True
+    assert (
+        await BaseDataLayer.write_approval(
+            typed,
+            thread_id="thread-1",
+            step_id="step-1",
+            record=_record("approval-1", "approved", 2),
+            expected_revision=1,
+        )
+        is False
+    )
 
 
 def _dynamo_layer():

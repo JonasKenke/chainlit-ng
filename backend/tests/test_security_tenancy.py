@@ -170,6 +170,64 @@ class TestSharedThreadExposure:
         assert "sk-not-for-the-client" not in response.text
         assert public_thread(stored)["metadata"] == {"is_shared": True}
 
+    def test_share_view_hides_approval_detail(self, client, data_layer):
+        approval = {
+            "id": "approval-1",
+            "stepId": "step-1",
+            "threadId": "thread-1",
+            "tool": "send_email",
+            "title": "Send the draft",
+            "status": "approved",
+            "requestedBy": "alice@example.com",
+            "requestedAt": "2026-01-01T00:00:00Z",
+            "decidedBy": "alice@example.com",
+            "decidedAt": "2026-01-01T00:00:05Z",
+            "decision": "approve",
+            "terminalReason": None,
+            "argumentsPreview": {"to": "person@example.com", "apiKey": "[redacted]"},
+            "argumentsDigest": "hmac-sha256:secret-digest",
+            "digestSalt": "secret-salt",
+            "decisionRequestId": "request-1",
+        }
+        stored = thread(metadata={"is_shared": True})
+        stored["steps"] = [
+            {
+                "id": "step-1",
+                "threadId": "thread-1",
+                "metadata": {"keep": "step-meta", "approval": approval},
+            }
+        ]
+        data_layer.get_thread.return_value = stored
+
+        with patch("chainlit.server.get_data_layer", return_value=data_layer):
+            response = client.get("/project/share/thread-1")
+
+        assert response.status_code == 200
+        public_metadata = response.json()["steps"][0]["metadata"]
+        assert public_metadata == {
+            "keep": "step-meta",
+            "approval": {
+                "status": "approved",
+                "tool": "send_email",
+                "decision": "approve",
+                "decidedAt": "2026-01-01T00:00:05Z",
+                "terminalReason": None,
+            },
+        }
+        for hidden in (
+            "person@example.com",
+            "secret-digest",
+            "secret-salt",
+            "request-1",
+            "alice@example.com",
+        ):
+            assert hidden not in response.text
+
+        owner_approval = public_thread(stored, include_settings=True)["steps"][0][
+            "metadata"
+        ]["approval"]
+        assert owner_approval == approval
+
     def test_callback_denial_wins_over_missing_share_flag(self, client, data_layer):
         async def deny(_thread, _user):
             return False

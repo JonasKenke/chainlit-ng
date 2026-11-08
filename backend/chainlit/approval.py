@@ -154,6 +154,13 @@ _pending_by_step: Dict[tuple[str, str], str] = {}
 _step_locks: Dict[tuple[str, str], asyncio.Lock] = {}
 _terminal_records: Dict[str, tuple[str, Dict[str, Any]]] = {}
 
+# Thread ids deleted while an approval step may still write. In-process, like
+# the registry: a restart also ends the waiting run. Shortcut: keep the most
+# recent tombstones, upgrade if deletes must survive a restart.
+_DELETED_THREAD_LIMIT = 4096
+_deleted_threads: Dict[str, None] = {}
+_managed_thread_users: Dict[str, str] = {}
+
 _PROCESS_DIGEST_KEY = secrets.token_bytes(32)
 
 
@@ -165,6 +172,58 @@ def step_lock(thread_id: str, step_id: str) -> asyncio.Lock:
         lock = asyncio.Lock()
         _step_locks[key] = lock
     return lock
+
+
+def mark_thread_deleted(thread_id: str) -> None:
+    """Tombstone a thread so approval-bearing steps cannot re-create it."""
+    _deleted_threads[thread_id] = None
+    while len(_deleted_threads) > _DELETED_THREAD_LIMIT:
+        _deleted_threads.pop(next(iter(_deleted_threads)))
+
+
+def clear_thread_deleted(thread_id: str) -> None:
+    """Undo a tombstone when the delete itself failed."""
+    _deleted_threads.pop(thread_id, None)
+
+
+def _remember_managed_thread(thread_id: str, identifier: str) -> None:
+    _managed_thread_users[thread_id] = identifier
+    while len(_managed_thread_users) > _DELETED_THREAD_LIMIT:
+        _managed_thread_users.pop(next(iter(_managed_thread_users)))
+
+
+def is_thread_deleted(thread_id: str) -> bool:
+    return thread_id in _deleted_threads
+
+
+def managed_thread_ids_for(identifier: str) -> set[str]:
+    """Threads with an approval step requested by this user."""
+    return {
+        thread_id
+        for thread_id, requested_by in _managed_thread_users.items()
+        if requested_by == identifier
+    } | {
+        entry.thread_id
+        for entry in _pending_by_approval.values()
+        if entry.requested_by == identifier
+    }
+
+
+async def supersede_thread_approvals(thread_id: str) -> None:
+    """Resolve waiters after a delete; the row is gone, so no write is durable."""
+    entries = [
+        entry for entry in _pending_by_approval.values() if entry.thread_id == thread_id
+    ]
+    for entry in entries:
+        try:
+            await transition(
+                entry.approval_id,
+                "superseded",
+                reason="deleted",
+                retry_on_failure=True,
+            )
+        except ApprovalError:
+            continue
 
 
 def _canonical_json(value: Any) -> str:
@@ -337,7 +396,7 @@ async def _transition_locked(
     )
 
     entry.step.metadata[APPROVAL_METADATA_KEY] = record
-    attempts = 3 if retry_on_failure else 1
+    attempts = 3 if retry_on_failure and not is_thread_deleted(entry.thread_id) else 1
     for attempt in range(attempts):
         if await _write(entry, record, expected_revision=pending.get("revision")):
             break
@@ -528,6 +587,7 @@ class Approval:
 
         # Synchronous, before the first await: later Step writes take the lock.
         self.step._approval_managed = True
+        _remember_managed_thread(self.step.thread_id, session.user.identifier)
         emitter = context.emitter
         key = (self.step.thread_id, self.step.id)
 
