@@ -104,6 +104,13 @@ describe('Markdown math', () => {
     expect(container.querySelector('.katex')).toBeNull();
   });
 
+  it('does not execute raw HTML unless allowHtml is set', () => {
+    const { container } = render(
+      <Markdown>{'<img src=x onerror="alert(1)">'}</Markdown>
+    );
+    expect(container.querySelector('img')).toBeNull();
+  });
+
   it('bounds the parse cost of repeated unclosed delimiters', () => {
     const payload = '\\(x'.repeat(Math.floor((32 * 1024) / 3));
     const started = performance.now();

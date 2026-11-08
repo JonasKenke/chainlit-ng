@@ -220,7 +220,8 @@
       },
       "new": "New Prompt",
       "search": "Search prompts...",
-      "saved": "Prompt saved!"
+      "saved": "Prompt saved!",
+      "tab": "Prompts"
     },
     "promptScheduling": {
       "button": "Scheduled prompts",
@@ -308,6 +309,54 @@
         "update": "Unable to update scheduled prompt",
         "delete": "Unable to delete scheduled prompt",
         "run": "Unable to queue scheduled prompt"
+      }
+    },
+    "skills": {
+      "button": "Skills",
+      "title": "Skills",
+      "tab": "Skills",
+      "new": "New skill",
+      "import": "Import",
+      "importing": "Importing...",
+      "imported": "Skill imported",
+      "created": "Skill created",
+      "saved": "Skill saved",
+      "loading": "Loading skills...",
+      "importedBadge": "Imported",
+      "importedBadgeTitle": "Imported skill — review before enabling",
+      "provenance": "Imported by you from {{source}} · {{date}} · sha256:{{hash}}",
+      "reviewBeforeEnabling": "Disabled — review before enabling",
+      "toggle": "Toggle {{name}}",
+      "edit": "Edit skill",
+      "export": "Export skill",
+      "delete": "Delete skill",
+      "importedBy": "Imported by you from {{source}} · {{date}}",
+      "empty": {
+        "title": "No skills yet",
+        "description": "Create a skill or import a Markdown file"
+      },
+      "editor": {
+        "createTitle": "New skill",
+        "editTitle": "Edit skill",
+        "name": "Name",
+        "nameHint": "Lowercase letters, digits and hyphens; must be unique.",
+        "description": "Description",
+        "descriptionHint": "The model sees this line to decide when to use the skill.",
+        "body": "Instructions (Markdown)",
+        "preview": "Preview",
+        "previewEmpty": "Nothing to preview yet.",
+        "save": "Save skill",
+        "saving": "Saving...",
+        "cancel": "Cancel"
+      },
+      "validation": {
+        "nameRequired": "Name is required.",
+        "namePattern": "Use lowercase letters, digits and hyphens, starting with a letter or digit (max 64).",
+        "descriptionRequired": "Description is required.",
+        "descriptionSingleLine": "Description must be a single line.",
+        "descriptionTooLarge": "Description is {{size}} bytes; maximum is {{max}}.",
+        "bodyTooLarge": "Instructions are {{size}} bytes; maximum is {{max}}.",
+        "fileTooLarge": "File is {{size}} bytes; maximum is {{max}}."
       }
     }
   },
