@@ -67,6 +67,7 @@ from chainlit.config import (
     public_dir,
     reload_config,
 )
+from chainlit.context import RequestContextMiddleware
 from chainlit.data import get_data_layer
 from chainlit.data.acl import is_thread_author
 from chainlit.data.base import BaseDataLayer
@@ -333,6 +334,7 @@ class SafariWebSocketsCompatibleGZipMiddleware(GZipMiddleware):
 
 
 app.add_middleware(SafariWebSocketsCompatibleGZipMiddleware)
+app.add_middleware(RequestContextMiddleware)
 
 # config.run.root_path is only set when started with --root-path. Not on submounts.
 router = APIRouter(prefix=config.run.root_path)

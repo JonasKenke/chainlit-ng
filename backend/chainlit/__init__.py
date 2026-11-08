@@ -22,7 +22,7 @@ from chainlit.action import Action
 from chainlit.cache import cache
 from chainlit.chat_context import chat_context
 from chainlit.chat_settings import ChatSettings
-from chainlit.context import context
+from chainlit.context import context, request
 from chainlit.element import (
     Audio,
     CustomElement,
@@ -219,6 +219,7 @@ __all__ = [
     "on_window_message",
     "password_auth_callback",
     "render_skill",
+    "request",
     "run_sync",
     "send_window_message",
     "set_chat_profiles",

@@ -7,7 +7,7 @@ from starlette.datastructures import Headers
 
 from chainlit.action import Action
 from chainlit.config import config
-from chainlit.context import context
+from chainlit.context import context, request
 from chainlit.data.base import BaseDataLayer
 from chainlit.mcp import McpConnection
 from chainlit.message import Message
@@ -167,6 +167,18 @@ def on_logout(func: Callable[[Request, Response], Any]) -> Callable:
     return func
 
 
+def _wants_request(func: Callable) -> bool:
+    """Whether the callback opted in to the optional ``request`` parameter."""
+    return "request" in inspect.signature(func).parameters
+
+
+async def _call_user_function(func: Callable, *args, **kwargs):
+    result = func(*args, **kwargs)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+
 def on_message(func: Callable) -> Callable:
     """
     Framework agnostic decorator to react to messages coming from the UI.
@@ -175,17 +187,26 @@ def on_message(func: Callable) -> Callable:
     Args:
         func (Callable[[Message], Any]): The function to be called when a new message is received. Takes a cl.Message.
 
+    The callback may declare an optional ``request`` parameter. It receives the
+    :class:`starlette.requests.Request` for the connection, or ``None`` outside
+    a web context. See ``cl.request()``.
+
     Returns:
         Callable[[str], Any]: The decorated on_message function.
     """
+    wants_request = _wants_request(func)
+    takes_message = any(
+        name != "request" for name in inspect.signature(func).parameters
+    )
 
     async def with_parent_id(message: Message):
         async with Step(name="on_message", type="run", parent_id=message.id) as s:
             s.input = message.content
-            if len(inspect.signature(func).parameters) > 0:
-                await func(message)
+            kwargs = {"request": request()} if wants_request else {}
+            if takes_message:
+                await _call_user_function(func, message, **kwargs)
             else:
-                await func()
+                await _call_user_function(func, **kwargs)
 
     config.code.on_message = wrap_user_function(with_parent_id)
     return func
@@ -223,28 +244,49 @@ def on_chat_start(func: Callable) -> Callable:
     Args:
         func (Callable[], Any]): The connection hook to execute.
 
+    The callback may declare an optional ``request`` parameter. It receives the
+    :class:`starlette.requests.Request` for the connection, or ``None`` outside
+    a web context. See ``cl.request()``.
+
     Returns:
         Callable[], Any]: The decorated hook.
     """
+    if _wants_request(func):
+
+        async def run():
+            return await _call_user_function(func, request=request())
+
+    else:
+        run = func
 
     config.code.on_chat_start = wrap_user_function(
-        step(func, name="on_chat_start", type="run"), with_task=True
+        step(run, name="on_chat_start", type="run"), with_task=True
     )
     return func
 
 
-def on_chat_resume(func: Callable[[ThreadDict], Any]) -> Callable:
+def on_chat_resume(func: Callable[..., Any]) -> Callable:
     """
     Hook to react to resume websocket connection event.
 
     Args:
         func (Callable[], Any]): The connection hook to execute.
 
+    The callback may declare an optional ``request`` parameter. It receives the
+    :class:`starlette.requests.Request` for the connection, or ``None`` outside
+    a web context. See ``cl.request()``.
+
     Returns:
         Callable[], Any]: The decorated hook.
     """
+    wants_request = _wants_request(func)
 
-    config.code.on_chat_resume = wrap_user_function(func, with_task=True)
+    async def run(thread: ThreadDict):
+        if wants_request:
+            return await _call_user_function(func, thread, request=request())
+        return await _call_user_function(func, thread)
+
+    config.code.on_chat_resume = wrap_user_function(run, with_task=True)
     return func
 
 

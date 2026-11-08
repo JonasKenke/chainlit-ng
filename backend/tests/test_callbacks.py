@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 from unittest.mock import AsyncMock, Mock
+
+from starlette.requests import Request
 
 from chainlit import config
 from chainlit.callbacks import password_auth_callback
@@ -848,3 +851,190 @@ async def test_set_chat_profiles_with_config_overrides(
         assert light_profile.config_overrides is not None
         assert light_profile.config_overrides.ui.name == "Light Theme App"
         assert light_profile.config_overrides.ui.default_theme == "light"
+
+
+def _request(path="/ws/socket.io/"):
+    return Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "https",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"host", b"chat.example.com"),
+                (b"cookie", b"session=abc123"),
+            ],
+            "client": ("203.0.113.7", 54321),
+            "server": ("chat.example.com", 443),
+        }
+    )
+
+
+async def test_on_chat_start_receives_request(
+    mock_chainlit_context, test_config: config.ChainlitConfig
+):
+    from chainlit.callbacks import on_chat_start
+
+    expected = _request()
+    async with mock_chainlit_context as context:
+        context.session.request = expected
+        received = None
+
+        @on_chat_start
+        async def handle_chat_start(request):
+            nonlocal received
+            received = request
+
+        assert test_config.code.on_chat_start is not None
+        await test_config.code.on_chat_start()
+
+        assert received is expected
+
+
+async def test_on_chat_start_sync_callback_receives_request(
+    mock_chainlit_context, test_config: config.ChainlitConfig
+):
+    from chainlit.callbacks import on_chat_start
+
+    expected = _request()
+    async with mock_chainlit_context as context:
+        context.session.request = expected
+        received = []
+
+        @on_chat_start
+        def handle_chat_start(request):
+            received.append(request)
+
+        assert test_config.code.on_chat_start is not None
+        await test_config.code.on_chat_start()
+
+        assert received == [expected]
+
+
+async def test_on_chat_start_detects_request_through_decorator(
+    mock_chainlit_context, test_config: config.ChainlitConfig
+):
+    from chainlit.callbacks import on_chat_start
+
+    def logged(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            return await func(*args, **kwargs)
+
+        return wrapper
+
+    expected = _request()
+    async with mock_chainlit_context as context:
+        context.session.request = expected
+        received = None
+
+        @on_chat_start
+        @logged
+        async def handle_chat_start(request):
+            nonlocal received
+            received = request
+
+        assert test_config.code.on_chat_start is not None
+        await test_config.code.on_chat_start()
+
+        assert received is expected
+
+
+async def test_on_chat_resume_receives_request(
+    mock_chainlit_context, test_config: config.ChainlitConfig
+):
+    from chainlit.callbacks import on_chat_resume
+
+    expected = _request()
+    async with mock_chainlit_context as context:
+        context.session.request = expected
+        received = None
+
+        @on_chat_resume
+        async def handle_chat_resume(thread: ThreadDict, request):
+            nonlocal received
+            received = request
+
+        assert test_config.code.on_chat_resume is not None
+        await test_config.code.on_chat_resume(
+            {
+                "id": "test_thread_id",
+                "createdAt": "2023-01-01T00:00:00Z",
+                "name": "Test Thread",
+                "userId": "test_user_id",
+                "userIdentifier": "test_user",
+                "tags": [],
+                "metadata": {},
+                "steps": [],
+                "elements": [],
+            }
+        )
+
+        assert received is expected
+
+
+async def test_on_message_receives_request(
+    mock_chainlit_context, test_config: config.ChainlitConfig
+):
+    from chainlit.callbacks import on_message
+    from chainlit.message import Message
+
+    expected = _request()
+    async with mock_chainlit_context as context:
+        context.session.request = expected
+        received = None
+
+        @on_message
+        async def handle_message(message, request):
+            nonlocal received
+            received = request
+
+        assert test_config.code.on_message is not None
+        await test_config.code.on_message(Message(content="hi", author="User"))
+
+        assert received is expected
+
+
+async def test_on_message_request_only_callback(
+    mock_chainlit_context, test_config: config.ChainlitConfig
+):
+    from chainlit.callbacks import on_message
+    from chainlit.message import Message
+
+    expected = _request()
+    async with mock_chainlit_context as context:
+        context.session.request = expected
+        received = []
+
+        @on_message
+        async def handle_message(request):
+            received.append(request)
+
+        assert test_config.code.on_message is not None
+        await test_config.code.on_message(Message(content="hi", author="User"))
+
+        assert received == [expected]
+
+
+async def test_on_message_without_request_argument_is_unchanged(
+    mock_chainlit_context, test_config: config.ChainlitConfig
+):
+    from chainlit.callbacks import on_message
+    from chainlit.message import Message
+
+    async with mock_chainlit_context:
+        calls = []
+
+        @on_message
+        async def handle_message():
+            calls.append("called")
+
+        assert test_config.code.on_message is not None
+        await test_config.code.on_message(Message(content="hi", author="User"))
+
+        assert calls == ["called"]
