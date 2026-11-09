@@ -20,6 +20,7 @@ from chainlit.socket import (
     load_user_env,
     message,
     persist_user_session,
+    process_message,
     restore_existing_session,
     resume_thread,
     stop,
@@ -875,6 +876,12 @@ class TestRunOwnership:
             mock_session.current_task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await mock_session.current_task
+
+    async def test_context_init_error_is_not_masked(self, mock_session):
+        mock_session.unavailable_chat_profile = None
+        with patch("chainlit.socket.init_ws_context", side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError, match="boom"):
+                await process_message(mock_session, {"message": {"output": "hi"}})
 
     async def test_edit_message_binds_current_task(self, mock_session, context):
         started = asyncio.Event()

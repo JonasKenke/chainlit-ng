@@ -428,6 +428,22 @@ async def test_invalid_thread_id_is_omitted(monkeypatch, memory_exporter):
     assert "chainlit.thread.id" not in root.attributes
 
 
+def test_spans_from_other_instrumentations_are_not_exported(
+    monkeypatch, memory_exporter
+):
+    _init_with_exporter(monkeypatch, memory_exporter)
+
+    foreign = otel._provider.get_tracer("fastapi")
+    span = foreign.start_span("GET /{full_path}")
+    span.end()
+
+    turn = otel.start_turn("message", THREAD_ID)
+    assert turn is not None
+    otel.end_turn(turn)
+
+    assert [span.name for span in _finished(memory_exporter)] == ["chainlit.turn"]
+
+
 # ---------------------------------------------------------------------------
 # AC 4: failure isolation
 # ---------------------------------------------------------------------------
@@ -890,6 +906,7 @@ def test_header_secrets_never_reach_logs(monkeypatch, caplog, env_var):
             f"x-bad-encoded={SENTINEL}%0AINJECTED",
             f"x-bad-del={SENTINEL}\x7f",
             f"x-bad-unicode={SENTINEL}\u00e9",
+            f"x-bad-name-{SENTINEL}\n=value",
         ]
     )
     monkeypatch.setenv(env_var, raw)
@@ -924,45 +941,79 @@ def test_header_secrets_never_reach_logs(monkeypatch, caplog, env_var):
     assert otel._provider is not None
     assert captured["headers"] == {"x-api-key": "abc123"}
     assert SENTINEL not in caplog.text
-    assert "dropped 5 malformed OTLP header entries" in caplog.text
+    assert "dropped 6 malformed OTLP header entries" in caplog.text
     assert "x-api-key" in caplog.text
     # The env vars are restored after construction.
     assert os.environ[env_var] == raw
 
 
-def test_endpoint_secrets_never_reach_logs(monkeypatch, caplog):
-    endpoint = (
-        f"https://user:{SENTINEL}@collector.example:4318/v1/traces?t={SENTINEL}#frag"
+def test_malformed_resource_attributes_are_not_logged(
+    monkeypatch, caplog, memory_exporter
+):
+    raw = f"badpair-{SENTINEL},service.namespace=chainlit"
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", raw)
+    with caplog.at_level(logging.DEBUG, logger="opentelemetry"):
+        _init_with_exporter(monkeypatch, memory_exporter)
+
+    assert SENTINEL not in caplog.text
+    assert SENTINEL not in json.dumps(
+        dict(otel._provider.resource.attributes), default=str
     )
+    assert otel._provider.resource.attributes["service.namespace"] == "chainlit"
+    assert os.environ["OTEL_RESOURCE_ATTRIBUTES"] == raw
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        f"https://user:{SENTINEL}@collector.example:4318/v1/traces",
+        f"https://collector.example:4318/v1/traces?token={SENTINEL}",
+        f"https://collector.example:4318/v1/traces#{SENTINEL}",
+        f"https://collector.example:4318/v1/traces;{SENTINEL}",
+    ],
+)
+def test_endpoint_credentials_or_query_is_rejected(monkeypatch, caplog, endpoint):
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", endpoint)
     _enable_config(monkeypatch)
 
-    captured = {}
-
-    class FakeExporter:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        def export(self, spans):
-            return None
-
-        def shutdown(self):
-            pass
-
-        def force_flush(self, timeout_millis=30000):
-            return True
-
-    monkeypatch.setattr(
-        "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter",
-        FakeExporter,
-    )
-
-    with caplog.at_level(logging.DEBUG, logger="chainlit"):
+    with (
+        caplog.at_level(logging.DEBUG, logger="chainlit"),
+        caplog.at_level(logging.DEBUG, logger="opentelemetry"),
+    ):
         otel.init()
 
-    assert captured["endpoint"] == endpoint
+    assert otel._provider is None
     assert SENTINEL not in caplog.text
-    assert "https://collector.example:4318" in caplog.text
+    assert "invalid OTLP endpoint" not in caplog.text
+
+
+def test_endpoint_path_secret_never_reaches_exporter_logs(monkeypatch, caplog):
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    endpoint = f"http://127.0.0.1:9/v1/traces/{SENTINEL}"
+    _enable_config(monkeypatch)
+    monkeypatch.setattr(
+        otel,
+        "_build_exporter",
+        lambda: (OTLPSpanExporter(endpoint=endpoint, timeout=2.0), endpoint, [], 0),
+    )
+
+    with (
+        caplog.at_level(logging.DEBUG, logger="chainlit"),
+        caplog.at_level(logging.DEBUG, logger="opentelemetry"),
+        caplog.at_level(logging.DEBUG, logger="urllib3"),
+        caplog.at_level(logging.DEBUG, logger="requests"),
+    ):
+        otel.init()
+        turn = otel.start_turn("message", THREAD_ID)
+        assert turn is not None
+        otel.end_turn(turn)
+        otel._provider.force_flush()
+
+    assert "Transient error" in caplog.text
+    assert SENTINEL not in caplog.text
+    assert "/v1/traces" not in caplog.text
+    assert "http://127.0.0.1:9" in caplog.text
 
 
 def test_malformed_endpoint_is_not_echoed(monkeypatch, caplog):

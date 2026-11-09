@@ -481,6 +481,7 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
     if session.unavailable_chat_profile:
         return
     turn = otel.start_turn("message", getattr(session, "thread_id", None))
+    context = None
     try:
         context = init_ws_context(session)
         await context.emitter.task_start()
@@ -494,12 +495,15 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
     except Exception as e:
         otel.mark_turn_error(turn, type(e))
         logger.exception(e)
+        if context is None:
+            raise
         await ErrorMessage(
             author="Error", content=str(e) or e.__class__.__name__
         ).send()
     finally:
         try:
-            await context.emitter.task_end()
+            if context is not None:
+                await context.emitter.task_end()
         finally:
             otel.end_turn(turn)
 

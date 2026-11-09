@@ -136,19 +136,13 @@ def init() -> None:
 
     try:
         exporter, endpoint, header_names, dropped_headers = _build_exporter()
+        _install_endpoint_redaction_filter(endpoint)
 
         provider = TracerProvider(
             resource=_resource(Resource),
             sampler=_sampler(settings.sample_ratio),
         )
-        provider.add_span_processor(
-            BatchSpanProcessor(
-                exporter,
-                max_queue_size=_env_int("OTEL_BSP_MAX_QUEUE_SIZE", 2048),
-                schedule_delay_millis=_env_int("OTEL_BSP_SCHEDULE_DELAY", 5000),
-                max_export_batch_size=_env_int("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", 512),
-            )
-        )
+        provider.add_span_processor(_processor(BatchSpanProcessor, exporter))
         _install_queue_full_filter()
     except Exception:
         _disable("telemetry: provider initialization failed. Telemetry is disabled.")
@@ -220,9 +214,31 @@ def _disable(message: str) -> None:
 
 def _resource(resource_cls: Any) -> Any:
     service_name = os.environ.get("OTEL_SERVICE_NAME") or _DEFAULT_SERVICE_NAME
-    return resource_cls.create(
-        {"service.name": service_name, "service.version": __version__}
-    )
+    attributes: Dict[str, Any] = {
+        "service.name": service_name,
+        "service.version": __version__,
+    }
+    # The SDK's resource detector logs malformed pairs raw, so parse the env
+    # var ourselves and keep it out of the detector (D3, §6.3).
+    raw = os.environ.pop("OTEL_RESOURCE_ATTRIBUTES", None)
+    try:
+        if raw:
+            attributes.update(_parse_resource_attributes(raw))
+        return resource_cls.create(attributes)
+    finally:
+        if raw is not None:
+            os.environ["OTEL_RESOURCE_ATTRIBUTES"] = raw
+
+
+def _parse_resource_attributes(raw: str) -> Dict[str, str]:
+    """Parse OTEL_RESOURCE_ATTRIBUTES without ever logging an entry (D3)."""
+    attributes: Dict[str, str] = {}
+    for item in raw.split(","):
+        key, separator, value = item.partition("=")
+        key = key.strip()
+        if separator and key:
+            attributes[key] = unquote(value.strip())
+    return attributes
 
 
 def _sampler(sample_ratio: float) -> Any:
@@ -281,6 +297,10 @@ def _validate_endpoint(endpoint: str) -> None:
     parsed = urlparse(endpoint)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("invalid OTLP endpoint")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("invalid OTLP endpoint")
+    if parsed.query or parsed.fragment or parsed.params:
+        raise ValueError("invalid OTLP endpoint")
     parsed.port  # raises ValueError for a malformed or out-of-range port
 
 
@@ -316,8 +336,8 @@ def _parse_otlp_headers(raw: str) -> Tuple[Dict[str, str], List[str], int]:
         if not entry:
             continue
         name, separator, value = entry.partition("=")
-        name = name.strip()
-        if not separator or not _HEADER_NAME_RE.match(name):
+        name = name.strip(" ")
+        if not separator or not _HEADER_NAME_RE.fullmatch(name):
             dropped += 1
             continue
         value = unquote(value.strip())
@@ -336,6 +356,77 @@ def _attributes(values: Dict[str, Any]) -> Dict[str, Any]:
 def _set_attributes(span: Any, values: Dict[str, Any]) -> None:
     for key, value in _attributes(values).items():
         span.set_attribute(key, value)
+
+
+def _processor(processor_cls: Any, exporter: Any) -> Any:
+    """Export only Chainlit's own spans (D1).
+
+    Telemetry may install its provider as the global one (AC 8); other
+    instrumentations then create spans on it too. Their spans must not leave
+    the process through Chainlit's exporter.
+    """
+
+    class _ChainlitSpanProcessor(processor_cls):  # type: ignore[misc, valid-type]
+        def on_end(self, span: Any) -> None:
+            scope = getattr(span, "instrumentation_scope", None)
+            if scope is not None and scope.name == __name__:
+                super().on_end(span)
+
+    return _ChainlitSpanProcessor(
+        exporter,
+        max_queue_size=_env_int("OTEL_BSP_MAX_QUEUE_SIZE", 2048),
+        schedule_delay_millis=_env_int("OTEL_BSP_SCHEDULE_DELAY", 5000),
+        max_export_batch_size=_env_int("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", 512),
+    )
+
+
+_ENDPOINT_LOGGERS = (
+    "opentelemetry.exporter.otlp.common.http",
+    "opentelemetry.exporter.otlp.proto.http.trace_exporter",
+)
+
+
+class _EndpointRedactionFilter(logging.Filter):
+    """Strip the endpoint path from exporter logs (D3, AC 10)."""
+
+    def __init__(self, endpoint: str) -> None:
+        super().__init__()
+        try:
+            parsed = urlparse(endpoint)
+            self._needles = tuple(
+                needle for needle in {parsed.path, parsed.query} if len(needle) > 1
+            )
+        except Exception:
+            self._needles = ()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not self._needles:
+            return True
+        try:
+            text = record.getMessage()
+            for needle in self._needles:
+                text = text.replace(needle, "[redacted]")
+            if text != record.getMessage():
+                record.msg = text
+                record.args = ()
+        except Exception:
+            pass
+        return True
+
+
+def _install_endpoint_redaction_filter(endpoint: str) -> None:
+    _remove_endpoint_redaction_filters()
+    filter_ = _EndpointRedactionFilter(endpoint)
+    for name in _ENDPOINT_LOGGERS:
+        logging.getLogger(name).addFilter(filter_)
+
+
+def _remove_endpoint_redaction_filters() -> None:
+    for name in _ENDPOINT_LOGGERS:
+        target = logging.getLogger(name)
+        for filter_ in list(target.filters):
+            if isinstance(filter_, _EndpointRedactionFilter):
+                target.removeFilter(filter_)
 
 
 class _QueueFullFilter(logging.Filter):
@@ -619,4 +710,5 @@ def _reset() -> None:
         for filter_ in list(sdk_logger.filters):
             if isinstance(filter_, _QueueFullFilter):
                 sdk_logger.removeFilter(filter_)
+    _remove_endpoint_redaction_filters()
     _turn.set(None)
