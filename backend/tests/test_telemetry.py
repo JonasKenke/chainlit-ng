@@ -1094,3 +1094,254 @@ async def test_queue_full_logs_at_most_twice(
     ]
     assert 1 <= len(warnings) <= 2
     assert turn is not None
+
+
+# ---------------------------------------------------------------------------
+# Slice 2: readable names, app context, remaining turn roots
+# ---------------------------------------------------------------------------
+
+
+def _traceparent(span_context) -> str:
+    return (
+        f"00-{span_context.trace_id:032x}-{span_context.span_id:016x}-"
+        f"{int(span_context.trace_flags):02x}"
+    )
+
+
+async def test_capture_names_use_a_sanitized_bounded_name(
+    monkeypatch, mock_chainlit_context, memory_exporter
+):
+    _init_with_exporter(monkeypatch, memory_exporter)
+    monkeypatch.setattr(config.features.telemetry, "capture_names", True)
+    raw = "read\nfile\x1b\u202e" + "x" * 200
+
+    async with mock_chainlit_context:
+        turn = otel.start_turn("message", THREAD_ID)
+        try:
+            step = Step(name=raw, type="tool")
+            step.input = SENTINEL
+            step.output = SENTINEL
+            async with step:
+                pass
+        finally:
+            otel.end_turn(turn)
+
+    spans = _finished(memory_exporter)
+    step_span = next(span for span in spans if "chainlit.step.name" in span.attributes)
+    expected = ("readfile" + "x" * 200)[:128]
+
+    assert step_span.name == expected
+    assert step_span.attributes["chainlit.step.name"] == expected
+    assert len(step_span.name) == 128
+    assert not any(char in step_span.name for char in "\n\x1b\u202e")
+    assert set(step_span.attributes) == {
+        "chainlit.step.is_error",
+        "chainlit.step.name",
+        "chainlit.step.type",
+    }
+    assert SENTINEL not in json.dumps(step_span.attributes, default=str)
+
+
+def test_get_tracer_and_traceparent_are_noops_when_disabled():
+    from opentelemetry.trace import NoOpTracer
+
+    tracer = otel.get_tracer("app")
+
+    assert isinstance(tracer, NoOpTracer)
+    assert tracer.start_span("app.span").is_recording() is False
+    assert otel.current_traceparent() is None
+
+
+async def test_get_tracer_uses_chainlit_provider_with_an_app_provider(
+    monkeypatch, mock_chainlit_context, memory_exporter
+):
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    app_exporter = InMemorySpanExporter()
+    app_provider = TracerProvider()
+    app_provider.add_span_processor(SimpleSpanProcessor(app_exporter))
+    trace.set_tracer_provider(app_provider)
+
+    try:
+        _init_with_exporter(monkeypatch, memory_exporter)
+        assert trace.get_tracer_provider() is app_provider
+
+        tracer = otel.get_tracer("app")
+        assert tracer is otel._tracer
+
+        async with mock_chainlit_context:
+            turn = otel.start_turn("message", THREAD_ID)
+            try:
+                async with Step(name="outer", type="run"):
+                    with tracer.start_as_current_span("app.span"):
+                        pass
+            finally:
+                otel.end_turn(turn)
+
+        spans = _finished(memory_exporter)
+        step_span = next(span for span in spans if span.name == "chainlit.run")
+        app_span = next(span for span in spans if span.name == "app.span")
+
+        assert app_span.context.trace_id == step_span.context.trace_id
+        assert app_span.parent.span_id == step_span.context.span_id
+        assert app_exporter.get_finished_spans() == ()
+    finally:
+        app_provider.shutdown()
+
+
+async def test_current_traceparent_matches_the_active_span(
+    monkeypatch, mock_chainlit_context, memory_exporter
+):
+    _init_with_exporter(monkeypatch, memory_exporter)
+    root_traceparent = None
+    step_traceparent = None
+
+    async with mock_chainlit_context:
+        turn = otel.start_turn("message", THREAD_ID)
+        assert turn is not None
+        try:
+            root_traceparent = otel.current_traceparent()
+            async with Step(name="tool", type="tool"):
+                step_traceparent = otel.current_traceparent()
+        finally:
+            otel.end_turn(turn)
+
+    spans = _finished(memory_exporter)
+    root = next(span for span in spans if span.name == "chainlit.turn")
+    step = next(span for span in spans if span.name == "chainlit.tool")
+
+    assert root_traceparent == _traceparent(root.context)
+    assert step_traceparent == _traceparent(step.context)
+    assert root_traceparent != step_traceparent
+
+
+async def test_chat_start_has_a_turn_root(monkeypatch, ws, memory_exporter):
+    import chainlit.socket as socket
+
+    session, _emitter, _ctx = ws
+    _init_with_exporter(monkeypatch, memory_exporter)
+
+    async def on_chat_start():
+        async with Step(name="start", type="run"):
+            pass
+
+    monkeypatch.setattr(
+        config.code, "on_chat_start", AsyncMock(side_effect=on_chat_start)
+    )
+    session.restored = False
+    session.thread_id_to_resume = None
+    session.chat_started = False
+
+    await socket.connection_successful("sid")
+    assert session.current_task is not None
+    await session.current_task
+
+    spans = _finished(memory_exporter)
+    roots = [span for span in spans if span.name == "chainlit.turn"]
+    assert len(roots) == 1
+    root = roots[0]
+    assert root.attributes["chainlit.turn.kind"] == "chat_start"
+    assert root.attributes["chainlit.thread.id"] == THREAD_ID
+
+    step = next(span for span in spans if span.name == "chainlit.run")
+    assert step.context.trace_id == root.context.trace_id
+    assert step.parent.span_id == root.context.span_id
+
+
+async def test_chat_resume_has_a_turn_root(monkeypatch, ws, memory_exporter):
+    import chainlit.socket as socket
+
+    session, _emitter, _ctx = ws
+    _init_with_exporter(monkeypatch, memory_exporter)
+
+    thread = {"id": THREAD_ID, "steps": []}
+
+    async def on_chat_resume(resumed_thread):
+        async with Step(name="resume", type="run"):
+            pass
+
+    monkeypatch.setattr(socket, "resume_thread", AsyncMock(return_value=thread))
+    monkeypatch.setattr(
+        config.code, "on_chat_resume", AsyncMock(side_effect=on_chat_resume)
+    )
+    monkeypatch.setattr(socket.sio.manager, "is_connected", lambda *args: False)
+    session.restored = False
+    session.thread_id_to_resume = THREAD_ID
+    session._resumed_thread = None
+    session.socket_id = "sid"
+
+    await socket.connection_successful("sid")
+
+    spans = _finished(memory_exporter)
+    roots = [span for span in spans if span.name == "chainlit.turn"]
+    assert len(roots) == 1
+    root = roots[0]
+    assert root.attributes["chainlit.turn.kind"] == "chat_resume"
+    assert root.attributes["chainlit.thread.id"] == THREAD_ID
+
+    step = next(span for span in spans if span.name == "chainlit.run")
+    assert step.context.trace_id == root.context.trace_id
+    assert step.parent.span_id == root.context.span_id
+
+
+async def test_audio_end_has_a_turn_root(monkeypatch, ws, memory_exporter):
+    import chainlit.socket as socket
+
+    session, _emitter, _ctx = ws
+    _init_with_exporter(monkeypatch, memory_exporter)
+
+    async def on_audio_end():
+        async with Step(name="audio", type="run"):
+            pass
+
+    monkeypatch.setattr(
+        socket.WebsocketSession, "require", staticmethod(lambda sid: session)
+    )
+    monkeypatch.setattr(session, "get_config", lambda: config)
+    monkeypatch.setattr(config.features.audio, "enabled", True)
+    monkeypatch.setattr(
+        config.code, "on_audio_end", AsyncMock(side_effect=on_audio_end)
+    )
+
+    await socket.audio_end("sid")
+
+    spans = _finished(memory_exporter)
+    roots = [span for span in spans if span.name == "chainlit.turn"]
+    assert len(roots) == 1
+    root = roots[0]
+    assert root.attributes["chainlit.turn.kind"] == "audio_end"
+    assert root.attributes["chainlit.thread.id"] == THREAD_ID
+
+    step = next(span for span in spans if span.name == "chainlit.run")
+    assert step.context.trace_id == root.context.trace_id
+    assert step.parent.span_id == root.context.span_id
+
+
+@pytest.mark.parametrize(
+    ("thread_id", "attached"),
+    [
+        (THREAD_ID, True),
+        (None, False),
+        (42, False),
+        ("not-a-uuid", False),
+        ("not-a-uuid\n", False),
+    ],
+)
+def test_thread_id_is_revalidated_at_the_hook(
+    monkeypatch, memory_exporter, thread_id, attached
+):
+    _init_with_exporter(monkeypatch, memory_exporter)
+
+    turn = otel.start_turn("message", thread_id)
+    assert turn is not None
+    otel.end_turn(turn)
+
+    root = _finished(memory_exporter)[0]
+    assert ("chainlit.thread.id" in root.attributes) is attached
+    if attached:
+        assert root.attributes["chainlit.thread.id"] == THREAD_ID
