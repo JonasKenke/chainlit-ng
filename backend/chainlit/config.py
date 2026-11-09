@@ -125,6 +125,21 @@ skills = false
 # Enable recurring prompt scheduling for authenticated users
 prompt_scheduling = false
 
+[features.telemetry]
+# Export one OpenTelemetry trace per chat turn to an OTLP/HTTP collector.
+# Requires the optional extra: pip install "chainlit[otel]"
+enabled = false
+
+# Use step names as span names and attach them as attributes.
+# Names can contain user data; keep this off in multi-tenant deployments.
+capture_names = false
+
+# Reserved: v1 accepts only false. Content capture needs a separate security review.
+capture_content = false
+
+# Fraction of turns to sample when OTEL_TRACES_SAMPLER is unset (0 to 1).
+sample_ratio = 0.1
+
 [features.slack]
 # Add emoji reaction when message is received (requires reactions:write OAuth scope)
 reaction_on_message_received = false
@@ -354,6 +369,17 @@ class SpontaneousFileUploadFeature(BaseModel):
     directory: Optional[str] = Field(default=None, exclude=True)
 
 
+class TelemetryFeature(BaseModel):
+    """OpenTelemetry export from the Step tree."""
+
+    enabled: bool = False
+    capture_names: bool = False
+    # Reserved for a later slice; v1 must fail validation instead of silently
+    # ignoring a content-capture request.
+    capture_content: Literal[False] = False
+    sample_ratio: float = Field(default=0.1, ge=0.0, le=1.0)
+
+
 class AudioFeature(BaseModel):
     sample_rate: int = 24000
     enabled: bool = False
@@ -497,6 +523,7 @@ class FeaturesSettings(BaseModel):
     prompt_gallery: bool = False
     prompt_scheduling: bool = False
     skills: bool = False
+    telemetry: TelemetryFeature = Field(default_factory=TelemetryFeature)
 
 
 class HeaderLink(BaseModel):

@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Literal, Optional, Type, TypedDict, Uni
 
 from pydantic import BaseModel
 
+from chainlit import otel
 from chainlit.config import config
 from chainlit.context import CL_RUN_NAMES, context, local_steps
 from chainlit.data import get_data_layer
@@ -647,6 +648,7 @@ class Step:
             if parent_step:
                 self.parent_id = parent_step.id
         local_steps.set(previous_steps + [self])
+        otel.start_step(self)
         await self.send()
         return self
 
@@ -662,6 +664,7 @@ class Step:
             current_steps.remove(self)
             local_steps.set(current_steps)
 
+        otel.end_step(self, exc_type)
         await self.update()
 
     def __enter__(self):
@@ -676,6 +679,7 @@ class Step:
                 self.parent_id = parent_step.id
         local_steps.set(previous_steps + [self])
 
+        otel.start_step(self)
         create_persistence_task(self.send())
         return self
 
@@ -691,4 +695,5 @@ class Step:
             current_steps.remove(self)
             local_steps.set(current_steps)
 
+        otel.end_step(self, exc_type)
         create_persistence_task(self.update())
