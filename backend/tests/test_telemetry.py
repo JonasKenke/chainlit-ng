@@ -698,6 +698,52 @@ async def test_lifespan_calls_otel_shutdown_before_exit(monkeypatch):
     assert order == ["otel", "exit"]
 
 
+def _blocking_exporter(entered: threading.Event, release: threading.Event):
+    class BlockingExporter:
+        def export(self, spans):
+            entered.set()
+            release.wait(10)
+            return None
+
+        def shutdown(self):
+            pass
+
+        def force_flush(self, timeout_millis=30000):
+            return True
+
+    return BlockingExporter()
+
+
+def test_shutdown_is_bounded_with_a_blocking_exporter(monkeypatch):
+    """The SDK's own shutdown flush must not run on the exit path.
+
+    A real ``TracerProvider`` + ``BatchSpanProcessor`` blocks inside
+    ``provider.shutdown()`` until the exporter returns; the join budget is the
+    only thing that keeps the process exit bounded.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+    # The only export attempt must be the one shutdown triggers.
+    monkeypatch.setenv("OTEL_BSP_SCHEDULE_DELAY", "600000")
+    _init_with_exporter(monkeypatch, _blocking_exporter(entered, release))
+
+    otel.end_turn(otel.start_turn("message", THREAD_ID))
+    assert not entered.is_set()
+
+    started = time.monotonic()
+    try:
+        otel.shutdown()
+        elapsed = time.monotonic() - started
+        # The flush was reached, so the bound is a cut-short flush, not a no-op.
+        assert entered.wait(5)
+    finally:
+        release.set()
+
+    assert elapsed < 2.5
+    assert otel._provider is None
+    assert otel._tracer is None
+
+
 def test_shutdown_never_touches_a_provider_chainlit_does_not_own(
     monkeypatch, memory_exporter
 ):
@@ -802,6 +848,89 @@ print(
     assert data["app_is_global"] is True
     assert data["app_shutdowns"] == 0
     assert len(data["info_lines"]) == 1
+
+
+def test_chainlit_isolation_holds_when_the_app_exporter_blocks():
+    """A blocking app exporter must never see a Chainlit span or a shutdown.
+
+    ``SimpleSpanProcessor`` exports inline on span end, so a turn that leaked
+    onto the app provider would stall here; a ``shutdown()`` call to that
+    provider would stall the lifespan instead.
+    """
+    script = f"""
+import json, time
+
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+
+app_exports = []
+app_shutdowns = []
+
+
+class BlockingExporter:
+    def export(self, spans):
+        app_exports.append(len(spans))
+        time.sleep(5)
+        return None
+
+    def shutdown(self):
+        app_shutdowns.append(True)
+
+    def force_flush(self, timeout_millis=30000):
+        return True
+
+
+app_provider = TracerProvider()
+app_provider.add_span_processor(SimpleSpanProcessor(BlockingExporter()))
+trace.set_tracer_provider(app_provider)
+
+import chainlit.otel as otel
+from chainlit.config import TelemetryFeature, config
+
+config.features.telemetry = TelemetryFeature(enabled=True, sample_ratio=1.0)
+chainlit_exporter = InMemorySpanExporter()
+otel._build_exporter = lambda: (
+    chainlit_exporter,
+    "http://localhost:4318/v1/traces",
+    [],
+    0,
+)
+otel.init()
+
+started = time.monotonic()
+otel.end_turn(otel.start_turn("message", "{THREAD_ID}"))
+turn_elapsed = time.monotonic() - started
+started = time.monotonic()
+otel.shutdown()
+shutdown_elapsed = time.monotonic() - started
+
+print(
+    json.dumps(
+        {{
+            "chainlit_spans": len(chainlit_exporter.get_finished_spans()),
+            "app_exports": app_exports,
+            "app_shutdowns": len(app_shutdowns),
+            "app_is_global": trace.get_tracer_provider() is app_provider,
+            "turn_elapsed": turn_elapsed,
+            "shutdown_elapsed": shutdown_elapsed,
+        }}
+    )
+)
+"""
+    result = _run_python(script)
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert data["turn_elapsed"] < 2.0
+    assert data["shutdown_elapsed"] < 2.5
+    assert data["app_exports"] == []
+    assert data["app_shutdowns"] == 0
+    assert data["app_is_global"] is True
+    assert data["chainlit_spans"] == 1
 
 
 def test_chainlit_installs_its_provider_as_global_by_default():
