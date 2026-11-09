@@ -23,11 +23,13 @@ from chainlit.logger import logger
 from chainlit.step import StepDict
 from chainlit.types import (
     Feedback,
+    FeedbackThreadLookup,
     PageInfo,
     PaginatedResponse,
     Pagination,
     ThreadDict,
     ThreadFilter,
+    ThreadGrant,
     ThreadOwner,
 )
 from chainlit.user import PersistedUser, User
@@ -43,6 +45,11 @@ _logger.setLevel(logging.WARNING)
 
 
 class DynamoDBDataLayer(BaseDataLayer):
+    # Grants live as GRANT# items in the thread partition; both capabilities are
+    # implemented together because the feedback gate depends on the grant gate.
+    thread_grants_supported = True
+    feedback_authorization_supported = True
+
     def __init__(
         self,
         table_name: str,
@@ -180,13 +187,29 @@ class DynamoDBDataLayer(BaseDataLayer):
             metadata=metadata,
         )
 
+    @staticmethod
+    def _parse_feedback_id(feedback_id: str) -> Optional[tuple[str, str]]:
+        """Split ``THREAD#<thread>::STEP#<step>``; None on a malformed id."""
+        prefix, marker = "THREAD#", "::STEP#"
+        if not isinstance(feedback_id, str) or not feedback_id.startswith(prefix):
+            return None
+        rest = feedback_id[len(prefix) :]
+        separator = rest.find(marker)
+        if separator <= 0:
+            return None
+        thread_id = rest[:separator]
+        step_id = rest[separator + len(marker) :]
+        if not step_id or "::" in thread_id or "::" in step_id:
+            return None
+        return thread_id, step_id
+
     async def delete_feedback(self, feedback_id: str) -> bool:
         _logger.info("DynamoDB: delete_feedback feedback_id=%s", feedback_id)
 
-        # feedback id = THREAD#{thread_id}::STEP#{step_id}
-        thread_id, step_id = feedback_id.split("::")
-        thread_id = thread_id.removeprefix("THREAD#")
-        step_id = step_id.removeprefix("STEP#")
+        parsed = self._parse_feedback_id(feedback_id)
+        if parsed is None:
+            return False
+        thread_id, step_id = parsed
 
         self.client.update_item(
             TableName=self.table_name,
@@ -480,13 +503,123 @@ class DynamoDBDataLayer(BaseDataLayer):
             user_id=item.get("userId"), identifier=item.get("userIdentifier")
         )
 
-    async def _query_thread_items(self, thread_id: str) -> List[Dict[str, Any]]:
+    async def get_thread_grant(
+        self, thread_id: str, grantee_user_id: str
+    ) -> Optional[ThreadGrant]:
+        # Quiet lookup: the grantee id must not reach the logs.
+        response = self.client.get_item(
+            TableName=self.table_name,
+            Key={
+                "PK": {"S": f"THREAD#{thread_id}"},
+                "SK": {"S": f"GRANT#{grantee_user_id}"},
+            },
+            ConsistentRead=True,
+        )
+
+        if "Item" not in response:
+            return None
+
+        item = self._deserialize_item(response["Item"])
+        if item.get("role") != "read" or not item.get("granteeUserCreatedAt"):
+            return None
+        return self._grant_from_item(item)
+
+    async def list_thread_grants(self, thread_id: str) -> List[ThreadGrant]:
+        items = await self._query_thread_items(thread_id, sk_prefix="GRANT#")
+        return [self._grant_from_item(self._deserialize_item(item)) for item in items]
+
+    async def create_thread_grant(self, grant: ThreadGrant) -> None:
+        item = {
+            "PK": f"THREAD#{grant.thread_id}",
+            "SK": f"GRANT#{grant.grantee_user_id}",
+            "granteeUserCreatedAt": grant.grantee_user_created_at,
+            "granteeIdentifier": grant.grantee_identifier,
+            "grantedByUserId": grant.granted_by_user_id,
+            "grantedAt": grant.granted_at,
+            "role": grant.role,
+        }
+        try:
+            self.client.put_item(
+                TableName=self.table_name,
+                Item=self._serialize_item(item),
+                ConditionExpression="attribute_not_exists(PK)",
+            )
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != (
+                "ConditionalCheckFailedException"
+            ):
+                raise
+            # A duplicate grant keeps the first generation: no-op.
+            return
+
+    async def delete_thread_grant(self, thread_id: str, grantee_user_id: str) -> bool:
+        response = self.client.delete_item(
+            TableName=self.table_name,
+            Key={
+                "PK": {"S": f"THREAD#{thread_id}"},
+                "SK": {"S": f"GRANT#{grantee_user_id}"},
+            },
+            ReturnValues="ALL_OLD",
+        )
+        return "Attributes" in response
+
+    @staticmethod
+    def _grant_from_item(item: Dict[str, Any]) -> ThreadGrant:
+        return ThreadGrant(
+            thread_id=str(item["PK"]).removeprefix("THREAD#"),
+            grantee_user_id=str(item["SK"]).removeprefix("GRANT#"),
+            grantee_user_created_at=str(item["granteeUserCreatedAt"]),
+            grantee_identifier=str(item["granteeIdentifier"]),
+            granted_by_user_id=str(item["grantedByUserId"]),
+            granted_at=str(item["grantedAt"]),
+            role=str(item["role"]),
+        )
+
+    async def _delete_thread_grants(self, thread_id: str) -> None:
+        grant_items = await self._query_thread_items(thread_id, sk_prefix="GRANT#")
+        keys = [{"PK": item["PK"], "SK": item["SK"]} for item in grant_items]
+        if keys:
+            await self._batch_delete_items(keys)
+
+    async def get_feedback_thread_id(self, feedback_id: str) -> FeedbackThreadLookup:
+        # Dynamo has no client-keyed feedback row: the id is the key space.
+        parsed = self._parse_feedback_id(feedback_id)
+        if parsed is None:
+            return FeedbackThreadLookup(status="not_found")
+        return FeedbackThreadLookup(status="found", thread_id=parsed[0])
+
+    async def step_belongs_to_thread(self, thread_id: str, step_id: str) -> bool:
+        try:
+            response = self.client.get_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"THREAD#{thread_id}"},
+                    "SK": {"S": f"STEP#{step_id}"},
+                },
+                ProjectionExpression="PK",
+                ConsistentRead=True,
+            )
+        except Exception:
+            _logger.warning("DynamoDB: step owner lookup failed thread=%s", thread_id)
+            return False
+        return "Item" in response
+
+    async def _query_thread_items(
+        self, thread_id: str, sk_prefix: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
+        names = {"#pk": "PK"}
+        values = {":pk": {"S": f"THREAD#{thread_id}"}}
+        condition = "#pk = :pk"
+        if sk_prefix:
+            condition += " AND begins_with(#sk, :sk)"
+            names["#sk"] = "SK"
+            values[":sk"] = {"S": sk_prefix}
         query_args: Dict[str, Any] = {
             "TableName": self.table_name,
-            "KeyConditionExpression": "#pk = :pk",
-            "ExpressionAttributeNames": {"#pk": "PK"},
-            "ExpressionAttributeValues": {":pk": {"S": f"THREAD#{thread_id}"}},
+            "KeyConditionExpression": condition,
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": values,
             "ConsistentRead": True,
         }
         while True:
@@ -651,6 +784,10 @@ class DynamoDBDataLayer(BaseDataLayer):
             )
 
         for item in response["Items"]:
+            # Only the THREAD marker is a thread row; a stale GSI-shaped
+            # SHARED# shadow must not be parsed as one.
+            if item.get("SK", {}).get("S") != "THREAD":
+                continue
             deserialized_item: Dict[str, Any] = self._deserialize_item(item)
             thread = ThreadDict(  # type: ignore
                 id=deserialized_item["PK"].removeprefix("THREAD#"),
@@ -747,6 +884,25 @@ class DynamoDBDataLayer(BaseDataLayer):
 
         if metadata is None:
             metadata = {}
+
+        # An ownership change invalidates every grant (M3: user_id=None deletes
+        # nothing). Delete grants before the owner write: if the cleanup fails,
+        # the old owner keeps the thread instead of a stale grant surviving a
+        # successful ownership flip.
+        if user_id is not None:
+            stored = self.client.get_item(
+                TableName=self.table_name,
+                Key={
+                    "PK": {"S": f"THREAD#{thread_id}"},
+                    "SK": {"S": "THREAD"},
+                },
+                ProjectionExpression="userId",
+                ConsistentRead=True,
+            )
+            if "Item" in stored:
+                stored_owner = self._deserialize_item(stored["Item"]).get("userId")
+                if stored_owner is None or str(stored_owner) != str(user_id):
+                    await self._delete_thread_grants(thread_id)
 
         ts = self._get_current_timestamp()
 

@@ -23,11 +23,13 @@ from chainlit.data.acl import (
     authorize_thread_read,
 )
 from chainlit.data.base import BaseDataLayer
+from chainlit.data.dynamodb import DynamoDBDataLayer
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.server import app
 from chainlit.session import WebsocketSession
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
+    Feedback,
     FeedbackThreadLookup,
     PageInfo,
     PaginatedResponse,
@@ -36,6 +38,7 @@ from chainlit.types import (
     ThreadOwner,
 )
 from chainlit.user import PersistedUser, User
+from tests.data.test_dynamodb import FakeDynamoDB
 
 ALICE = PersistedUser(
     id="alice-id", identifier="alice", createdAt="2026-01-01T00:00:00Z"
@@ -1571,6 +1574,352 @@ class TestSqlThreadGrants:
         assert rename.status_code == 200, rename.text
         assert "quiet-grantee@example.com" not in caplog.text
         assert alice.id not in caplog.text
+
+
+class TestDynamoThreadGrants:
+    async def test_dynamo_grantee_reads_the_share_route(
+        self, client, monkeypatch: pytest.MonkeyPatch
+    ):
+        """S3 after S1 without S2: the grant branch is layer-independent."""
+        monkeypatch.setattr(config.features, "thread_grants", True)
+        monkeypatch.setattr("chainlit.server.require_login", lambda: True)
+        thread_marker = {
+            "PK": {"S": "THREAD#thread-1"},
+            "SK": {"S": "THREAD"},
+            "id": {"S": "thread-1"},
+            "createdAt": {"S": "2026-01-01T00:00:00Z"},
+            "name": {"S": "thread-1"},
+            "userId": {"S": ALICE.id},
+            "userIdentifier": {"S": ALICE.identifier},
+            "metadata": {"M": {}},
+        }
+        step = {
+            "PK": {"S": "THREAD#thread-1"},
+            "SK": {"S": "STEP#step-1"},
+            "id": {"S": "step-1"},
+            "createdAt": {"S": "2026-01-01T00:00:01Z"},
+        }
+        element = {
+            "PK": {"S": "THREAD#thread-1"},
+            "SK": {"S": "ELEMENT#element-1"},
+            "id": {"S": "element-1"},
+            "objectKey": {"S": "alice/thread-1/element-1"},
+            "url": {"S": "https://files.example/element-1"},
+        }
+        grants = {
+            f"GRANT#{BOB.id}": {
+                "PK": {"S": "THREAD#thread-1"},
+                "SK": {"S": f"GRANT#{BOB.id}"},
+                "granteeUserCreatedAt": {"S": BOB.createdAt},
+                "granteeIdentifier": {"S": BOB.identifier},
+                "grantedByUserId": {"S": ALICE.id},
+                "grantedAt": {"S": "2026-01-02T00:00:00Z"},
+                "role": {"S": "read"},
+            }
+        }
+
+        def get_item(**kwargs):
+            key = kwargs["Key"]
+            if key["SK"] == {"S": "THREAD"}:
+                return {"Item": thread_marker}
+            item = grants.get(key["SK"]["S"])
+            return {"Item": item} if item is not None else {}
+
+        def delete_item(TableName, Key, ReturnValues=None):
+            item = grants.pop(Key["SK"]["S"], None)
+            return {"Attributes": item} if item is not None else {}
+
+        dynamo = Mock()
+        dynamo.query.return_value = {"Items": [thread_marker, step, element]}
+        dynamo.get_item.side_effect = get_item
+        dynamo.delete_item.side_effect = delete_item
+        layer = DynamoDBDataLayer(table_name="test-table", client=dynamo)
+
+        with (
+            patch("chainlit.server.get_data_layer", return_value=layer),
+            patch("chainlit.data.acl.get_data_layer", return_value=layer),
+        ):
+            as_user(BOB)
+            granted = client.get("/project/share/thread-1")
+            assert granted.status_code == 200, granted.text
+            body = granted.json()
+            assert body["userId"] is None
+            assert body["userIdentifier"] is None
+            for key in ("PK", "SK", "UserThreadPK", "UserThreadSK"):
+                assert key not in body
+            for public_step in body["steps"]:
+                assert "PK" not in public_step
+                assert "SK" not in public_step
+            for public_element in body["elements"]:
+                for key in ("PK", "SK", "objectKey"):
+                    assert key not in public_element
+                assert public_element["url"] == "https://files.example/element-1"
+
+            grant_key = f"GRANT#{BOB.id}"
+            for mutation in (
+                {"granteeUserCreatedAt": {"S": "2020-01-01T00:00:00Z"}},
+                {"role": {"S": "write"}},
+            ):
+                original = dict(grants[grant_key])
+                grants[grant_key].update(mutation)
+                as_user(BOB)
+                assert client.get("/project/share/thread-1").status_code == 404
+                grants[grant_key].clear()
+                grants[grant_key].update(original)
+
+            original = dict(grants.pop(grant_key))
+            as_user(BOB)
+            assert client.get("/project/share/thread-1").status_code == 404
+            grants[grant_key] = original
+
+            as_user(ALICE)
+            revoked = client.delete(f"/project/thread/thread-1/grants/{BOB.id}")
+            assert revoked.status_code == 200, revoked.text
+
+            as_user(BOB)
+            assert client.get("/project/share/thread-1").status_code == 404
+
+
+def _dynamo_thread_item(thread_id: str, user: PersistedUser) -> dict:
+    return {
+        "PK": {"S": f"THREAD#{thread_id}"},
+        "SK": {"S": "THREAD"},
+        "UserThreadPK": {"S": f"USER#{user.id}"},
+        "UserThreadSK": {"S": "TS#2026-01-01T00:00:00"},
+        "id": {"S": thread_id},
+        "createdAt": {"S": "2026-01-01T00:00:00Z"},
+        "name": {"S": thread_id},
+        "userId": {"S": user.id},
+        "userIdentifier": {"S": user.identifier},
+        "metadata": {"M": {}},
+    }
+
+
+def _dynamo_step_item(thread_id: str, step_id: str) -> dict:
+    return {
+        "PK": {"S": f"THREAD#{thread_id}"},
+        "SK": {"S": f"STEP#{step_id}"},
+        "id": {"S": step_id},
+        "createdAt": {"S": "2026-01-01T00:00:01Z"},
+    }
+
+
+def _stored_dynamo_feedback(client, thread_id: str, step_id: str) -> dict:
+    for item in client.items:
+        if item["PK"] == {"S": f"THREAD#{thread_id}"} and item["SK"] == {
+            "S": f"STEP#{step_id}"
+        }:
+            return item.get("feedback", {}).get("M", {})
+    raise AssertionError("step item not found")
+
+
+@pytest.fixture
+def dynamo_feedback_active(monkeypatch: pytest.MonkeyPatch):
+    items = [
+        _dynamo_thread_item("thread-1", ALICE),
+        _dynamo_step_item("thread-1", "step-1"),
+        _dynamo_thread_item("thread-2", BOB),
+        _dynamo_step_item("thread-2", "step-2"),
+    ]
+    client = FakeDynamoDB(items)
+    layer = DynamoDBDataLayer(
+        table_name="test-table",
+        client=client,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(config.features, "thread_grants", True)
+    monkeypatch.setattr("chainlit.server.require_login", lambda: True)
+    with (
+        patch("chainlit.server.get_data_layer", return_value=layer),
+        patch("chainlit.data.acl.get_data_layer", return_value=layer),
+    ):
+        yield layer, client
+
+
+class TestDynamoFeedbackH1:
+    async def _put(self, client, user, thread_id, feedback):
+        as_user(user)
+        with patch(
+            "chainlit.session.WebsocketSession.get_by_id",
+            return_value=_websocket_session(user, thread_id),
+        ):
+            return client.put(
+                "/feedback",
+                json={
+                    "sessionId": f"{user.identifier}-session",
+                    "feedback": feedback,
+                },
+            )
+
+    async def test_a_victim_feedback_id_is_denied_and_unchanged(
+        self, client, dynamo_feedback_active
+    ):
+        layer, dynamo = dynamo_feedback_active
+        await layer.upsert_feedback(
+            Feedback(forId="step-1", value=1, threadId="thread-1")
+        )
+
+        response = await self._put(
+            client,
+            BOB,
+            "thread-2",
+            {
+                "id": "THREAD#thread-1::STEP#step-1",
+                "forId": "step-2",
+                "value": 0,
+                "threadId": "thread-2",
+            },
+        )
+
+        assert response.status_code == 404
+        assert _stored_dynamo_feedback(dynamo, "thread-1", "step-1")["value"] == {
+            "N": "1"
+        }
+
+    async def test_a_feedback_without_a_thread_is_denied(
+        self, client, dynamo_feedback_active
+    ):
+        layer, dynamo = dynamo_feedback_active
+        await layer.upsert_feedback(
+            Feedback(forId="step-1", value=1, threadId="thread-1")
+        )
+
+        response = await self._put(
+            client,
+            BOB,
+            "thread-2",
+            {
+                "id": "THREAD#thread-1::STEP#step-1",
+                "forId": "step-2",
+                "value": 0,
+                "threadId": None,
+            },
+        )
+
+        assert response.status_code == 404
+        assert _stored_dynamo_feedback(dynamo, "thread-1", "step-1")["value"] == {
+            "N": "1"
+        }
+
+    async def test_a_lookup_error_is_denied(
+        self, client, dynamo_feedback_active, monkeypatch: pytest.MonkeyPatch
+    ):
+        layer, _ = dynamo_feedback_active
+
+        async def failing_lookup(_feedback_id):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(layer, "get_feedback_thread_id", failing_lookup)
+
+        response = await self._put(
+            client,
+            BOB,
+            "thread-2",
+            {
+                "id": "THREAD#thread-1::STEP#step-1",
+                "forId": "step-2",
+                "value": 0,
+                "threadId": "thread-2",
+            },
+        )
+
+        assert response.status_code == 404
+
+    async def test_a_step_outside_the_thread_is_denied(
+        self, client, dynamo_feedback_active
+    ):
+        layer, dynamo = dynamo_feedback_active
+        await layer.upsert_feedback(
+            Feedback(forId="step-1", value=1, threadId="thread-1")
+        )
+
+        response = await self._put(
+            client,
+            BOB,
+            "thread-2",
+            {"forId": "step-1", "value": 0, "threadId": "thread-2"},
+        )
+
+        assert response.status_code == 404
+        assert _stored_dynamo_feedback(dynamo, "thread-1", "step-1")["value"] == {
+            "N": "1"
+        }
+
+    async def test_the_owner_can_write_their_own_feedback(
+        self, client, dynamo_feedback_active
+    ):
+        _, dynamo = dynamo_feedback_active
+
+        response = await self._put(
+            client,
+            ALICE,
+            "thread-1",
+            {"forId": "step-1", "value": 1, "threadId": "thread-1"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["feedbackId"] == "THREAD#thread-1::STEP#step-1"
+        assert _stored_dynamo_feedback(dynamo, "thread-1", "step-1")["value"] == {
+            "N": "1"
+        }
+
+    async def test_delete_of_a_malformed_feedback_id_is_a_no_op(
+        self, client, dynamo_feedback_active
+    ):
+        layer, dynamo = dynamo_feedback_active
+        await layer.upsert_feedback(
+            Feedback(forId="step-1", value=1, threadId="thread-1")
+        )
+        as_user(ALICE)
+
+        response = client.request(
+            "DELETE",
+            "/feedback",
+            json={"feedbackId": "THREAD#thread-1::STEP#step-1::STEP#step-2"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"success": True}
+        assert _stored_dynamo_feedback(dynamo, "thread-1", "step-1")["value"] == {
+            "N": "1"
+        }
+
+    async def test_delete_of_a_foreign_feedback_is_a_no_op(
+        self, client, dynamo_feedback_active
+    ):
+        layer, dynamo = dynamo_feedback_active
+        await layer.upsert_feedback(
+            Feedback(forId="step-1", value=1, threadId="thread-1")
+        )
+
+        as_user(BOB)
+        response = client.request(
+            "DELETE",
+            "/feedback",
+            json={"feedbackId": "THREAD#thread-1::STEP#step-1"},
+        )
+
+        assert response.status_code == 200
+        assert _stored_dynamo_feedback(dynamo, "thread-1", "step-1")["value"] == {
+            "N": "1"
+        }
+
+    async def test_delete_of_the_owners_feedback_removes_it(
+        self, client, dynamo_feedback_active
+    ):
+        layer, dynamo = dynamo_feedback_active
+        await layer.upsert_feedback(
+            Feedback(forId="step-1", value=1, threadId="thread-1")
+        )
+
+        as_user(ALICE)
+        response = client.request(
+            "DELETE",
+            "/feedback",
+            json={"feedbackId": "THREAD#thread-1::STEP#step-1"},
+        )
+
+        assert response.status_code == 200
+        assert "feedback" not in _stored_dynamo_feedback(dynamo, "thread-1", "step-1")
 
 
 class TestSqlFeedbackH1:
