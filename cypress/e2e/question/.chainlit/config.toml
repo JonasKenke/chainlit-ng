@@ -1,0 +1,11 @@
+[project]
+allow_origins = ["*"]
+
+[UI]
+name = "Assistant"
+
+# The question card must render even when all CoT steps are hidden.
+cot = "hidden"
+
+[meta]
+generated_by = "2.12.0"
