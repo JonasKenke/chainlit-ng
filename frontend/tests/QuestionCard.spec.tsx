@@ -3,7 +3,7 @@ import { MessageContext } from 'contexts/MessageContext';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ChainlitContext } from '@chainlit/react-client';
+import { ChainlitContext, type IQuestion } from '@chainlit/react-client';
 
 import { QuestionCard } from '@/components/chat/Questions/QuestionCard';
 
@@ -23,12 +23,12 @@ vi.mock('@chainlit/react-client', async () => {
   };
 });
 
-const question = {
-  kind: 'question' as const,
+const question: IQuestion = {
+  kind: 'question',
   id: 'question-1',
   stepId: 'step-1',
   threadId: 'thread-1',
-  status: 'pending' as const,
+  status: 'pending',
   prompt: 'Which environment?',
   options: [
     { id: 'staging', label: 'Staging', description: 'Pre-production' },
@@ -66,6 +66,16 @@ describe('QuestionCard', () => {
     expect(
       screen.queryByRole('button', { name: 'Approve' })
     ).not.toBeInTheDocument();
+  });
+
+  it('renders every option from the typed option list', () => {
+    renderCard();
+
+    for (const { id, label } of question.options) {
+      expect(
+        screen.getByRole('radio', { name: new RegExp(label) })
+      ).toHaveAttribute('value', id);
+    }
   });
 
   it('submits the selected server option id', async () => {

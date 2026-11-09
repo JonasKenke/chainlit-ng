@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   ChainlitContext,
   IQuestion,
+  IQuestionOption,
   useChainlitStore,
   useSetChainlitState
 } from '@chainlit/react-client';
@@ -100,7 +101,7 @@ export const QuestionCard = ({ question }: Props) => {
                 Options
               </legend>
               <div className="mt-1 flex flex-col gap-2">
-                {question.options.map((option) => {
+                {question.options.map((option: IQuestionOption) => {
                   const descriptionId = option.description
                     ? `question-${question.id}-${option.id}-description`
                     : undefined;
