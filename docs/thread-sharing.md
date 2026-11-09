@@ -86,6 +86,44 @@ the grants on those threads. Calling `update_thread` without an owner (the
 normal step-write path) leaves grants alone; changing the owner of a thread
 deletes them.
 
+## DynamoDBDataLayer
+
+`DynamoDBDataLayer` supports grants without a new table or index. A grant is one
+item in the thread partition:
+
+```
+PK                   = THREAD#<thread_id>
+SK                   = GRANT#<grantee_user_id>
+granteeUserCreatedAt = <grantee PersistedUser.createdAt at grant time>
+granteeIdentifier    = <identifier>
+grantedByUserId      = <owner PersistedUser.id>
+grantedAt            = <ISO-8601>
+role                 = "read"
+```
+
+Lookup is one `GetItem` with `ConsistentRead=True`, so a revoke is visible on
+the next request. A revoke is one `DeleteItem`, the grant list is one partition
+query, and the feedback and step checks are point reads; nothing scans the
+table. Grant items carry no `UserThreadPK`, so they never appear in a
+`UserThread` list.
+
+Deleting a thread deletes every item in its partition, grants included; deleting
+all of a user's threads does the same for each owned thread. `update_thread`
+without an owner (the normal step-write path) leaves grants alone; changing the
+owner deletes them.
+
+Shared threads are not listed: the Dynamo thread list is built from the
+`UserThread` GSI and a grant adds no `UserThread` row. A grantee reaches a
+shared thread only through `/project/share/{id}`. A stale `SHARED#` item is
+ignored by both the list and `get_thread`. Operator query for a thread's grants:
+
+```bash
+aws dynamodb query --table-name <table> \
+  --key-condition-expression "PK = :pk AND begins_with(SK, :sk)" \
+  --expression-attribute-values '{":pk":{"S":"THREAD#<thread_id>"},":sk":{"S":"GRANT#"}}' \
+  --consistent-read
+```
+
 ## Custom data layers
 
 A custom `BaseDataLayer` can opt in by implementing and then advertising:

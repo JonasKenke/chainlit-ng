@@ -23,6 +23,7 @@ from chainlit.data.acl import (
     authorize_thread_read,
 )
 from chainlit.data.base import BaseDataLayer
+from chainlit.data.dynamodb import DynamoDBDataLayer
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.server import app
 from chainlit.session import WebsocketSession
@@ -1571,6 +1572,96 @@ class TestSqlThreadGrants:
         assert rename.status_code == 200, rename.text
         assert "quiet-grantee@example.com" not in caplog.text
         assert alice.id not in caplog.text
+
+
+class TestDynamoThreadGrants:
+    async def test_dynamo_grantee_reads_the_share_route(
+        self, client, monkeypatch: pytest.MonkeyPatch
+    ):
+        """S3 after S1 without S2: the grant branch is layer-independent."""
+        monkeypatch.setattr(config.features, "thread_grants", True)
+        monkeypatch.setattr("chainlit.server.require_login", lambda: True)
+        thread_marker = {
+            "PK": {"S": "THREAD#thread-1"},
+            "SK": {"S": "THREAD"},
+            "id": {"S": "thread-1"},
+            "createdAt": {"S": "2026-01-01T00:00:00Z"},
+            "name": {"S": "thread-1"},
+            "userId": {"S": ALICE.id},
+            "userIdentifier": {"S": ALICE.identifier},
+            "metadata": {"M": {}},
+        }
+        step = {
+            "PK": {"S": "THREAD#thread-1"},
+            "SK": {"S": "STEP#step-1"},
+            "id": {"S": "step-1"},
+            "createdAt": {"S": "2026-01-01T00:00:01Z"},
+        }
+        grants = {
+            f"GRANT#{BOB.id}": {
+                "PK": {"S": "THREAD#thread-1"},
+                "SK": {"S": f"GRANT#{BOB.id}"},
+                "granteeUserCreatedAt": {"S": BOB.createdAt},
+                "granteeIdentifier": {"S": BOB.identifier},
+                "grantedByUserId": {"S": ALICE.id},
+                "grantedAt": {"S": "2026-01-02T00:00:00Z"},
+                "role": {"S": "read"},
+            }
+        }
+
+        def get_item(**kwargs):
+            key = kwargs["Key"]
+            if key["SK"] == {"S": "THREAD"}:
+                return {"Item": thread_marker}
+            item = grants.get(key["SK"]["S"])
+            return {"Item": item} if item is not None else {}
+
+        def delete_item(TableName, Key, ReturnValues=None):
+            item = grants.pop(Key["SK"]["S"], None)
+            return {"Attributes": item} if item is not None else {}
+
+        dynamo = Mock()
+        dynamo.query.return_value = {"Items": [thread_marker, step]}
+        dynamo.get_item.side_effect = get_item
+        dynamo.delete_item.side_effect = delete_item
+        layer = DynamoDBDataLayer(table_name="test-table", client=dynamo)
+
+        with (
+            patch("chainlit.server.get_data_layer", return_value=layer),
+            patch("chainlit.data.acl.get_data_layer", return_value=layer),
+        ):
+            as_user(BOB)
+            granted = client.get("/project/share/thread-1")
+            assert granted.status_code == 200, granted.text
+            body = granted.json()
+            assert body["userId"] is None
+            assert body["userIdentifier"] is None
+            for key in ("PK", "SK", "UserThreadPK", "UserThreadSK"):
+                assert key not in body
+
+            grant_key = f"GRANT#{BOB.id}"
+            for mutation in (
+                {"granteeUserCreatedAt": {"S": "2020-01-01T00:00:00Z"}},
+                {"role": {"S": "write"}},
+            ):
+                original = dict(grants[grant_key])
+                grants[grant_key].update(mutation)
+                as_user(BOB)
+                assert client.get("/project/share/thread-1").status_code == 404
+                grants[grant_key].clear()
+                grants[grant_key].update(original)
+
+            original = dict(grants.pop(grant_key))
+            as_user(BOB)
+            assert client.get("/project/share/thread-1").status_code == 404
+            grants[grant_key] = original
+
+            as_user(ALICE)
+            revoked = client.delete(f"/project/thread/thread-1/grants/{BOB.id}")
+            assert revoked.status_code == 200, revoked.text
+
+            as_user(BOB)
+            assert client.get("/project/share/thread-1").status_code == 404
 
 
 class TestSqlFeedbackH1:

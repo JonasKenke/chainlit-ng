@@ -6,14 +6,16 @@ only, never the characters the identifier happens to end with.
 """
 
 import logging
+import re
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from chainlit.data.dynamodb import DynamoDBDataLayer
 from chainlit.data.storage_clients.base import BaseStorageClient
-from chainlit.types import Pagination, ThreadFilter
+from chainlit.types import FeedbackThreadLookup, Pagination, ThreadFilter, ThreadGrant
 
 
 def _make_layer(items=None):
@@ -131,6 +133,17 @@ class FakeDynamoDB:
         self.stale_gsi_items = list(stale_gsi_items)
         self.batch_sizes = []
         self.query_kwargs = []
+        self.get_item_kwargs = []
+        self.put_item_kwargs = []
+        self.delete_item_kwargs = []
+        self.update_kwargs = []
+        self.scan_calls = []
+
+    def _find(self, key):
+        for item in self.items:
+            if item["PK"] == key["PK"] and item["SK"] == key["SK"]:
+                return item
+        return None
 
     def _page(self, matched, exclusive_start_key):
         start = 0
@@ -159,6 +172,11 @@ class FakeDynamoDB:
             ]
         else:
             matched = [item for item in self.items if item["PK"]["S"] == pk]
+            if "begins_with" in kwargs["KeyConditionExpression"]:
+                prefix = kwargs["ExpressionAttributeValues"][":sk"]["S"]
+                matched = [
+                    item for item in matched if item["SK"]["S"].startswith(prefix)
+                ]
         return self._page(matched, kwargs.get("ExclusiveStartKey"))
 
     def batch_write_item(self, RequestItems):
@@ -177,13 +195,60 @@ class FakeDynamoDB:
             ]
         return {"UnprocessedItems": {table: unprocessed}} if unprocessed else {}
 
-    def delete_item(self, TableName, Key):
-        self.items = [
-            item
-            for item in self.items
-            if not (item["PK"] == Key["PK"] and item["SK"] == Key["SK"])
-        ]
+    def delete_item(self, TableName, Key, ReturnValues=None):
+        self.delete_item_kwargs.append({"Key": Key, "ReturnValues": ReturnValues})
+        item = self._find(Key)
+        if item is not None:
+            self.items.remove(item)
+        if ReturnValues == "ALL_OLD" and item is not None:
+            return {"Attributes": item}
         return {}
+
+    def get_item(self, **kwargs):
+        self.get_item_kwargs.append(kwargs)
+        item = self._find(kwargs["Key"])
+        return {"Item": item} if item is not None else {}
+
+    def put_item(self, TableName, Item, ConditionExpression=None):
+        self.put_item_kwargs.append(
+            {"Item": Item, "ConditionExpression": ConditionExpression}
+        )
+        existing = self._find(Item)
+        if ConditionExpression == "attribute_not_exists(PK)" and existing is not None:
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "ConditionalCheckFailedException",
+                        "Message": "item exists",
+                    }
+                },
+                "PutItem",
+            )
+        if existing is not None:
+            self.items.remove(existing)
+        self.items.append(dict(Item))
+
+    def update_item(
+        self,
+        TableName,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeNames,
+        ExpressionAttributeValues,
+        **kwargs,
+    ):
+        self.update_kwargs.append({"Key": Key, "Expression": UpdateExpression})
+        item = self._find(Key)
+        if item is None:
+            item = dict(Key)
+            self.items.append(item)
+        for name, value in re.findall(r"(#\w+) = (:\w+)", UpdateExpression):
+            item[ExpressionAttributeNames[name]] = ExpressionAttributeValues[value]
+        return {}
+
+    def scan(self, **kwargs):
+        self.scan_calls.append(kwargs)
+        return {"Items": []}
 
 
 def _thread_item(thread_id, user_id):
@@ -460,3 +525,302 @@ async def test_delete_thread_keeps_items_when_a_storage_delete_fails():
         await layer.delete_thread("target-thread-0")
 
     assert client.items == original_items
+
+
+def _grant(
+    thread_id: str = "thread-1",
+    grantee_user_id: str = "bob-id",
+    grantee_user_created_at: str = "2026-01-01T00:00:00Z",
+    role: str = "read",
+) -> ThreadGrant:
+    return ThreadGrant(
+        thread_id=thread_id,
+        grantee_user_id=grantee_user_id,
+        grantee_user_created_at=grantee_user_created_at,
+        grantee_identifier="bob",
+        granted_by_user_id="alice-id",
+        granted_at="2026-01-02T00:00:00Z",
+        role=role,
+    )
+
+
+def _grant_item(
+    thread_id: str = "thread-1",
+    grantee_user_id: str = "bob-id",
+    grantee_user_created_at: str = "2026-01-01T00:00:00Z",
+    role: str = "read",
+) -> dict:
+    return {
+        "PK": {"S": f"THREAD#{thread_id}"},
+        "SK": {"S": f"GRANT#{grantee_user_id}"},
+        "granteeUserCreatedAt": {"S": grantee_user_created_at},
+        "granteeIdentifier": {"S": "bob"},
+        "grantedByUserId": {"S": "alice-id"},
+        "grantedAt": {"S": "2026-01-02T00:00:00Z"},
+        "role": {"S": role},
+    }
+
+
+def test_thread_grants_are_a_layer_capability():
+    layer, _ = _make_layer()
+
+    assert layer.thread_grants_supported is True
+    assert layer.feedback_authorization_supported is True
+
+
+@pytest.mark.asyncio
+async def test_thread_grant_crud():
+    layer, client = _make_delete_layer([_thread_item("thread-1", "user-1")])
+
+    await layer.create_thread_grant(_grant())
+
+    assert await layer.get_thread_grant("thread-1", "bob-id") == _grant()
+    assert await layer.list_thread_grants("thread-1") == [_grant()]
+
+    assert await layer.delete_thread_grant("thread-1", "bob-id") is True
+    assert await layer.get_thread_grant("thread-1", "bob-id") is None
+    assert await layer.list_thread_grants("thread-1") == []
+    assert await layer.delete_thread_grant("thread-1", "bob-id") is False
+    assert client.scan_calls == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_thread_grant_keeps_the_first_generation():
+    layer, _ = _make_delete_layer([])
+
+    await layer.create_thread_grant(_grant())
+    await layer.create_thread_grant(
+        _grant(grantee_user_created_at="2027-01-01T00:00:00Z")
+    )
+
+    stored = await layer.get_thread_grant("thread-1", "bob-id")
+    assert stored is not None
+    assert stored.grantee_user_created_at == "2026-01-01T00:00:00Z"
+    assert len(await layer.list_thread_grants("thread-1")) == 1
+
+
+@pytest.mark.asyncio
+async def test_thread_grant_lookup_is_scoped():
+    layer, _ = _make_delete_layer([])
+    await layer.create_thread_grant(_grant())
+
+    assert await layer.get_thread_grant("thread-1", "carol-id") is None
+    assert await layer.get_thread_grant("thread-2", "bob-id") is None
+
+
+@pytest.mark.asyncio
+async def test_thread_grant_lookup_denies_a_non_read_role():
+    layer, _ = _make_delete_layer([])
+    await layer.create_thread_grant(_grant(role="write"))
+
+    assert await layer.get_thread_grant("thread-1", "bob-id") is None
+
+
+@pytest.mark.asyncio
+async def test_thread_grant_lookup_denies_a_missing_generation():
+    layer, client = _make_delete_layer([])
+    item = _grant_item()
+    del item["granteeUserCreatedAt"]
+    client.items.append(item)
+
+    assert await layer.get_thread_grant("thread-1", "bob-id") is None
+
+
+@pytest.mark.asyncio
+async def test_thread_grant_item_stays_in_the_thread_partition():
+    layer, client = _make_delete_layer([])
+
+    await layer.create_thread_grant(_grant())
+
+    item = client.items[0]
+    assert item["PK"] == {"S": "THREAD#thread-1"}
+    assert item["SK"] == {"S": "GRANT#bob-id"}
+    assert item["granteeUserCreatedAt"] == {"S": "2026-01-01T00:00:00Z"}
+    assert item["role"] == {"S": "read"}
+    assert "UserThreadPK" not in item
+    assert "UserThreadSK" not in item
+
+
+@pytest.mark.asyncio
+async def test_thread_grant_lookup_is_one_consistent_get_item():
+    layer, client = _make_layer()
+    client.get_item.return_value = {"Item": _grant_item()}
+
+    assert await layer.get_thread_grant("thread-1", "bob-id") == _grant()
+
+    assert client.get_item.call_count == 1
+    assert client.get_item.call_args.kwargs["Key"] == {
+        "PK": {"S": "THREAD#thread-1"},
+        "SK": {"S": "GRANT#bob-id"},
+    }
+    assert client.get_item.call_args.kwargs["ConsistentRead"] is True
+    assert client.delete_item.call_count == 0
+    assert client.scan.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_revoke_is_one_delete_item():
+    layer, client = _make_layer()
+    client.delete_item.return_value = {"Attributes": _grant_item()}
+
+    assert await layer.delete_thread_grant("thread-1", "bob-id") is True
+
+    assert client.delete_item.call_count == 1
+    assert client.delete_item.call_args.kwargs["ReturnValues"] == "ALL_OLD"
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_removes_its_grants_and_is_idempotent():
+    layer, client = _make_delete_layer(
+        [
+            _thread_item("thread-1", "user-1"),
+            _step_item("thread-1", "step-1"),
+        ]
+    )
+    await layer.create_thread_grant(_grant())
+
+    await layer.delete_thread("thread-1")
+
+    assert await layer.list_thread_grants("thread-1") == []
+    assert client.items == []
+
+    await layer.delete_thread("thread-1")
+    assert client.items == []
+
+
+@pytest.mark.asyncio
+async def test_delete_all_threads_removes_only_the_owners_grants():
+    layer, _ = _make_delete_layer(
+        [
+            _thread_item("alice-thread", "alice-id"),
+            _thread_item("bob-thread", "bob-id"),
+        ]
+    )
+    await layer.create_thread_grant(_grant(thread_id="alice-thread"))
+    await layer.create_thread_grant(_grant(thread_id="bob-thread"))
+
+    assert await layer.delete_all_threads("alice-id") == 1
+
+    assert await layer.list_thread_grants("alice-thread") == []
+    assert await layer.list_thread_grants("bob-thread") == [
+        _grant(thread_id="bob-thread")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_grantee_clear_all_leaves_the_owners_thread_and_grant():
+    layer, client = _make_delete_layer([_thread_item("alice-thread", "alice-id")])
+    await layer.create_thread_grant(
+        _grant(thread_id="alice-thread", grantee_user_id="bob-id")
+    )
+
+    assert await layer.delete_all_threads("bob-id") == 0
+
+    assert any(item["SK"] == {"S": "THREAD"} for item in client.items)
+    assert await layer.list_thread_grants("alice-thread") == [
+        _grant(thread_id="alice-thread", grantee_user_id="bob-id")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_thread_without_an_owner_keeps_grants():
+    layer, _ = _make_delete_layer([_thread_item("thread-1", "user-1")])
+    await layer.update_thread("thread-1", user_id="alice-id")
+    await layer.create_thread_grant(_grant())
+
+    await layer.update_thread("thread-1", name="renamed")
+
+    assert await layer.list_thread_grants("thread-1") == [_grant()]
+
+
+@pytest.mark.asyncio
+async def test_update_thread_owner_change_removes_grants():
+    layer, _ = _make_delete_layer([_thread_item("thread-1", "user-1")])
+    await layer.update_thread("thread-1", user_id="alice-id")
+    await layer.create_thread_grant(_grant())
+
+    await layer.update_thread("thread-1", user_id="alice-id")
+    assert await layer.list_thread_grants("thread-1") == [_grant()]
+
+    await layer.update_thread("thread-1", user_id="bob-id")
+    assert await layer.list_thread_grants("thread-1") == []
+
+
+@pytest.mark.asyncio
+async def test_get_feedback_thread_id_parses_the_key_without_a_read():
+    layer, client = _make_layer()
+
+    lookup = await layer.get_feedback_thread_id("THREAD#thread-1::STEP#step-1")
+
+    assert lookup == FeedbackThreadLookup(status="found", thread_id="thread-1")
+    assert client.mock_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "feedback_id",
+    [
+        "missing-feedback",
+        "THREAD#::STEP#step-1",
+        "THREAD#thread-1",
+        "thread-1::STEP#step-1",
+        "THREAD#thread-1::step-1",
+    ],
+)
+async def test_get_feedback_thread_id_parse_failure_is_not_found(feedback_id):
+    layer, _ = _make_layer()
+
+    assert await layer.get_feedback_thread_id(feedback_id) == FeedbackThreadLookup(
+        status="not_found"
+    )
+
+
+@pytest.mark.asyncio
+async def test_step_belongs_to_thread_is_one_consistent_get_item():
+    layer, client = _make_layer()
+    client.get_item.return_value = {"Item": {"PK": {"S": "THREAD#thread-1"}}}
+
+    assert await layer.step_belongs_to_thread("thread-1", "step-1") is True
+
+    assert client.get_item.call_count == 1
+    assert client.get_item.call_args.kwargs["Key"] == {
+        "PK": {"S": "THREAD#thread-1"},
+        "SK": {"S": "STEP#step-1"},
+    }
+    assert client.get_item.call_args.kwargs["ConsistentRead"] is True
+
+    client.get_item.return_value = {}
+    assert await layer.step_belongs_to_thread("thread-1", "step-2") is False
+
+
+@pytest.mark.asyncio
+async def test_step_belongs_to_thread_denies_on_error():
+    layer, client = _make_layer()
+    client.get_item.side_effect = RuntimeError("boom")
+
+    assert await layer.step_belongs_to_thread("thread-1", "step-1") is False
+
+
+@pytest.mark.asyncio
+async def test_list_and_get_thread_omit_a_stale_shared_item():
+    step = _step_item("thread-1", "step-1")
+    step["id"] = {"S": "step-1"}
+    step["createdAt"] = {"S": "2026-01-01T00:00:00"}
+    stale_shared = {
+        "PK": {"S": "THREAD#thread-1"},
+        "SK": {"S": "SHARED#bob-id"},
+        "sharedWithUserId": {"S": "bob-id"},
+    }
+    layer, _ = _make_delete_layer(
+        [_thread_item("thread-1", "user-1"), step, stale_shared], page_size=10
+    )
+
+    listed = await layer.list_threads(
+        Pagination(first=10), ThreadFilter(userId="user-1")
+    )
+    assert [thread["id"] for thread in listed.data] == ["thread-1"]
+
+    thread = await layer.get_thread("thread-1")
+    assert thread is not None
+    assert "sharedWithUserId" not in thread
+    assert [s["id"] for s in thread["steps"]] == ["step-1"]
