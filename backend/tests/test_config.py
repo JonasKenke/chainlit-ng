@@ -162,6 +162,18 @@ class TestUISettings:
     def test_config_template_documents_cot_display(self):
         assert '# cot_display = "list"' in DEFAULT_CONFIG_STR
 
+    def test_show_message_timestamps_defaults_to_false(self):
+        settings = UISettings(name="Assistant")
+        assert settings.show_message_timestamps is False
+        assert settings.model_dump()["show_message_timestamps"] is False
+
+    def test_show_message_timestamps_accepts_true(self):
+        settings = UISettings(name="Assistant", show_message_timestamps=True)
+        assert settings.model_dump()["show_message_timestamps"] is True
+
+    def test_config_template_documents_show_message_timestamps(self):
+        assert "# show_message_timestamps = false" in DEFAULT_CONFIG_STR
+
 
 class TestSpontaneousFileUploadDirectory:
     def test_default_is_unchanged(
