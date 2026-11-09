@@ -228,13 +228,18 @@ def _project_owner_steps(steps: Any) -> Any:
 
 
 def public_thread(
-    thread: Optional[ThreadDict], *, include_settings: bool = False
+    thread: Optional[ThreadDict],
+    *,
+    include_settings: bool = False,
+    include_owner: bool = True,
 ) -> Optional[ThreadDict]:
     """Copy a thread with only browser-visible metadata, preserving stored state.
 
     Args:
         thread: Internal thread returned by the data layer, or None.
         include_settings: Include profile and settings for an owner's chat view.
+        include_owner: Keep the owner identity. False also drops the DynamoDB
+            internal keys that carry the owner's identifier.
     """
     if thread is None:
         return None
@@ -249,6 +254,11 @@ def public_thread(
         **thread,
         "metadata": {key: value for key, value in metadata.items() if key in allowed},
     }
+    if not include_owner:
+        result["userId"] = None
+        result["userIdentifier"] = None
+        for key in ("PK", "SK", "UserThreadPK", "UserThreadSK"):
+            result.pop(key, None)
     if "steps" in thread:
         steps = thread.get("steps")
         result["steps"] = (

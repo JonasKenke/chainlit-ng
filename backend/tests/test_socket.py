@@ -307,6 +307,25 @@ class TestResumeThread:
             assert result is None
 
     @pytest.mark.asyncio
+    async def test_resume_thread_rejects_an_ownerless_row(self):
+        """An existing row with no owner is rejected, not guessed."""
+        mock_session = Mock(spec=WebsocketSession)
+        mock_session.user = Mock(identifier="user123")
+        mock_session.thread_id_to_resume = "thread_123"
+        mock_session.id = "session_123"
+
+        thread = {"userIdentifier": None, "metadata": {"is_shared": True}}
+        mock_data_layer = AsyncMock()
+        mock_data_layer.get_thread.return_value = thread
+
+        with patch("chainlit.socket.get_data_layer") as mock_get_dl:
+            mock_get_dl.return_value = mock_data_layer
+
+            result = await resume_thread(mock_session)
+
+            assert result is None
+
+    @pytest.mark.asyncio
     async def test_resume_thread_success(self, monkeypatch):
         """Test successful thread resumption."""
         from chainlit.user_session import user_sessions

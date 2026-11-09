@@ -22,6 +22,7 @@ from chainlit.chat_context import chat_context
 from chainlit.config import ChainlitConfig, config
 from chainlit.context import init_ws_context
 from chainlit.data import get_data_layer
+from chainlit.data.acl import ThreadAccess, authorize_thread_read
 from chainlit.logger import logger
 from chainlit.message import ErrorMessage, Message
 from chainlit.mode import MODE_PREFERENCES_METADATA_KEY
@@ -137,10 +138,10 @@ async def resume_thread(session: WebsocketSession):
     if not thread:
         return
 
-    author = thread.get("userIdentifier")
-    user_is_author = author == session.user.identifier
-
-    if user_is_author:
+    access = await authorize_thread_read(
+        session.thread_id_to_resume, session.user, thread=thread, data_layer=data_layer
+    )
+    if access == ThreadAccess.OWNER:
         await orphan_thread_approvals(
             thread, keep_generation=getattr(session, "generation", None)
         )
@@ -236,9 +237,13 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
         if thread_id:
             if data_layer := get_data_layer():
                 thread = await data_layer.get_thread(thread_id)
-                if thread and not (thread["userIdentifier"] == user.identifier):
-                    logger.error("Authorization for the thread failed.")
-                    raise ConnectionRefusedError("authorization failed")
+                if thread:
+                    access = await authorize_thread_read(
+                        thread_id, user, thread=thread, data_layer=data_layer
+                    )
+                    if access not in (ThreadAccess.OWNER, ThreadAccess.MISSING):
+                        logger.error("Authorization for the thread failed.")
+                        raise ConnectionRefusedError("authorization failed")
 
     # Session scoped function to emit to the client
     def emit_fn(event, data):

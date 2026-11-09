@@ -203,6 +203,26 @@ async def test_get_thread_author(test_user: User, data_layer: SQLAlchemyDataLaye
     assert author == persisted_user.identifier
 
 
+async def test_get_thread_owner(test_user: User, data_layer: SQLAlchemyDataLayer):
+    persisted_user = await data_layer.create_user(test_user)
+    assert persisted_user
+
+    await data_layer.update_thread("test_thread", user_id=persisted_user.id)
+    owner = await data_layer.get_thread_owner("test_thread")
+
+    assert owner is not None
+    assert owner.user_id == persisted_user.id
+    assert owner.identifier == persisted_user.identifier
+
+    await data_layer.update_thread("ownerless_thread")
+    ownerless = await data_layer.get_thread_owner("ownerless_thread")
+    assert ownerless is not None
+    assert ownerless.user_id is None
+    assert ownerless.identifier is None
+
+    assert await data_layer.get_thread_owner("nonexisting_thread") is None
+
+
 async def test_get_thread(test_user: User, data_layer: SQLAlchemyDataLayer):
     persisted_user = await data_layer.create_user(test_user)
     assert persisted_user

@@ -113,6 +113,11 @@ edit_message = true
 # Allow users to share threads (backend + UI). Requires an app-defined on_shared_thread_view callback.
 allow_thread_sharing = false
 
+# Allow read-only sharing of a thread with named users. Requires login and a
+# data layer that implements the thread-grant contract. Off by default; without
+# it, thread access is the owner plus anonymous share links only.
+thread_grants = false
+
 # Enable favorite messages
 favorites = false
 
@@ -519,6 +524,7 @@ class FeaturesSettings(BaseModel):
     auto_tag_thread: bool = True
     edit_message: bool = True
     allow_thread_sharing: bool = False
+    thread_grants: bool = False
     favorites: bool = False
     prompt_gallery: bool = False
     prompt_scheduling: bool = False

@@ -29,6 +29,7 @@ from chainlit.types import (
     ScheduledTaskDict,
     ThreadDict,
     ThreadFilter,
+    ThreadOwner,
 )
 from chainlit.user import PersistedUser, User
 
@@ -210,6 +211,18 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             if author_identifier is not None:
                 return author_identifier
         raise ValueError(f"Author not found for thread_id {thread_id}")
+
+    async def get_thread_owner(self, thread_id: str) -> Optional[ThreadOwner]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: get_thread_owner, thread_id={thread_id}")
+        query = """SELECT "userId", "userIdentifier" FROM threads WHERE "id" = :id"""
+        result = await self.execute_sql(query=query, parameters={"id": thread_id})
+        if not isinstance(result, list) or not result:
+            return None
+        return ThreadOwner(
+            user_id=result[0].get("userId"),
+            identifier=result[0].get("userIdentifier"),
+        )
 
     async def get_thread(self, thread_id: str) -> Optional[ThreadDict]:
         if self.show_logger:

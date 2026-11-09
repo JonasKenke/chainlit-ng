@@ -21,6 +21,7 @@ from chainlit.types import (
     Pagination,
     ThreadDict,
     ThreadFilter,
+    ThreadOwner,
 )
 from chainlit.user import PersistedUser, User
 
@@ -510,6 +511,23 @@ class ChainlitDataLayer(BaseDataLayer):
         if not results:
             raise ValueError(f"Thread {thread_id} not found")
         return results[0]["identifier"]
+
+    async def get_thread_owner(self, thread_id: str) -> Optional[ThreadOwner]:
+        query = """
+        SELECT t."userId", u.identifier
+        FROM "Thread" t
+        LEFT JOIN "User" u ON t."userId" = u.id
+        WHERE t.id = $1
+        """
+        results = await self.execute_query(query, {"thread_id": thread_id})
+        if not results:
+            return None
+        user_id = results[0].get("userId")
+        return ThreadOwner(
+            # asyncpg returns a UUID object for a uuid column.
+            user_id=str(user_id) if user_id is not None else None,
+            identifier=results[0].get("identifier"),
+        )
 
     async def delete_thread(self, thread_id: str):
         elements_query = """

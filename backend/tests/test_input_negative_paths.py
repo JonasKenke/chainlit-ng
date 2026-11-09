@@ -30,7 +30,7 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.emitter import ChainlitEmitter
 from chainlit.server import app, upload_file
 from chainlit.session import WebsocketSession, ws_sessions_id, ws_sessions_sid
-from chainlit.types import AskFileSpec, PageInfo, PaginatedResponse
+from chainlit.types import AskFileSpec, PageInfo, PaginatedResponse, ThreadOwner
 from chainlit.user import PersistedUser
 
 USER = PersistedUser(
@@ -371,6 +371,95 @@ def test_shared_thread_is_public(anon_api, layer):
     response = anon_api.get("/project/share/t1")
     assert response.status_code == 200
     assert response.json()["metadata"] == {"is_shared": True}
+
+
+def test_shared_thread_never_exposes_a_non_public_callback_result(anon_api, layer):
+    layer.get_thread.return_value = {
+        "id": "t1",
+        "userIdentifier": USER.identifier,
+        "metadata": {"is_shared": False},
+        "steps": [],
+        "elements": [],
+    }
+    response = anon_api.get("/project/share/t1")
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /project/thread/{id}/grants: disabled, unsupported, unauthenticated
+# ---------------------------------------------------------------------------
+
+GRANT_ROUTES = [
+    ("get", "/project/thread/t1/grants", None),
+    ("post", "/project/thread/t1/grants", {"grantee": "other@example.com"}),
+    ("delete", "/project/thread/t1/grants/user-2", None),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "body"), GRANT_ROUTES)
+def test_grant_routes_are_hidden_while_the_flag_is_off(api, layer, method, path, body):
+    response = _call(api, method, path, body)
+    assert response.status_code == 404, response.text
+    layer.create_thread_grant.assert_not_awaited()
+    layer.delete_thread_grant.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("method", "path", "body"), GRANT_ROUTES)
+def test_grant_routes_require_authentication(
+    anon_api, layer, monkeypatch, method, path, body
+):
+    monkeypatch.setattr(config.features, "thread_grants", True)
+    layer.thread_grants_supported = True
+    response = _call(anon_api, method, path, body)
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(("method", "path", "body"), GRANT_ROUTES)
+def test_grant_routes_require_a_data_layer(
+    api, no_data_layer, monkeypatch, method, path, body
+):
+    monkeypatch.setattr(config.features, "thread_grants", True)
+    response = _call(api, method, path, body)
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(("method", "path", "body"), GRANT_ROUTES)
+def test_grant_routes_report_missing_support(
+    api, layer, monkeypatch, method, path, body
+):
+    monkeypatch.setattr(config.features, "thread_grants", True)
+    layer.thread_grants_supported = False
+    response = _call(api, method, path, body)
+    assert response.status_code == 501, response.text
+
+
+@pytest.mark.parametrize(("method", "path", "body"), GRANT_ROUTES)
+def test_grant_routes_hide_missing_and_foreign_threads(
+    api, layer, monkeypatch, method, path, body
+):
+    monkeypatch.setattr(config.features, "thread_grants", True)
+    layer.thread_grants_supported = True
+    layer.get_thread_owner.return_value = None
+    missing = _call(api, method, path, body)
+    assert missing.status_code == 404, missing.text
+
+    layer.get_thread_owner.return_value = ThreadOwner(user_id=OTHER_USER.id)
+    foreign = _call(api, method, path, body)
+    assert foreign.status_code == 404, foreign.text
+    layer.create_thread_grant.assert_not_awaited()
+    layer.delete_thread_grant.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{}, {"grantee": ""}, {"grantee": 1}],
+)
+def test_grant_create_rejects_a_malformed_body(api, layer, monkeypatch, body):
+    monkeypatch.setattr(config.features, "thread_grants", True)
+    layer.thread_grants_supported = True
+    response = api.post("/project/thread/t1/grants", json=body)
+    assert response.status_code == 422, response.text
+    layer.create_thread_grant.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

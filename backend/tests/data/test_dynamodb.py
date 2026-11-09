@@ -5,6 +5,7 @@ DynamoDB stores a thread as ``PK="THREAD#<thread_id>"`` and a step as
 only, never the characters the identifier happens to end with.
 """
 
+import logging
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 
@@ -19,6 +20,49 @@ def _make_layer(items=None):
     client = Mock()
     client.query.return_value = {"Items": items or []}
     return DynamoDBDataLayer(table_name="test-table", client=client), client
+
+
+@pytest.mark.asyncio
+async def test_get_thread_owner_reads_the_typed_owner():
+    layer, client = _make_layer()
+    client.get_item.return_value = {
+        "Item": {
+            "userId": {"S": "user-1"},
+            "userIdentifier": {"S": "alice@example.com"},
+        }
+    }
+
+    owner = await layer.get_thread_owner("thread-1")
+
+    assert owner is not None
+    assert (owner.user_id, owner.identifier) == ("user-1", "alice@example.com")
+    projection = client.get_item.call_args.kwargs["ProjectionExpression"]
+    assert projection == "userId, userIdentifier"
+
+    client.get_item.return_value = {}
+    assert await layer.get_thread_owner("missing-thread") is None
+
+
+@pytest.mark.asyncio
+async def test_get_user_for_acl_does_not_log_the_identifier(caplog):
+    layer, client = _make_layer()
+    client.get_item.return_value = {
+        "Item": {
+            "PK": {"S": "USER#alice@example.com"},
+            "SK": {"S": "USER"},
+            "id": {"S": "user-1"},
+            "identifier": {"S": "alice@example.com"},
+            "createdAt": {"S": "2026-01-01T00:00:00Z"},
+            "metadata": {"M": {}},
+        }
+    }
+
+    with caplog.at_level(logging.INFO):
+        user = await layer.get_user_for_acl("alice@example.com")
+
+    assert user is not None
+    assert user.id == "user-1"
+    assert "alice@example.com" not in caplog.text
 
 
 @pytest.mark.asyncio

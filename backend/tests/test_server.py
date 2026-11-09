@@ -1281,6 +1281,36 @@ def test_project_settings_thread_sharing_flag(
     assert resp.json().get("threadSharing") is True
 
 
+def test_project_settings_thread_grants_flag(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    layer = AsyncMock(spec=BaseDataLayer)
+    layer.thread_grants_supported = True
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: layer)
+    monkeypatch.setattr("chainlit.server.require_login", lambda: True)
+
+    # Off by default.
+    test_config.features.thread_grants = False
+    resp = test_client.get("/project/settings")
+    assert resp.status_code == 200
+    assert resp.json()["threadGrants"] is False
+
+    # The flag alone is not enough without a capable layer.
+    test_config.features.thread_grants = True
+    layer.thread_grants_supported = False
+    resp = test_client.get("/project/settings")
+    assert resp.status_code == 200
+    assert resp.json()["threadGrants"] is False
+
+    # Flag + login + capability.
+    layer.thread_grants_supported = True
+    resp = test_client.get("/project/settings")
+    assert resp.status_code == 200
+    assert resp.json()["threadGrants"] is True
+
+
 def test_project_settings_forwards_chat_profile_to_starter_categories(
     test_client: TestClient,
     test_config: ChainlitConfig,
@@ -2464,9 +2494,11 @@ def test_thread_element_route_exposes_live_request(test_client, monkeypatch):
 
     monkeypatch.setattr(
         "chainlit.server.get_data_layer",
-        lambda: SimpleNamespace(get_element=get_element),
+        lambda: SimpleNamespace(
+            get_element=get_element,
+            get_thread_author=AsyncMock(return_value=author.identifier),
+        ),
     )
-    monkeypatch.setattr("chainlit.server.is_thread_author", AsyncMock())
 
     try:
         response = test_client.get(

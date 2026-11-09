@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from chainlit.types import (
     Feedback,
+    FeedbackThreadLookup,
     PaginatedResponse,
     Pagination,
     PromptDict,
@@ -11,6 +12,8 @@ from chainlit.types import (
     ScheduledTaskDict,
     ThreadDict,
     ThreadFilter,
+    ThreadGrant,
+    ThreadOwner,
 )
 
 from .utils import queue_until_user_message
@@ -23,6 +26,11 @@ if TYPE_CHECKING:
 
 class BaseDataLayer(ABC):
     """Base class for data persistence."""
+
+    # Thread grants and feedback authorization are opt-in layer capabilities.
+    # A layer that reports False gets today's owner-only behavior.
+    thread_grants_supported = False
+    feedback_authorization_supported = False
 
     @abstractmethod
     async def get_user(self, identifier: str) -> Optional["PersistedUser"]:
@@ -80,6 +88,61 @@ class BaseDataLayer(ABC):
     @abstractmethod
     async def get_thread_author(self, thread_id: str) -> str:
         return ""
+
+    async def get_thread_owner(self, thread_id: str) -> Optional[ThreadOwner]:
+        """Typed owner, or None when the row does not exist.
+
+        The default keeps identifier-only custom layers working: it can detect
+        a missing row but not an ownerless one.
+        """
+        try:
+            author = await self.get_thread_author(thread_id)
+        except ValueError:
+            return None
+        if not author:
+            return None
+        return ThreadOwner(identifier=author)
+
+    async def get_user_for_acl(self, identifier: str) -> Optional["PersistedUser"]:
+        """Authorization path user lookup; overridden to stay quiet in logs."""
+        return await self.get_user(identifier)
+
+    async def get_thread_grant(
+        self, thread_id: str, grantee_user_id: str
+    ) -> Optional[ThreadGrant]:
+        return None
+
+    async def list_thread_grants(self, thread_id: str) -> List[ThreadGrant]:
+        raise NotImplementedError(
+            "Thread grants are not implemented for this data layer"
+        )
+
+    async def create_thread_grant(self, grant: ThreadGrant) -> None:
+        raise NotImplementedError(
+            "Thread grants are not implemented for this data layer"
+        )
+
+    async def delete_thread_grant(self, thread_id: str, grantee_user_id: str) -> bool:
+        raise NotImplementedError(
+            "Thread grants are not implemented for this data layer"
+        )
+
+    async def get_feedback_thread_id(self, feedback_id: str) -> FeedbackThreadLookup:
+        raise NotImplementedError(
+            "Feedback authorization is not implemented for this data layer"
+        )
+
+    async def step_belongs_to_thread(self, thread_id: str, step_id: str) -> bool:
+        """Whether the step is part of the thread; any failure denies."""
+        try:
+            thread = await self.get_thread(thread_id)
+        except Exception:
+            return False
+        if not thread:
+            return False
+        return any(
+            (step or {}).get("id") == step_id for step in thread.get("steps") or []
+        )
 
     @abstractmethod
     async def delete_thread(self, thread_id: str):

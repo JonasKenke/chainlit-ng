@@ -53,6 +53,38 @@ class ThreadDict(TypedDict):
     elements: Optional[List["ElementDict"]]
 
 
+@dataclass
+class ThreadOwner:
+    """Typed thread owner. A layer that knows the persisted user id returns it."""
+
+    user_id: Optional[str] = None
+    identifier: Optional[str] = None
+
+
+@dataclass
+class ThreadGrant:
+    """Read grant from a thread owner to one persisted user."""
+
+    thread_id: str
+    grantee_user_id: str
+    grantee_user_created_at: str
+    grantee_identifier: str
+    granted_by_user_id: str
+    granted_at: str
+    role: str = "read"
+
+
+@dataclass
+class FeedbackThreadLookup:
+    """Typed answer to "which thread owns this feedback id".
+
+    `found` with no `thread_id` is a legacy row and is a denial, not a new row.
+    """
+
+    status: Literal["found", "not_found", "error"]
+    thread_id: Optional[str] = None
+
+
 class Pagination(BaseModel):
     first: int = Field(ge=1)
     cursor: Optional[str] = None
@@ -245,6 +277,10 @@ class DeleteThreadRequest(BaseModel):
 
 class DeleteFeedbackRequest(BaseModel):
     feedbackId: str
+
+
+class CreateThreadGrantRequest(BaseModel):
+    grantee: NonBlankStr
 
 
 class GetThreadsRequest(BaseModel):
