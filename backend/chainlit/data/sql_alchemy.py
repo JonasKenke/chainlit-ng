@@ -81,6 +81,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         query: str,
         parameters: dict,
         expanding: Optional[List[str]] = None,
+        quiet: bool = False,
     ) -> Union[List[Dict[str, Any]], int, None]:
         parameterized_query = text(query)
         if expanding:
@@ -103,11 +104,22 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     return result.rowcount
             except SQLAlchemyError as e:
                 await session.rollback()
-                logger.warning(f"An error occurred: {e}")
+                if quiet:
+                    # The exception text can render query parameters; keep them out of the log.
+                    logger.warning(
+                        "SQLAlchemy: quiet lookup failed (%s)", type(e).__name__
+                    )
+                else:
+                    logger.warning(f"An error occurred: {e}")
                 return None
             except Exception as e:
                 await session.rollback()
-                logger.warning(f"An unexpected error occurred: {e}")
+                if quiet:
+                    logger.warning(
+                        "SQLAlchemy: quiet lookup failed (%s)", type(e).__name__
+                    )
+                else:
+                    logger.warning(f"An unexpected error occurred: {e}")
                 return None
 
     async def get_current_timestamp(self) -> str:
@@ -127,9 +139,18 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def get_user(self, identifier: str) -> Optional[PersistedUser]:
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_user, identifier={identifier}")
+        return await self._get_user(identifier)
+
+    async def get_user_for_acl(self, identifier: str) -> Optional[PersistedUser]:
+        # Authorization path: neither the result nor a DB error may log the identifier.
+        return await self._get_user(identifier, quiet=True)
+
+    async def _get_user(
+        self, identifier: str, quiet: bool = False
+    ) -> Optional[PersistedUser]:
         query = "SELECT * FROM users WHERE identifier = :identifier"
         parameters = {"identifier": identifier}
-        result = await self.execute_sql(query=query, parameters=parameters)
+        result = await self.execute_sql(query=query, parameters=parameters, quiet=quiet)
         if result and isinstance(result, list):
             user_data = result[0]
 

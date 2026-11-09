@@ -57,9 +57,13 @@ async def test_get_user_for_acl_does_not_log_the_identifier(caplog):
         }
     }
 
+    # The child logger is pinned at WARNING; raise it so a logged identifier would be captured.
+    caplog.set_level(logging.INFO, logger="chainlit.DynamoDB")
+
     with caplog.at_level(logging.INFO):
         user = await layer.get_user_for_acl("alice@example.com")
 
+    assert logging.getLogger("chainlit.DynamoDB").isEnabledFor(logging.INFO)
     assert user is not None
     assert user.id == "user-1"
     assert "alice@example.com" not in caplog.text

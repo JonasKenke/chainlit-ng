@@ -126,7 +126,13 @@ class DynamoDBDataLayer(BaseDataLayer):
 
     async def get_user(self, identifier: str) -> Optional["PersistedUser"]:
         _logger.info("DynamoDB: get_user identifier=%s", identifier)
+        return await self._get_user(identifier)
 
+    async def get_user_for_acl(self, identifier: str) -> Optional["PersistedUser"]:
+        # Authorization path: the caller's identifier must not reach the logs.
+        return await self._get_user(identifier)
+
+    async def _get_user(self, identifier: str) -> Optional["PersistedUser"]:
         response = self.client.get_item(
             TableName=self.table_name,
             Key={

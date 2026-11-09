@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Literal, cast
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from chainlit import User
@@ -172,6 +174,58 @@ async def test_get_user(test_user: User, data_layer: SQLAlchemyDataLayer):
 
     nonexistent_user = await data_layer.get_user("nonexistent")
     assert nonexistent_user is None
+
+
+async def test_get_user_for_acl_does_not_log_the_identifier(
+    test_user: User, data_layer: SQLAlchemyDataLayer, caplog: pytest.LogCaptureFixture
+):
+    persisted_user = await data_layer.create_user(test_user)
+    assert persisted_user
+    data_layer.show_logger = True
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        fetched_user = await data_layer.get_user_for_acl(persisted_user.identifier)
+
+    assert fetched_user is not None
+    assert fetched_user.id == persisted_user.id
+    assert persisted_user.identifier not in caplog.text
+
+
+async def test_get_user_for_acl_db_error_does_not_log_the_identifier(
+    data_layer: SQLAlchemyDataLayer,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    identifier = "acl-db-error@example.com"
+
+    class FailingSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def begin(self):
+            return None
+
+        async def execute(self, *args, **kwargs):
+            raise SQLAlchemyError(
+                f"boom [parameters: {{'identifier': '{identifier}'}}]"
+            )
+
+        async def rollback(self):
+            return None
+
+    monkeypatch.setattr(data_layer, "async_session", lambda: FailingSession())
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        user = await data_layer.get_user_for_acl(identifier)
+
+    assert user is None
+    assert "quiet lookup failed" in caplog.text
+    assert identifier not in caplog.text
 
 
 async def test_create_user(test_user: User, data_layer: SQLAlchemyDataLayer):
