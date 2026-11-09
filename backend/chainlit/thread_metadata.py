@@ -135,7 +135,7 @@ def _public_steps(steps: Any) -> Any:
             )
             continue
         if "approval" not in raw_metadata:
-            result.append(step)
+            result.append({**step, "metadata": raw_metadata})
             continue
         approval = raw_metadata["approval"]
         # The framework writes the edited preview into the step input trace

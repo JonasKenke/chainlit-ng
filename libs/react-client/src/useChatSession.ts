@@ -52,6 +52,8 @@ function approvalFromStep(step: IStep): IApproval | null {
     }
   }
   if (!record || typeof record !== 'object' || !record.id) return null;
+  // Questions share the approval metadata slot; they must not hydrate as cards.
+  if (record.kind === 'question') return null;
   return {
     id: record.id,
     stepId: record.stepId ?? step.id,

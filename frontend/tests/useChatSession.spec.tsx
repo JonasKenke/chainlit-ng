@@ -356,6 +356,35 @@ describe('useChatSession approval resume', () => {
     expect(approval.arguments).toEqual({ to: 'person@example.com' });
   });
 
+  it('does not hydrate a question record as an approval', async () => {
+    const { store, resumeHandler } = await connectWithResumeHandler();
+
+    act(() => {
+      resumeHandler({
+        id: 'thread-1',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'question-step',
+            type: 'tool',
+            metadata: {
+              approval: {
+                kind: 'question',
+                id: 'question-1',
+                stepId: 'step-1',
+                threadId: 'thread-1',
+                status: 'answered'
+              }
+            }
+          }
+        ],
+        elements: []
+      });
+    });
+
+    expect(store.getState().approvals).toEqual([]);
+  });
+
   it('keeps the live arguments when a pending record is restored', async () => {
     const { store, resumeHandler } = await connectWithResumeHandler();
     act(() => {
