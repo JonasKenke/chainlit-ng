@@ -987,10 +987,18 @@ def test_endpoint_credentials_or_query_is_rejected(monkeypatch, caplog, endpoint
     assert "invalid OTLP endpoint" not in caplog.text
 
 
-def test_endpoint_path_secret_never_reaches_exporter_logs(monkeypatch, caplog):
+@pytest.mark.parametrize(
+    "path",
+    [
+        SENTINEL,
+        f"{SENTINEL} KRE373",
+        "SENTINEL_KRE338_SECR%41ET",
+    ],
+)
+def test_endpoint_path_secret_never_reaches_exporter_logs(monkeypatch, caplog, path):
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-    endpoint = f"http://127.0.0.1:9/v1/traces/{SENTINEL}"
+    endpoint = f"http://127.0.0.1:9/v1/traces/{path}"
     _enable_config(monkeypatch)
     monkeypatch.setattr(
         otel,
@@ -1012,6 +1020,8 @@ def test_endpoint_path_secret_never_reaches_exporter_logs(monkeypatch, caplog):
 
     assert "Transient error" in caplog.text
     assert SENTINEL not in caplog.text
+    for record in caplog.records:
+        assert SENTINEL not in record.getMessage(), record.name
     assert "/v1/traces" not in caplog.text
     assert "http://127.0.0.1:9" in caplog.text
 
