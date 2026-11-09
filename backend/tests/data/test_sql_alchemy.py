@@ -12,6 +12,8 @@ from chainlit import User
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.data.storage_clients.base import BaseStorageClient
 from chainlit.element import Text
+from chainlit.message import MessageBase
+from chainlit.thread_metadata import public_thread
 from chainlit.types import Feedback, Pagination, ThreadFilter
 
 
@@ -211,6 +213,48 @@ async def test_get_thread(test_user: User, data_layer: SQLAlchemyDataLayer):
 
     result = await data_layer.get_thread("nonexisting_thread")
     assert result is None
+
+
+async def test_reload_keeps_elements_position(
+    data_layer: SQLAlchemyDataLayer, mock_chainlit_context
+):
+    """SQLite returns step metadata as a JSON string; the browser must get an object."""
+    thread_id = "thread_elements_position"
+    step_id = str(uuid.uuid4())
+    await data_layer.update_thread(thread_id)
+    await data_layer.execute_sql(
+        query="""
+            INSERT INTO steps (
+                "id", "name", "type", "threadId", "disableFeedback",
+                "streaming", "output", "createdAt", "metadata"
+            ) VALUES (
+                :id, :name, :type, :thread_id, :disable_feedback,
+                :streaming, :output, :created_at, :metadata
+            )
+        """,
+        parameters={
+            "id": step_id,
+            "name": "assistant",
+            "type": "assistant_message",
+            "thread_id": thread_id,
+            "disable_feedback": False,
+            "streaming": False,
+            "output": "Chart attached",
+            "created_at": "2026-11-09T00:00:00Z",
+            "metadata": json.dumps({"elementsPosition": "above"}),
+        },
+    )
+
+    thread = await data_layer.get_thread(thread_id)
+    assert thread is not None
+    reloaded = public_thread(thread, include_settings=True)
+    assert reloaded is not None
+    step = reloaded["steps"][0]
+    assert step["metadata"] == {"elementsPosition": "above"}
+
+    async with mock_chainlit_context:
+        restored = MessageBase.from_dict(step)
+    assert restored.to_dict()["metadata"] == {"elementsPosition": "above"}
 
 
 async def test_delete_thread(test_user: User, data_layer: SQLAlchemyDataLayer):

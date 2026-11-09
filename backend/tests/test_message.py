@@ -888,6 +888,21 @@ class TestMessageElementsPosition:
 
             assert restored.to_dict()["metadata"] == {"elementsPosition": "above"}
 
+    def test_elements_position_from_dict_parses_json_string_metadata(self):
+        # SQLite returns JSON columns as strings; do not drop a valid value.
+        step_dict = {
+            "id": "msg_123",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "output": "Hello",
+            "name": "Assistant",
+            "metadata": '{"elementsPosition": "above"}',
+        }
+
+        with mock_chainlit_context():
+            restored = MessageBase.from_dict(step_dict)  # type: ignore[arg-type]
+
+            assert restored.to_dict()["metadata"] == {"elementsPosition": "above"}
+
     def test_elements_position_from_dict_falls_back_for_unknown_metadata(self):
         step_dict = {
             "id": "msg_123",

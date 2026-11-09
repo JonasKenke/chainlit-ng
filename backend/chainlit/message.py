@@ -61,6 +61,11 @@ class MessageBase(ABC):
     def from_dict(self, _dict: StepDict):
         type = _dict.get("type", "assistant_message")
         metadata = _dict.get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (TypeError, ValueError):
+                metadata = {}
         if not isinstance(metadata, dict):
             metadata = {}
         elements_position = metadata.get("elementsPosition", "below")

@@ -54,6 +54,20 @@ def test_public_thread_parses_json_metadata():
     assert result["metadata"] == {"is_shared": True}
 
 
+def test_public_thread_parses_json_step_metadata():
+    thread = {
+        "id": "thread-1",
+        "steps": [{"id": "step-1", "metadata": '{"elementsPosition": "above"}'}],
+    }
+
+    assert public_thread(thread)["steps"][0]["metadata"] == {
+        "elementsPosition": "above"
+    }
+    assert public_thread(thread, include_settings=True)["steps"][0]["metadata"] == {
+        "elementsPosition": "above"
+    }
+
+
 def test_public_thread_handles_missing_or_invalid_metadata():
     assert public_thread(None) is None
     assert public_thread({"id": "thread-1"})["metadata"] == {}

@@ -16,7 +16,30 @@ _PUBLIC_APPROVAL_FIELDS = (
 )
 
 
+def _metadata_dict(raw: Any) -> dict:
+    """Parse JSON columns that SQLite hands back as strings."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _normalize_steps(steps: Any) -> Any:
+    """Ensure reloaded steps carry metadata as an object, not a JSON string."""
+    if not isinstance(steps, list):
+        return steps
+    return [
+        {**step, "metadata": _metadata_dict(step.get("metadata"))}
+        if isinstance(step, dict)
+        else step
+        for step in steps
+    ]
+
+
 def _public_steps(steps: Any) -> Any:
+    steps = _normalize_steps(steps)
     if not isinstance(steps, list):
         return steps
     result = []
@@ -24,22 +47,16 @@ def _public_steps(steps: Any) -> Any:
         if not isinstance(step, dict):
             result.append(step)
             continue
-        raw_metadata = step.get("metadata")
-        if isinstance(raw_metadata, str):
-            try:
-                raw_metadata = json.loads(raw_metadata)
-            except (TypeError, ValueError):
-                raw_metadata = None
-        if not isinstance(raw_metadata, dict):
-            result.append({**step, "metadata": {}})
-            continue
+        raw_metadata: dict = step["metadata"]
         if "approval" not in raw_metadata:
             result.append(step)
             continue
         approval = raw_metadata["approval"]
         # The framework writes the edited preview into the step input trace
         # (M11); the public view must not carry it past the whitelist.
-        public_step = {key: value for key, value in step.items() if key != "input"}
+        public_step: dict = {
+            key: value for key, value in step.items() if key != "input"
+        }
         if not isinstance(approval, dict):
             # An unexpected shape may carry detail outside the nested record;
             # drop the whole step metadata rather than guessing.
@@ -73,14 +90,7 @@ def public_thread(
     if thread is None:
         return None
 
-    metadata = thread.get("metadata") or {}
-    if isinstance(metadata, str):
-        try:
-            metadata = json.loads(metadata)
-        except (TypeError, ValueError):
-            metadata = {}
-    if not isinstance(metadata, dict):
-        metadata = {}
+    metadata = _metadata_dict(thread.get("metadata"))
 
     allowed = {"is_shared", "viewer_read_only"}
     if include_settings:
@@ -90,6 +100,9 @@ def public_thread(
         **thread,
         "metadata": {key: value for key, value in metadata.items() if key in allowed},
     }
-    if not include_settings and "steps" in thread:
-        result["steps"] = _public_steps(thread.get("steps"))
+    if "steps" in thread:
+        steps = thread.get("steps")
+        result["steps"] = (
+            _normalize_steps(steps) if include_settings else _public_steps(steps)
+        )
     return cast(ThreadDict, result)
