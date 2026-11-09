@@ -239,9 +239,11 @@ async def test_tracer_raising_completes_the_turn_and_warns_once(
     assert records[0].levelno == logging.WARNING
 
 
-async def test_exporter_raising_completes_the_turn_and_warns_once(
+async def test_exporter_raising_completes_the_turn_and_logs_one_error(
     monkeypatch, ws, caplog
 ):
+    """The SDK exporter logs one ERROR; the turn still completes."""
+
     class RaisingExporter:
         def export(self, spans):
             raise RuntimeError("collector is down")
@@ -260,6 +262,7 @@ async def test_exporter_raising_completes_the_turn_and_warns_once(
 
     records = _records(caplog, "exception while exporting")
     assert len(records) == 1
+    assert records[0].levelno == logging.ERROR
 
 
 async def test_queue_full_completes_the_turn_and_warns_once(monkeypatch, ws, caplog):
@@ -390,9 +393,10 @@ async def test_app_owned_provider_present_completes_the_turn(
 # ---------------------------------------------------------------------------
 
 
-async def test_thousand_step_turn_exports_the_cap_and_drops_the_rest(
+async def test_thousand_step_turn_exports_the_step_cap_and_drops_the_rest(
     monkeypatch, mock_chainlit_context, memory_exporter
 ):
+    """Export 200 step spans plus the root; the root is not counted."""
     _init_with_exporter(monkeypatch, memory_exporter)
 
     async with mock_chainlit_context:

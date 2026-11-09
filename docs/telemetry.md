@@ -162,16 +162,22 @@ has a trace context.
 
 ## Bounds and failure behavior
 
-Each turn exports at most 200 step spans plus its root span. Steps after the
-cap are not exported and are counted in `chainlit.telemetry.dropped_spans` on
-the root, so a 1,000-step turn produces 200 step spans and
-`dropped_spans=800`. The per-turn handle registry is released when the turn
-ends.
+The bounds below apply to spans Chainlit creates. Spans made with
+`chainlit.otel.get_tracer()` export through Chainlit's exporter but are not
+filtered by Chainlit: their attributes, value length, events, and links are the
+app's responsibility. Enforcing the bound on app spans is out of scope for this
+slice.
 
-Every exported span carries at most 8 attributes, and every string value is at
-most 128 characters. Attribute values are scalars only: no dict, list, tuple,
-or set. Chainlit adds no span events and no span links. Resource attributes
-(`service.name`, `service.version`, and anything from
+For each turn, Chainlit exports at most 200 of its own step spans plus its
+root span. Steps after the cap are not exported and are counted in
+`chainlit.telemetry.dropped_spans` on the root, so a 1,000-step turn produces
+200 step spans and `dropped_spans=800`. The per-turn handle registry is released
+when the turn ends.
+
+Every span Chainlit creates carries at most 8 attributes, and every string
+value is at most 128 characters. Attribute values are scalars only: no dict,
+list, tuple, or set. Chainlit adds no events and no links to its spans.
+Resource attributes (`service.name`, `service.version`, and anything from
 `OTEL_RESOURCE_ATTRIBUTES`) are attached to the resource, not the span, and are
 excluded from the 8-attribute count. They are operator-controlled; bound them
 at the collector if they can contain sensitive values.
