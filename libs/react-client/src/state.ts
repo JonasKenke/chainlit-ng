@@ -7,6 +7,7 @@ import { type StoreApi, createStore } from 'zustand/vanilla';
 import { IApproval } from './types/approval';
 import { ICommand } from './types/command';
 import { IMode } from './types/mode';
+import { IQuestion } from './types/question';
 
 import type { ChainlitAPI } from './api';
 import { ChainlitContext } from './context';
@@ -48,6 +49,7 @@ export interface ChainlitState {
   session: ISession | undefined;
   actions: IAction[];
   approvals: IApproval[];
+  questions: IQuestion[];
   messages: IStep[];
   commands: ICommand[];
   modes: IMode[];
@@ -113,6 +115,7 @@ function initialState(): ChainlitState {
     session: undefined,
     actions: [],
     approvals: [],
+    questions: [],
     messages: [],
     commands: [],
     modes: [],

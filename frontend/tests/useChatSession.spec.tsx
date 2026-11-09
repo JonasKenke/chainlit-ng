@@ -147,6 +147,54 @@ describe('useChatSession approval events', () => {
   });
 });
 
+describe('useChatSession question events', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    io.mockClear();
+    sockets.length = 0;
+  });
+
+  it('upserts a live question and ignores a late pending event', async () => {
+    const { store } = await connectWithResumeHandler();
+    const socket = sockets[0];
+    const handler = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'question'
+    )?.[1] as (question: unknown) => void;
+    expect(handler).toBeTruthy();
+
+    const base = {
+      kind: 'question',
+      id: 'question-1',
+      stepId: 'step-1',
+      threadId: 'thread-1',
+      prompt: 'Which environment?',
+      options: [{ id: 'staging', label: 'Staging' }],
+      allowFreeText: true
+    };
+    act(() => {
+      handler({ ...base, status: 'pending', revision: 1 });
+    });
+    expect(store.getState().questions).toHaveLength(1);
+    expect(store.getState().questions[0].live).toBe(true);
+
+    act(() => {
+      handler({
+        ...base,
+        status: 'answered',
+        answer: { optionId: 'staging', label: 'Staging' },
+        revision: 2
+      });
+    });
+    expect(store.getState().questions[0].status).toBe('answered');
+
+    act(() => {
+      handler({ ...base, status: 'pending', revision: 1 });
+    });
+    expect(store.getState().questions[0].status).toBe('answered');
+  });
+});
+
 async function connectWithResumeHandler() {
   vi.useFakeTimers();
   const client = new ChainlitAPI('http://localhost:8000', 'webapp');

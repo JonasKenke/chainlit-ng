@@ -17,6 +17,7 @@ import {
   IMcp,
   IMessageElement,
   IMode,
+  IQuestion,
   IStep,
   ITasklistElement,
   IThread
@@ -100,6 +101,7 @@ const useChatSession = () => {
   const setTasklists = useSetChainlitState('tasklists');
   const setActions = useSetChainlitState('actions');
   const setApprovals = useSetChainlitState('approvals');
+  const setQuestions = useSetChainlitState('questions');
   const setChatSettingsInputs = useSetChainlitState('chatSettingsInputs');
   const setTokenCount = useSetChainlitState('tokenCount');
   const [chatProfile, setChatProfile] = useChainlitState('chatProfile');
@@ -586,6 +588,21 @@ const useChatSession = () => {
             arguments: approval.arguments ?? previous.arguments
           };
           return [...old.slice(0, index), merged, ...old.slice(index + 1)];
+        });
+      });
+
+      socket.on('question', (question: IQuestion) => {
+        setQuestions((old) => {
+          const index = old.findIndex((item) => item.id === question.id);
+          if (index === -1) return [...old, { ...question, live: true }];
+          const previous = old[index];
+          // A late pending event must not overwrite a terminal answer.
+          if ((question.revision ?? 0) < (previous.revision ?? 0)) return old;
+          return [
+            ...old.slice(0, index),
+            { ...previous, ...question, live: true },
+            ...old.slice(index + 1)
+          ];
         });
       });
 

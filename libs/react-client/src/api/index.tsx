@@ -15,6 +15,10 @@ import {
 import { IFeedback } from 'src/types/feedback';
 import { IPrompt } from 'src/types/prompt';
 import {
+  IQuestionAnswerPayload,
+  IQuestionAnswerResponse
+} from 'src/types/question';
+import {
   IScheduledTask,
   IScheduledTaskPayload,
   IScheduledTaskUpdate
@@ -361,6 +365,25 @@ export class ChainlitAPI extends APIBase {
         error.payload?.approvalId
       ) {
         return error.payload as IApprovalDecisionResponse;
+      }
+      throw error;
+    }
+  }
+
+  async respondToQuestion(
+    payload: IQuestionAnswerPayload
+  ): Promise<IQuestionAnswerResponse> {
+    try {
+      const res = await this.post(`/project/question`, payload);
+      return res.json();
+    } catch (error) {
+      // A 409 carries the terminal record so a stale card can reconcile.
+      if (
+        error instanceof ClientError &&
+        error.status === 409 &&
+        error.payload?.questionId
+      ) {
+        return error.payload as IQuestionAnswerResponse;
       }
       throw error;
     }
