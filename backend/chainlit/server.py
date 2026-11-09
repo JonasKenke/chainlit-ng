@@ -11,6 +11,7 @@ import time
 import urllib.parse
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
@@ -82,7 +83,13 @@ from chainlit.config import (
 )
 from chainlit.context import RequestContextMiddleware
 from chainlit.data import get_data_layer
-from chainlit.data.acl import is_thread_author
+from chainlit.data.acl import (
+    MAX_THREAD_GRANTS_PER_THREAD,
+    ThreadAccess,
+    _require_owner_or_404,
+    authorize_thread_read,
+    is_thread_author,
+)
 from chainlit.data.base import BaseDataLayer
 from chainlit.logger import logger
 from chainlit.markdown import get_markdown_str
@@ -122,6 +129,7 @@ from chainlit.types import (
     CreatePromptRequest,
     CreateScheduledTaskRequest,
     CreateSkillRequest,
+    CreateThreadGrantRequest,
     DeleteFeedbackRequest,
     DeleteThreadRequest,
     DisconnectMCPRequest,
@@ -137,6 +145,7 @@ from chainlit.types import (
     SharePromptRequest,
     ShareThreadRequest,
     Theme,
+    ThreadGrant,
     UpdateFeedbackRequest,
     UpdatePromptRequest,
     UpdateScheduledTaskRequest,
@@ -1255,6 +1264,139 @@ async def project_translations(
     )
 
 
+def _thread_grants_active(data_layer: Optional[BaseDataLayer]) -> bool:
+    """Named thread sharing needs the flag, login, and a capable data layer."""
+    return bool(
+        config.features.thread_grants
+        and require_login()
+        and data_layer is not None
+        and getattr(data_layer, "thread_grants_supported", False)
+    )
+
+
+def _no_store(response: JSONResponse) -> JSONResponse:
+    """Caller-varying thread responses must never be cached by a shared cache."""
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+def _require_same_origin(request: Request) -> None:
+    """Reject a present cross-origin Origin header on state-changing routes."""
+    origin = request.headers.get("origin")
+    if not origin:
+        return
+    allowed = {
+        request.headers.get("host"),
+        URL(get_user_facing_url(request.base_url)).netloc,
+    }
+    if URL(origin).netloc not in allowed:
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
+
+def _thread_grants_layer() -> BaseDataLayer:
+    """Grant routes: 400 without a layer, 404 while off, 501 without support."""
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    if not config.features.thread_grants:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not getattr(data_layer, "thread_grants_supported", False):
+        raise HTTPException(
+            status_code=501,
+            detail="Thread grants are not supported by the data layer",
+        )
+    return data_layer
+
+
+def _feedback_gate_active(data_layer: BaseDataLayer) -> bool:
+    """Whether feedback mutations are owner-gated; 403 if the layer cannot."""
+    if not _thread_grants_active(data_layer):
+        return False
+    if not getattr(data_layer, "feedback_authorization_supported", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Feedback authorization is not supported by the data layer",
+        )
+    return True
+
+
+def _same_principal(one: Optional[User], other: Optional[User]) -> bool:
+    """Compare the persisted generation when both sides know it."""
+    if one is None or other is None:
+        return False
+    if isinstance(one, PersistedUser) and isinstance(other, PersistedUser):
+        return one.id == other.id and one.createdAt == other.createdAt
+    return one.identifier == other.identifier
+
+
+async def _authorize_feedback_update(
+    update: UpdateFeedbackRequest,
+    current_user: Optional[User],
+    data_layer: BaseDataLayer,
+) -> None:
+    """Owner-gate a feedback write by the feedback's own thread and step."""
+    session = WebsocketSession.get_by_id(update.sessionId)
+    if session is None or not _same_principal(session.user, current_user):
+        raise HTTPException(status_code=403, detail="Session does not match the caller")
+
+    feedback = update.feedback
+    if feedback.threadId is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    access = await authorize_thread_read(
+        feedback.threadId, current_user, data_layer=data_layer
+    )
+    if access != ThreadAccess.OWNER:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        belongs = await data_layer.step_belongs_to_thread(
+            feedback.threadId, feedback.forId
+        )
+    except Exception:
+        belongs = False
+    if not belongs:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if feedback.id is None:
+        return
+
+    try:
+        lookup = await data_layer.get_feedback_thread_id(feedback.id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if lookup is not None and lookup.status == "not_found":
+        return
+    if (
+        lookup is not None
+        and lookup.status == "found"
+        and lookup.thread_id
+        and lookup.thread_id == feedback.threadId
+    ):
+        return
+    raise HTTPException(status_code=404, detail="Thread not found")
+
+
+async def _can_delete_feedback(
+    feedback_id: str,
+    current_user: Optional[User],
+    data_layer: BaseDataLayer,
+) -> bool:
+    """Delete only a row whose thread resolves and whose owner is the caller."""
+    try:
+        lookup = await data_layer.get_feedback_thread_id(feedback_id)
+    except Exception:
+        return False
+    if lookup is None or lookup.status != "found" or not lookup.thread_id:
+        return False
+    return (
+        await authorize_thread_read(
+            lookup.thread_id, current_user, data_layer=data_layer
+        )
+        == ThreadAccess.OWNER
+    )
+
+
 @router.get("/project/settings")
 async def project_settings(
     current_user: UserParam,
@@ -1364,6 +1506,7 @@ async def project_settings(
                 getattr(cfg.features, "allow_thread_sharing", False)
                 and getattr(config.code, "on_shared_thread_view", None)
             ),
+            "threadGrants": _thread_grants_active(data_layer),
             "promptGallery": bool(
                 getattr(cfg.features, "prompt_gallery", False)
                 and _supports_prompt_gallery(data_layer)
@@ -1395,6 +1538,9 @@ async def update_feedback(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=500, detail="Data persistence is not enabled")
+
+    if _feedback_gate_active(data_layer):
+        await _authorize_feedback_update(update, current_user, data_layer)
 
     try:
         feedback_id = await data_layer.upsert_feedback(feedback=update.feedback)
@@ -1433,6 +1579,12 @@ async def delete_feedback(
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
 
     feedback_id = payload.feedbackId
+
+    if _feedback_gate_active(data_layer):
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if not await _can_delete_feedback(feedback_id, current_user, data_layer):
+            return JSONResponse(content={"success": True})
 
     await data_layer.delete_feedback(feedback_id)
     return JSONResponse(content={"success": True})
@@ -1483,7 +1635,11 @@ async def get_thread(
     if not current_user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    await is_thread_author(current_user.identifier, thread_id)
+    access = await authorize_thread_read(thread_id, current_user, data_layer=data_layer)
+    if access in (ThreadAccess.MISSING, ThreadAccess.OWNERLESS):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if access != ThreadAccess.OWNER:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     try:
         res = await data_layer.get_thread(thread_id)
@@ -1493,7 +1649,7 @@ async def get_thread(
             status_code=500,
             detail="Failed to load conversation history",
         )
-    return JSONResponse(content=public_thread(res, include_settings=True))
+    return _no_store(JSONResponse(content=public_thread(res, include_settings=True)))
 
 
 @router.get("/project/share/{thread_id}")
@@ -1519,32 +1675,25 @@ async def get_shared_thread(
 
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
-    # Extract and normalize metadata (may be dict, strified JSON, or None)
-    metadata = (thread.get("metadata") if isinstance(thread, dict) else {}) or {}
-    if isinstance(metadata, str):
-        try:
-            metadata = json.loads(metadata)
-        except Exception:
-            metadata = {}
-    if not isinstance(metadata, dict):
-        metadata = {}
 
-    user_can_view = False
-    if getattr(config.code, "on_shared_thread_view", None):
-        try:
-            user_can_view = await config.code.on_shared_thread_view(
-                thread, current_user
-            )
-        except Exception:
-            user_can_view = False
-
-    is_shared = bool(metadata.get("is_shared"))
-
-    # Proceed only raise an error if both conditions are False.
-    if (not user_can_view) and (not is_shared):
+    access = await authorize_thread_read(
+        thread_id,
+        current_user,
+        thread=thread,
+        allow_public_share=True,
+        data_layer=data_layer,
+    )
+    if access not in (ThreadAccess.OWNER, ThreadAccess.PUBLIC, ThreadAccess.SHARED):
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    return JSONResponse(content=public_thread(thread))
+    # The owner identity is only stripped while the grants feature is active.
+    return _no_store(
+        JSONResponse(
+            content=public_thread(
+                thread, include_owner=not _thread_grants_active(data_layer)
+            )
+        )
+    )
 
 
 # ---- Prompt scheduling endpoints ----
@@ -2226,12 +2375,16 @@ async def get_thread_element(
     if not current_user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    await is_thread_author(current_user.identifier, thread_id)
+    access = await authorize_thread_read(thread_id, current_user, data_layer=data_layer)
+    if access in (ThreadAccess.MISSING, ThreadAccess.OWNERLESS):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if access not in (ThreadAccess.OWNER, ThreadAccess.SHARED):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     res = await data_layer.get_element(thread_id, element_id)
     if res is None:
         raise HTTPException(status_code=404, detail="Element not found")
-    return JSONResponse(content=res)
+    return _no_store(JSONResponse(content=res))
 
 
 def _get_ws_session(session_id: str) -> "WebsocketSession":
@@ -2470,6 +2623,95 @@ async def delete_thread(
         clear_thread_deleted(thread_id)
         raise
     return JSONResponse(content={"success": True})
+
+
+@router.get("/project/thread/{thread_id}/grants")
+async def list_thread_grants(
+    request: Request,
+    thread_id: str,
+    current_user: UserParam,
+):
+    """List the read grants of a thread (owner only)."""
+    data_layer = _thread_grants_layer()
+
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    await _require_owner_or_404(thread_id, current_user)
+
+    grants = await data_layer.list_thread_grants(thread_id)
+    return _no_store(JSONResponse(content=[asdict(grant) for grant in grants]))
+
+
+@router.post("/project/thread/{thread_id}/grants")
+async def create_thread_grant(
+    request: Request,
+    thread_id: str,
+    payload: CreateThreadGrantRequest,
+    current_user: UserParam,
+):
+    """Grant read access to one identifier (owner only, idempotent)."""
+    data_layer = _thread_grants_layer()
+
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    _require_same_origin(request)
+    await _require_owner_or_404(thread_id, current_user)
+
+    if payload.grantee == current_user.identifier:
+        raise HTTPException(
+            status_code=400, detail="Cannot grant a thread to its owner"
+        )
+
+    grantee = await data_layer.get_user(payload.grantee)
+    if not grantee or not getattr(grantee, "createdAt", None):
+        # Same body as a created grant: no one-request existence oracle.
+        return _no_store(JSONResponse(content={"success": True}))
+
+    current_user_id = getattr(current_user, "id", None)
+    if current_user_id is not None and grantee.id == current_user_id:
+        raise HTTPException(
+            status_code=400, detail="Cannot grant a thread to its owner"
+        )
+
+    grants = await data_layer.list_thread_grants(thread_id)
+    if any(grant.grantee_user_id == grantee.id for grant in grants):
+        return _no_store(JSONResponse(content={"success": True}))
+    if len(grants) >= MAX_THREAD_GRANTS_PER_THREAD:
+        raise HTTPException(status_code=409, detail="Thread grant limit reached")
+
+    await data_layer.create_thread_grant(
+        ThreadGrant(
+            thread_id=thread_id,
+            grantee_user_id=grantee.id,
+            grantee_user_created_at=grantee.createdAt,
+            grantee_identifier=grantee.identifier,
+            granted_by_user_id=current_user_id or current_user.identifier,
+            granted_at=utc_now(),
+        )
+    )
+    return _no_store(JSONResponse(content={"success": True}))
+
+
+@router.delete("/project/thread/{thread_id}/grants/{grantee_user_id}")
+async def delete_thread_grant(
+    request: Request,
+    thread_id: str,
+    grantee_user_id: str,
+    current_user: UserParam,
+):
+    """Revoke a read grant (owner only, idempotent)."""
+    data_layer = _thread_grants_layer()
+
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    _require_same_origin(request)
+    await _require_owner_or_404(thread_id, current_user)
+
+    await data_layer.delete_thread_grant(thread_id, grantee_user_id)
+    return _no_store(JSONResponse(content={"success": True}))
 
 
 @router.delete("/project/threads")

@@ -419,3 +419,63 @@ def test_share_fails_closed_on_non_list_steps_and_non_dict_steps():
     assert len(result["steps"]) == 1
     assert result["steps"][0]["metadata"] == {}
     assert "secret" not in json.dumps(result)
+
+
+def test_public_thread_keeps_the_owner_identity_by_default():
+    thread = {
+        "id": "thread-1",
+        "userId": "user-1",
+        "userIdentifier": "alice@example.com",
+        "metadata": {"is_shared": True},
+    }
+
+    result = public_thread(thread)
+
+    assert result["userId"] == "user-1"
+    assert result["userIdentifier"] == "alice@example.com"
+
+
+def test_public_thread_can_strip_the_owner_identity_from_an_sql_row():
+    thread = {
+        "id": "thread-1",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "name": "chat",
+        "userId": "user-1",
+        "userIdentifier": "alice@example.com",
+        "tags": [],
+        "metadata": {"is_shared": True},
+        "steps": [],
+        "elements": [],
+    }
+
+    result = public_thread(thread, include_owner=False)
+
+    assert result["userId"] is None
+    assert result["userIdentifier"] is None
+    assert "alice@example.com" not in json.dumps(result)
+    # The stored row is untouched.
+    assert thread["userId"] == "user-1"
+
+
+def test_public_thread_strips_the_dynamo_owner_keys():
+    thread = {
+        "id": "thread-1",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "name": "chat",
+        "userId": "alice@example.com",
+        "userIdentifier": "alice@example.com",
+        "PK": "THREAD#thread-1",
+        "SK": "THREAD",
+        "UserThreadPK": "USER#alice@example.com",
+        "UserThreadSK": "THREAD#thread-1",
+        "metadata": {"is_shared": True},
+        "steps": [],
+        "elements": [],
+    }
+
+    result = public_thread(thread, include_owner=False)
+
+    for key in ("PK", "SK", "UserThreadPK", "UserThreadSK"):
+        assert key not in result
+    assert "USER#" not in json.dumps(result)
+    assert "alice@example.com" not in json.dumps(result)

@@ -28,6 +28,7 @@ from chainlit.types import (
     Pagination,
     ThreadDict,
     ThreadFilter,
+    ThreadOwner,
 )
 from chainlit.user import PersistedUser, User
 
@@ -125,7 +126,13 @@ class DynamoDBDataLayer(BaseDataLayer):
 
     async def get_user(self, identifier: str) -> Optional["PersistedUser"]:
         _logger.info("DynamoDB: get_user identifier=%s", identifier)
+        return await self._get_user(identifier)
 
+    async def get_user_for_acl(self, identifier: str) -> Optional["PersistedUser"]:
+        # Authorization path: the caller's identifier must not reach the logs.
+        return await self._get_user(identifier)
+
+    async def _get_user(self, identifier: str) -> Optional["PersistedUser"]:
         response = self.client.get_item(
             TableName=self.table_name,
             Key={
@@ -452,6 +459,26 @@ class DynamoDBDataLayer(BaseDataLayer):
 
         item = self._deserialize_item(response["Item"])
         return item["userId"]
+
+    async def get_thread_owner(self, thread_id: str) -> Optional["ThreadOwner"]:
+        _logger.info("DynamoDB: get_thread_owner thread=%s", thread_id)
+
+        response = self.client.get_item(
+            TableName=self.table_name,
+            Key={
+                "PK": {"S": f"THREAD#{thread_id}"},
+                "SK": {"S": "THREAD"},
+            },
+            ProjectionExpression="userId, userIdentifier",
+        )
+
+        if "Item" not in response:
+            return None
+
+        item = self._deserialize_item(response["Item"])
+        return ThreadOwner(
+            user_id=item.get("userId"), identifier=item.get("userIdentifier")
+        )
 
     async def _query_thread_items(self, thread_id: str) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []

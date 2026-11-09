@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Literal, cast
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from chainlit import User
@@ -174,6 +176,58 @@ async def test_get_user(test_user: User, data_layer: SQLAlchemyDataLayer):
     assert nonexistent_user is None
 
 
+async def test_get_user_for_acl_does_not_log_the_identifier(
+    test_user: User, data_layer: SQLAlchemyDataLayer, caplog: pytest.LogCaptureFixture
+):
+    persisted_user = await data_layer.create_user(test_user)
+    assert persisted_user
+    data_layer.show_logger = True
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        fetched_user = await data_layer.get_user_for_acl(persisted_user.identifier)
+
+    assert fetched_user is not None
+    assert fetched_user.id == persisted_user.id
+    assert persisted_user.identifier not in caplog.text
+
+
+async def test_get_user_for_acl_db_error_does_not_log_the_identifier(
+    data_layer: SQLAlchemyDataLayer,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    identifier = "acl-db-error@example.com"
+
+    class FailingSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def begin(self):
+            return None
+
+        async def execute(self, *args, **kwargs):
+            raise SQLAlchemyError(
+                f"boom [parameters: {{'identifier': '{identifier}'}}]"
+            )
+
+        async def rollback(self):
+            return None
+
+    monkeypatch.setattr(data_layer, "async_session", lambda: FailingSession())
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        user = await data_layer.get_user_for_acl(identifier)
+
+    assert user is None
+    assert "quiet lookup failed" in caplog.text
+    assert identifier not in caplog.text
+
+
 async def test_create_user(test_user: User, data_layer: SQLAlchemyDataLayer):
     persisted_user = await data_layer.create_user(test_user)
 
@@ -201,6 +255,26 @@ async def test_get_thread_author(test_user: User, data_layer: SQLAlchemyDataLaye
     author = await data_layer.get_thread_author("test_thread")
 
     assert author == persisted_user.identifier
+
+
+async def test_get_thread_owner(test_user: User, data_layer: SQLAlchemyDataLayer):
+    persisted_user = await data_layer.create_user(test_user)
+    assert persisted_user
+
+    await data_layer.update_thread("test_thread", user_id=persisted_user.id)
+    owner = await data_layer.get_thread_owner("test_thread")
+
+    assert owner is not None
+    assert owner.user_id == persisted_user.id
+    assert owner.identifier == persisted_user.identifier
+
+    await data_layer.update_thread("ownerless_thread")
+    ownerless = await data_layer.get_thread_owner("ownerless_thread")
+    assert ownerless is not None
+    assert ownerless.user_id is None
+    assert ownerless.identifier is None
+
+    assert await data_layer.get_thread_owner("nonexisting_thread") is None
 
 
 async def test_get_thread(test_user: User, data_layer: SQLAlchemyDataLayer):

@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import cast
@@ -212,6 +213,26 @@ async def test_update_thread_deletes_keys_with_none_values():
         # Verify "is_shared" and "keep" are preserved
         assert metadata_json.get("is_shared") is True
         assert metadata_json.get("keep") == "stays"
+
+
+@pytest.mark.asyncio
+async def test_get_thread_owner_reads_the_persisted_id_and_identifier():
+    data_layer = ChainlitDataLayer(
+        database_url="postgresql://test", storage_client=None, show_logger=False
+    )
+    data_layer.execute_query = AsyncMock(
+        # asyncpg hands back a UUID object for a uuid column.
+        return_value=[{"userId": uuid.UUID(int=1), "identifier": "alice@example.com"}]
+    )
+
+    owner = await data_layer.get_thread_owner("thread-1")
+
+    assert owner is not None
+    assert owner.user_id == str(uuid.UUID(int=1))
+    assert owner.identifier == "alice@example.com"
+
+    data_layer.execute_query = AsyncMock(return_value=[])
+    assert await data_layer.get_thread_owner("missing") is None
 
 
 @pytest.mark.asyncio
