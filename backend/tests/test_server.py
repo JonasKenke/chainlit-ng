@@ -23,6 +23,7 @@ from chainlit.config import (
     SpontaneousFileUploadFeature,
 )
 from chainlit.data.base import BaseDataLayer
+from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.server import (
     _cleanup_files_directory,
     _verify_azure_hf_id_token,
@@ -1307,6 +1308,23 @@ def test_project_settings_thread_grants_flag(
     # Flag + login + capability.
     layer.thread_grants_supported = True
     resp = test_client.get("/project/settings")
+    assert resp.status_code == 200
+    assert resp.json()["threadGrants"] is True
+
+
+def test_project_settings_report_thread_grants_for_the_sql_layer(
+    test_client: TestClient,
+    test_config: ChainlitConfig,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The built-in SQL layer is the first layer to advertise grants."""
+    layer = SQLAlchemyDataLayer(conninfo="sqlite+aiosqlite://")
+    monkeypatch.setattr("chainlit.server.get_data_layer", lambda: layer)
+    monkeypatch.setattr("chainlit.server.require_login", lambda: True)
+    test_config.features.thread_grants = True
+
+    resp = test_client.get("/project/settings")
+
     assert resp.status_code == 200
     assert resp.json()["threadGrants"] is True
 

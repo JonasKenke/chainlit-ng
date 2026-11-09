@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Add opt-in read-only thread sharing with named users (`feat(data)`):
+  `[features] thread_grants = true` plus a data layer that implements the grant
+  contract. `SQLAlchemyDataLayer` stores grants in a lazily created
+  `thread_grants` table, the grantee reads through the existing share route
+  without owner identity or settings, and feedback writes are owner-gated with
+  a typed, non-swallowing thread lookup. Off by default. See
+  [the thread-sharing guide](docs/thread-sharing.md).
 - Add opt-in tool-call approvals: `@cl.step(requires_approval=True)` with an
   optional `approval_schema`, or the explicit `cl.Approval` API. The server
   keeps the execution arguments, persists only a redacted preview, and requires

@@ -2664,7 +2664,8 @@ async def create_thread_grant(
             status_code=400, detail="Cannot grant a thread to its owner"
         )
 
-    grantee = await data_layer.get_user(payload.grantee)
+    # Quiet lookup: the grant path must not log the grantee identifier.
+    grantee = await data_layer.get_user_for_acl(payload.grantee)
     if not grantee or not getattr(grantee, "createdAt", None):
         # Same body as a created grant: no one-request existence oracle.
         return _no_store(JSONResponse(content={"success": True}))

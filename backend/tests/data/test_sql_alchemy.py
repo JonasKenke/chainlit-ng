@@ -16,7 +16,7 @@ from chainlit.data.storage_clients.base import BaseStorageClient
 from chainlit.element import Text
 from chainlit.message import MessageBase
 from chainlit.thread_metadata import public_thread
-from chainlit.types import Feedback, Pagination, ThreadFilter
+from chainlit.types import Feedback, Pagination, ThreadFilter, ThreadGrant
 
 
 @pytest.fixture
@@ -874,3 +874,376 @@ async def test_element_storage_key_stays_under_the_thread_owner(
     object_key = upload.await_args.kwargs["object_key"]
     assert object_key.startswith(f"{alice.id}/{element.id}/")
     assert not object_key.startswith(f"{bob.id}/")
+
+
+class _FailingSession:
+    """Session double whose driver error renders the query parameters."""
+
+    def __init__(self, error: Exception):
+        self.error = error
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def begin(self):
+        return None
+
+    async def execute(self, *args, **kwargs):
+        raise self.error
+
+    async def rollback(self):
+        return None
+
+
+def _grant(
+    thread_id: str = "thread-1",
+    grantee_user_id: str = "bob-id",
+    grantee_user_created_at: str = "2026-01-01T00:00:00Z",
+    role: str = "read",
+) -> ThreadGrant:
+    return ThreadGrant(
+        thread_id=thread_id,
+        grantee_user_id=grantee_user_id,
+        grantee_user_created_at=grantee_user_created_at,
+        grantee_identifier="bob",
+        granted_by_user_id="alice-id",
+        granted_at="2026-01-02T00:00:00Z",
+        role=role,
+    )
+
+
+async def test_thread_grants_are_a_layer_capability(data_layer: SQLAlchemyDataLayer):
+    assert data_layer.thread_grants_supported is True
+    assert data_layer.feedback_authorization_supported is True
+
+
+async def test_thread_grant_crud(data_layer: SQLAlchemyDataLayer):
+    await data_layer.create_thread_grant(_grant())
+
+    stored = await data_layer.get_thread_grant("thread-1", "bob-id")
+    assert stored == _grant()
+    assert await data_layer.list_thread_grants("thread-1") == [_grant()]
+
+    assert await data_layer.delete_thread_grant("thread-1", "bob-id") is True
+    assert await data_layer.get_thread_grant("thread-1", "bob-id") is None
+    assert await data_layer.list_thread_grants("thread-1") == []
+    assert await data_layer.delete_thread_grant("thread-1", "bob-id") is False
+
+
+async def test_duplicate_thread_grant_is_a_noop(data_layer: SQLAlchemyDataLayer):
+    await data_layer.create_thread_grant(_grant())
+    await data_layer.create_thread_grant(_grant())
+
+    assert len(await data_layer.list_thread_grants("thread-1")) == 1
+
+
+async def test_thread_grant_lookup_is_scoped(data_layer: SQLAlchemyDataLayer):
+    await data_layer.create_thread_grant(_grant())
+
+    assert await data_layer.get_thread_grant("thread-1", "carol-id") is None
+    assert await data_layer.get_thread_grant("thread-2", "bob-id") is None
+
+
+async def test_thread_grant_lookup_denies_a_non_read_role(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.create_thread_grant(_grant(role="write"))
+
+    assert await data_layer.get_thread_grant("thread-1", "bob-id") is None
+
+
+async def test_thread_grant_errors_do_not_log_the_grantee(
+    data_layer: SQLAlchemyDataLayer,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    identifier = "secret-grantee@example.com"
+    await data_layer.create_thread_grant(_grant())
+    data_layer.show_logger = True
+    monkeypatch.setattr(
+        data_layer,
+        "async_session",
+        lambda: _FailingSession(
+            SQLAlchemyError(f"boom [parameters: {{'grantee_user_id': '{identifier}'}}]")
+        ),
+    )
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        assert await data_layer.get_thread_grant("thread-1", identifier) is None
+        with pytest.raises(RuntimeError):
+            await data_layer.create_thread_grant(_grant(grantee_user_id=identifier))
+
+    assert identifier not in caplog.text
+    assert "quiet lookup failed" in caplog.text
+
+
+async def test_grants_deny_when_the_table_cannot_be_created(
+    data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    async def failing_execute_sql(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(data_layer, "execute_sql", failing_execute_sql)
+
+    assert await data_layer.get_thread_grant("thread-1", "bob-id") is None
+    assert await data_layer.list_thread_grants("thread-1") == []
+    with pytest.raises(RuntimeError):
+        await data_layer.create_thread_grant(_grant())
+
+
+async def test_delete_thread_removes_its_grants(
+    data_layer: SQLAlchemyDataLayer, test_user: User
+):
+    owner = await data_layer.create_user(test_user)
+    assert owner
+    await data_layer.update_thread("thread-1", user_id=owner.id)
+    await data_layer.create_thread_grant(_grant())
+
+    await data_layer.delete_thread("thread-1")
+
+    assert await data_layer.list_thread_grants("thread-1") == []
+
+
+async def test_delete_all_threads_removes_only_the_owners_grants(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="grants_alice"))
+    bob = await data_layer.create_user(User(identifier="grants_bob"))
+    assert alice
+    assert bob
+    await data_layer.update_thread("alice-thread", user_id=alice.id)
+    await data_layer.update_thread("bob-thread", user_id=bob.id)
+    await data_layer.create_thread_grant(_grant(thread_id="alice-thread"))
+    await data_layer.create_thread_grant(_grant(thread_id="bob-thread"))
+
+    deleted = await data_layer.delete_all_threads(alice.id)
+
+    assert deleted >= 1
+    assert await data_layer.list_thread_grants("alice-thread") == []
+    assert await data_layer.list_thread_grants("bob-thread") == [
+        _grant(thread_id="bob-thread")
+    ]
+
+
+async def test_update_thread_without_an_owner_keeps_grants(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.create_thread_grant(_grant())
+
+    await data_layer.update_thread("thread-1", name="renamed")
+
+    assert await data_layer.list_thread_grants("thread-1") == [_grant()]
+
+
+async def test_update_thread_owner_change_removes_grants(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="grants_owner_alice"))
+    bob = await data_layer.create_user(User(identifier="grants_owner_bob"))
+    assert alice
+    assert bob
+    await data_layer.update_thread("thread-1", user_id=alice.id)
+    await data_layer.create_thread_grant(_grant())
+
+    await data_layer.update_thread("thread-1", user_id=alice.id)
+    assert await data_layer.list_thread_grants("thread-1") == [_grant()]
+
+    await data_layer.update_thread("thread-1", user_id=bob.id)
+    assert await data_layer.list_thread_grants("thread-1") == []
+
+
+async def test_get_feedback_thread_id_is_typed(data_layer: SQLAlchemyDataLayer):
+    assert (
+        await data_layer.get_feedback_thread_id("missing-feedback")
+    ).status == "not_found"
+
+    await data_layer.execute_sql(
+        'INSERT INTO feedbacks ("id", "forId", "threadId", "value") VALUES (:id, :for_id, :thread_id, 1)',
+        {"id": "feedback-1", "for_id": "step-1", "thread_id": "thread-1"},
+    )
+
+    found = await data_layer.get_feedback_thread_id("feedback-1")
+    assert found.status == "found"
+    assert found.thread_id == "thread-1"
+
+
+async def test_get_feedback_thread_id_errors_are_typed(
+    tmp_path: Path, mock_storage_client: BaseStorageClient
+):
+    """A legacy row may have a NULL threadId; SQLite needs a nullable table."""
+    db_file = tmp_path / "legacy_db.sqlite"
+    conninfo = f"sqlite+aiosqlite:///{db_file}"
+    engine = create_async_engine(conninfo)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE feedbacks (
+                    "id" TEXT PRIMARY KEY,
+                    "forId" TEXT NOT NULL,
+                    "threadId" TEXT,
+                    "value" INT NOT NULL
+                );
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                'INSERT INTO feedbacks ("id", "forId", "threadId", "value") '
+                "VALUES ('legacy-feedback', 'step-1', NULL, 1)"
+            )
+        )
+    await engine.dispose()
+    layer = SQLAlchemyDataLayer(conninfo, storage_provider=mock_storage_client)
+    try:
+        lookup = await layer.get_feedback_thread_id("legacy-feedback")
+        assert lookup.status == "found"
+        assert lookup.thread_id is None
+    finally:
+        await layer.close()
+
+
+async def test_get_feedback_thread_id_failure_is_an_error(
+    data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        data_layer,
+        "async_session",
+        lambda: _FailingSession(SQLAlchemyError("boom")),
+    )
+
+    assert (await data_layer.get_feedback_thread_id("feedback-1")).status == "error"
+
+
+async def test_step_belongs_to_thread_is_a_point_check(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.execute_sql(
+        """
+        INSERT INTO steps ("id", "name", "type", "threadId", "disableFeedback", "streaming")
+        VALUES (:id, 'step', 'assistant_message', :thread_id, false, false)
+        """,
+        {"id": "step-1", "thread_id": "thread-1"},
+    )
+
+    assert await data_layer.step_belongs_to_thread("thread-1", "step-1") is True
+    assert await data_layer.step_belongs_to_thread("thread-2", "step-1") is False
+    assert await data_layer.step_belongs_to_thread("thread-1", "step-2") is False
+
+
+async def test_step_belongs_to_thread_denies_on_error(
+    data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        data_layer,
+        "async_session",
+        lambda: _FailingSession(SQLAlchemyError("boom")),
+    )
+
+    assert await data_layer.step_belongs_to_thread("thread-1", "step-1") is False
+
+
+async def test_upsert_feedback_does_not_overwrite_another_threads_row(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.upsert_feedback(
+        Feedback(id="feedback-1", forId="step-1", threadId="thread-1", value=1)
+    )
+
+    await data_layer.upsert_feedback(
+        Feedback(id="feedback-1", forId="step-2", threadId="thread-2", value=0)
+    )
+
+    row = await data_layer.execute_sql(
+        'SELECT * FROM feedbacks WHERE "id" = :id', {"id": "feedback-1"}
+    )
+    assert isinstance(row, list)
+    assert row[0]["threadId"] == "thread-1"
+    assert row[0]["forId"] == "step-1"
+    assert row[0]["value"] == 1
+
+
+async def test_upsert_feedback_still_updates_its_own_thread(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.upsert_feedback(
+        Feedback(id="feedback-1", forId="step-1", threadId="thread-1", value=1)
+    )
+
+    await data_layer.upsert_feedback(
+        Feedback(id="feedback-1", forId="step-1", threadId="thread-1", value=0)
+    )
+
+    row = await data_layer.execute_sql(
+        'SELECT * FROM feedbacks WHERE "id" = :id', {"id": "feedback-1"}
+    )
+    assert isinstance(row, list)
+    assert row[0]["value"] == 0
+
+
+async def test_grant_reads_deny_on_a_query_failure(
+    data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    await data_layer.create_thread_grant(_grant())
+
+    async def failing_execute_sql(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(data_layer, "execute_sql", failing_execute_sql)
+
+    assert await data_layer.get_thread_grant("thread-1", "bob-id") is None
+    assert await data_layer.list_thread_grants("thread-1") == []
+
+
+async def test_revoke_failure_is_not_silent(
+    data_layer: SQLAlchemyDataLayer, monkeypatch: pytest.MonkeyPatch
+):
+    await data_layer.create_thread_grant(_grant())
+
+    async def failing_execute_sql(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(data_layer, "execute_sql", failing_execute_sql)
+
+    with pytest.raises(RuntimeError):
+        await data_layer.delete_thread_grant("thread-1", "bob-id")
+
+
+async def test_delete_thread_works_without_a_grants_table(
+    data_layer: SQLAlchemyDataLayer,
+):
+    await data_layer.update_thread("thread-1")
+    data_layer._thread_grants_table_checked = True
+    data_layer._thread_grants_table_ready = False
+
+    await data_layer.delete_thread("thread-1")
+
+    assert await data_layer.get_thread("thread-1") is None
+
+
+async def test_delete_all_threads_works_without_a_grants_table(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="grants_no_table"))
+    assert alice
+    await data_layer.update_thread("thread-1", user_id=alice.id)
+    data_layer._thread_grants_table_checked = True
+    data_layer._thread_grants_table_ready = False
+
+    assert await data_layer.delete_all_threads(alice.id) == 1
+
+
+async def test_execute_sql_raise_on_error_is_additive(data_layer: SQLAlchemyDataLayer):
+    assert (
+        await data_layer.execute_sql("SELECT * FROM table_that_does_not_exist", {})
+        is None
+    )
+
+    with pytest.raises(SQLAlchemyError):
+        await data_layer.execute_sql(
+            "SELECT * FROM table_that_does_not_exist", {}, raise_on_error=True
+        )

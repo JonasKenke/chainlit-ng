@@ -5,16 +5,25 @@ caller gets a denial, and the data-layer mutator is never reached.
 """
 
 import json
+import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from chainlit.auth import get_current_user
 from chainlit.config import config
 from chainlit.context import context_var
-from chainlit.data.acl import ThreadAccess, authorize_thread_read
+from chainlit.data.acl import (
+    MAX_THREAD_GRANTS_PER_THREAD,
+    ThreadAccess,
+    authorize_thread_read,
+)
 from chainlit.data.base import BaseDataLayer
+from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.server import app
 from chainlit.session import WebsocketSession
 from chainlit.thread_metadata import public_thread
@@ -26,7 +35,7 @@ from chainlit.types import (
     ThreadGrant,
     ThreadOwner,
 )
-from chainlit.user import PersistedUser
+from chainlit.user import PersistedUser, User
 
 ALICE = PersistedUser(
     id="alice-id", identifier="alice", createdAt="2026-01-01T00:00:00Z"
@@ -1077,6 +1086,7 @@ class TestFeedbackGate:
             FeedbackThreadLookup(status="found", thread_id="thread-2"),
             FeedbackThreadLookup(status="found", thread_id=None),
             FeedbackThreadLookup(status="error"),
+            None,
         ],
     )
     def test_update_denies_an_existing_row_it_does_not_resolve(
@@ -1210,3 +1220,541 @@ class TestFeedbackGate:
         data_layer.upsert_feedback.assert_awaited_once()
         data_layer.get_feedback_thread_id.assert_not_awaited()
         data_layer.step_belongs_to_thread.assert_not_awaited()
+
+
+SQL_SCHEMA = [
+    """
+    CREATE TABLE users (
+        "id" UUID PRIMARY KEY,
+        "identifier" TEXT NOT NULL UNIQUE,
+        "metadata" JSONB NOT NULL,
+        "createdAt" TEXT
+    );
+    """,
+    """
+    CREATE TABLE threads (
+        "id" UUID PRIMARY KEY,
+        "createdAt" TEXT,
+        "name" TEXT,
+        "userId" UUID,
+        "userIdentifier" TEXT,
+        "tags" TEXT[],
+        "metadata" JSONB NOT NULL DEFAULT '{}'
+    );
+    """,
+    """
+    CREATE TABLE steps (
+        "id" UUID PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "type" TEXT NOT NULL,
+        "threadId" UUID NOT NULL,
+        "parentId" UUID,
+        "disableFeedback" BOOLEAN NOT NULL,
+        "streaming" BOOLEAN NOT NULL,
+        "waitForAnswer" BOOLEAN,
+        "isError" BOOLEAN,
+        "metadata" JSONB,
+        "tags" TEXT[],
+        "input" TEXT,
+        "output" TEXT,
+        "createdAt" TEXT,
+        "start" TEXT,
+        "end" TEXT,
+        "generation" JSONB,
+        "showInput" TEXT,
+        "language" TEXT,
+        "indent" INT
+    );
+    """,
+    """
+    CREATE TABLE elements (
+        "id" UUID PRIMARY KEY,
+        "threadId" UUID,
+        "type" TEXT,
+        "url" TEXT,
+        "chainlitKey" TEXT,
+        "name" TEXT NOT NULL,
+        "display" TEXT,
+        "objectKey" TEXT,
+        "size" TEXT,
+        "page" INT,
+        "language" TEXT,
+        "forId" UUID,
+        "mime" TEXT,
+        "props" JSONB DEFAULT '{}'
+    );
+    """,
+    # threadId stays nullable here: legacy rows carry NULL and must be denied.
+    """
+    CREATE TABLE feedbacks (
+        "id" UUID PRIMARY KEY,
+        "forId" UUID NOT NULL,
+        "threadId" UUID,
+        "value" INT NOT NULL,
+        "comment" TEXT
+    );
+    """,
+]
+
+
+@pytest.fixture
+async def sql_layer(tmp_path: Path):
+    conninfo = f"sqlite+aiosqlite:///{tmp_path / 'tenancy.sqlite'}"
+    engine = create_async_engine(conninfo)
+    async with engine.begin() as conn:
+        for statement in SQL_SCHEMA:
+            await conn.execute(text(statement))
+    await engine.dispose()
+    layer = SQLAlchemyDataLayer(conninfo)
+    yield layer
+    await layer.close()
+
+
+@pytest.fixture
+def sql_grants_active(monkeypatch, sql_layer):
+    """The real SQL layer behind the S1 chokepoint and grant routes."""
+    monkeypatch.setattr(config.features, "thread_grants", True)
+    monkeypatch.setattr("chainlit.server.require_login", lambda: True)
+    with (
+        patch("chainlit.server.get_data_layer", return_value=sql_layer),
+        patch("chainlit.data.acl.get_data_layer", return_value=sql_layer),
+    ):
+        yield sql_layer
+
+
+async def _sql_thread(layer, owner, thread_id="thread-1", step_id="step-1"):
+    await layer.update_thread(thread_id, user_id=owner.id)
+    await layer.execute_sql(
+        """
+        INSERT INTO steps ("id", "name", "type", "threadId", "disableFeedback", "streaming")
+        VALUES (:id, 'step', 'assistant_message', :thread_id, false, false)
+        """,
+        {"id": step_id, "thread_id": thread_id},
+    )
+
+
+async def _sql_feedback(layer, feedback_id, step_id, thread_id, value=1):
+    await layer.execute_sql(
+        'INSERT INTO feedbacks ("id", "forId", "threadId", "value") '
+        "VALUES (:id, :for_id, :thread_id, :value)",
+        {
+            "id": feedback_id,
+            "for_id": step_id,
+            "thread_id": thread_id,
+            "value": value,
+        },
+    )
+
+
+async def _stored_feedback(layer, feedback_id):
+    rows = await layer.execute_sql(
+        'SELECT * FROM feedbacks WHERE "id" = :id', {"id": feedback_id}
+    )
+    assert isinstance(rows, list)
+    return rows[0] if rows else None
+
+
+class TestSqlThreadGrants:
+    async def test_owner_creates_lists_and_revokes_a_grant(
+        self, client, sql_grants_active
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        as_user(alice)
+
+        created = client.post(
+            "/project/thread/thread-1/grants", json={"grantee": "bob"}
+        )
+        duplicate = client.post(
+            "/project/thread/thread-1/grants", json={"grantee": "bob"}
+        )
+        listed = client.get("/project/thread/thread-1/grants")
+
+        assert created.status_code == 200, created.text
+        assert duplicate.status_code == 200
+        assert created.json() == duplicate.json() == {"success": True}
+        assert listed.status_code == 200
+        grants = listed.json()
+        assert len(grants) == 1
+        assert grants[0]["grantee_user_id"] == bob.id
+        assert grants[0]["grantee_identifier"] == "bob"
+        assert grants[0]["grantee_user_created_at"] == bob.createdAt
+        assert grants[0]["role"] == "read"
+        assert listed.headers["cache-control"] == "private, no-store"
+
+        revoked = client.delete(f"/project/thread/thread-1/grants/{bob.id}")
+        assert revoked.status_code == 200
+        assert client.get("/project/thread/thread-1/grants").json() == []
+        assert await layer.get_thread_grant("thread-1", bob.id) is None
+
+    async def test_self_unknown_and_foreign_grants_are_refused(
+        self, client, sql_grants_active
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice)
+        as_user(alice)
+
+        own = client.post("/project/thread/thread-1/grants", json={"grantee": "alice"})
+        unknown = client.post(
+            "/project/thread/thread-1/grants", json={"grantee": "never-seen"}
+        )
+        assert own.status_code == 400
+        assert unknown.status_code == 200
+        assert unknown.json() == {"success": True}
+        assert await layer.list_thread_grants("thread-1") == []
+
+        as_user(bob)
+        foreign = client.post(
+            "/project/thread/thread-1/grants", json={"grantee": "bob"}
+        )
+        assert foreign.status_code == 404
+        assert await layer.list_thread_grants("thread-1") == []
+
+    async def test_grant_cap_is_enforced(self, client, sql_grants_active):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice)
+        for index in range(MAX_THREAD_GRANTS_PER_THREAD):
+            await layer.create_thread_grant(
+                ThreadGrant(
+                    thread_id="thread-1",
+                    grantee_user_id=f"grantee-{index}",
+                    grantee_user_created_at="2026-01-01T00:00:00Z",
+                    grantee_identifier=f"grantee-{index}",
+                    granted_by_user_id=alice.id,
+                    granted_at="2026-01-01T00:00:00Z",
+                )
+            )
+        as_user(alice)
+
+        response = client.post(
+            "/project/thread/thread-1/grants", json={"grantee": "bob"}
+        )
+
+        assert response.status_code == 409
+        assert await layer.get_thread_grant("thread-1", bob.id) is None
+
+    async def test_grantee_reads_the_share_route_until_revoked(
+        self, client, sql_grants_active
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        carol = await layer.create_user(User(identifier="carol"))
+        assert alice
+        assert bob
+        assert carol
+        await _sql_thread(layer, alice)
+        await layer.create_thread_grant(
+            ThreadGrant(
+                thread_id="thread-1",
+                grantee_user_id=bob.id,
+                grantee_user_created_at=bob.createdAt,
+                grantee_identifier=bob.identifier,
+                granted_by_user_id=alice.id,
+                granted_at="2026-01-01T00:00:00Z",
+            )
+        )
+
+        as_user(bob)
+        granted = client.get("/project/share/thread-1")
+        assert granted.status_code == 200, granted.text
+        body = granted.json()
+        assert body["userId"] is None
+        assert body["userIdentifier"] is None
+        assert "chat_settings" not in body
+        for key in ("PK", "SK", "UserThreadPK", "UserThreadSK"):
+            assert key not in body
+
+        as_user(carol)
+        assert client.get("/project/share/thread-1").status_code == 404
+
+        as_user(alice)
+        assert (
+            client.delete(f"/project/thread/thread-1/grants/{bob.id}").status_code
+            == 200
+        )
+
+        as_user(bob)
+        assert client.get("/project/share/thread-1").status_code == 404
+
+        # An anonymous public link keeps working after the revoke.
+        await layer.update_thread("thread-1", metadata={"is_shared": True})
+        app.dependency_overrides.pop(get_current_user, None)
+        assert client.get("/project/share/thread-1").status_code == 200
+
+    @pytest.mark.parametrize(
+        "grant_mutation",
+        [
+            {"grantee_user_id": "stale-bob-id"},
+            {"grantee_user_created_at": "2020-01-01T00:00:00Z"},
+            {"grantee_user_created_at": ""},
+        ],
+    )
+    async def test_grants_with_a_wrong_identity_or_generation_are_denied(
+        self, client, sql_grants_active, grant_mutation
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice)
+        values = {
+            "thread_id": "thread-1",
+            "grantee_user_id": bob.id,
+            "grantee_user_created_at": bob.createdAt,
+            "grantee_identifier": "bob",
+            "granted_by_user_id": alice.id,
+            "granted_at": "2026-01-01T00:00:00Z",
+            **grant_mutation,
+        }
+        await layer.create_thread_grant(ThreadGrant(**values))
+
+        as_user(bob)
+        assert client.get("/project/share/thread-1").status_code == 404
+
+    async def test_a_write_role_grant_is_denied(self, client, sql_grants_active):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice)
+        await layer.create_thread_grant(
+            ThreadGrant(
+                thread_id="thread-1",
+                grantee_user_id=bob.id,
+                grantee_user_created_at=bob.createdAt,
+                grantee_identifier="bob",
+                granted_by_user_id=alice.id,
+                granted_at="2026-01-01T00:00:00Z",
+                role="write",
+            )
+        )
+
+        as_user(bob)
+        assert client.get("/project/share/thread-1").status_code == 404
+
+    async def test_grant_creation_never_logs_the_grantee(
+        self, client, sql_grants_active, caplog: pytest.LogCaptureFixture
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        assert alice
+        await _sql_thread(layer, alice)
+        layer.show_logger = True
+        as_user(alice)
+        caplog.clear()
+
+        with caplog.at_level(logging.INFO):
+            response = client.post(
+                "/project/thread/thread-1/grants",
+                json={"grantee": "quiet-grantee@example.com"},
+            )
+            rename = client.put(
+                "/project/thread", json={"threadId": "thread-1", "name": "renamed"}
+            )
+
+        assert response.status_code == 200, response.text
+        assert rename.status_code == 200, rename.text
+        assert "quiet-grantee@example.com" not in caplog.text
+        assert alice.id not in caplog.text
+
+
+class TestSqlFeedbackH1:
+    async def _attacker_put(self, client, layer, bob, feedback):
+        as_user(bob)
+        with patch(
+            "chainlit.session.WebsocketSession.get_by_id",
+            return_value=_websocket_session(bob, "thread-2"),
+        ):
+            return client.put(
+                "/feedback", json={"sessionId": "session-2", "feedback": feedback}
+            )
+
+    async def test_a_victim_feedback_id_is_denied_and_unchanged(
+        self, client, sql_grants_active
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        await _sql_thread(layer, bob, thread_id="thread-2", step_id="step-2")
+        await _sql_feedback(layer, "victim-feedback", "step-1", "thread-1", value=1)
+
+        response = await self._attacker_put(
+            client,
+            layer,
+            bob,
+            {
+                "id": "victim-feedback",
+                "forId": "step-2",
+                "value": 0,
+                "threadId": "thread-2",
+            },
+        )
+
+        assert response.status_code == 404
+        assert (await _stored_feedback(layer, "victim-feedback"))["threadId"] == (
+            "thread-1"
+        )
+        assert (await _stored_feedback(layer, "victim-feedback"))["value"] == 1
+
+    async def test_a_victim_step_is_denied(self, client, sql_grants_active):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        await _sql_thread(layer, bob, thread_id="thread-2", step_id="step-2")
+        await _sql_feedback(layer, "victim-feedback", "step-1", "thread-1", value=1)
+
+        response = await self._attacker_put(
+            client,
+            layer,
+            bob,
+            {"forId": "step-1", "value": 0, "threadId": "thread-2"},
+        )
+
+        assert response.status_code == 404
+        assert (await _stored_feedback(layer, "victim-feedback"))["value"] == 1
+
+    async def test_a_legacy_null_thread_row_is_denied(self, client, sql_grants_active):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        await _sql_thread(layer, bob, thread_id="thread-2", step_id="step-2")
+        await _sql_feedback(layer, "legacy-feedback", "step-1", None, value=1)
+
+        # A NULL thread id is invisible to the thread payload, so the attack
+        # surface is the client-supplied id: the lookup must find it and deny.
+        response = await self._attacker_put(
+            client,
+            layer,
+            bob,
+            {
+                "id": "legacy-feedback",
+                "forId": "step-2",
+                "value": 0,
+                "threadId": "thread-2",
+            },
+        )
+
+        assert response.status_code == 404
+        assert (await _stored_feedback(layer, "legacy-feedback"))["value"] == 1
+
+    async def test_a_lookup_error_is_denied(self, client, sql_grants_active):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        await _sql_thread(layer, bob, thread_id="thread-2", step_id="step-2")
+        await _sql_feedback(layer, "victim-feedback", "step-1", "thread-1", value=1)
+        await layer.execute_sql("ALTER TABLE feedbacks RENAME TO feedbacks_old", {})
+
+        response = await self._attacker_put(
+            client,
+            layer,
+            bob,
+            {
+                "id": "victim-feedback",
+                "forId": "step-2",
+                "value": 0,
+                "threadId": "thread-2",
+            },
+        )
+
+        assert response.status_code == 404
+        rows = await layer.execute_sql(
+            'SELECT * FROM feedbacks_old WHERE "id" = :id',
+            {"id": "victim-feedback"},
+        )
+        assert isinstance(rows, list)
+        assert rows[0]["value"] == 1
+
+    async def test_the_owner_can_write_their_own_feedback(
+        self, client, sql_grants_active
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        assert alice
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        as_user(alice)
+
+        with patch(
+            "chainlit.session.WebsocketSession.get_by_id",
+            return_value=_websocket_session(alice, "thread-1"),
+        ):
+            response = client.put(
+                "/feedback",
+                json={
+                    "sessionId": "alice-session",
+                    "feedback": {
+                        "forId": "step-1",
+                        "value": 1,
+                        "threadId": "thread-1",
+                    },
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        assert (await _stored_feedback(layer, response.json()["feedbackId"]))[
+            "threadId"
+        ] == "thread-1"
+
+    async def test_delete_of_a_legacy_null_row_is_a_no_op(
+        self, client, sql_grants_active
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        assert alice
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        await _sql_feedback(layer, "legacy-feedback", "step-1", None, value=1)
+        as_user(alice)
+
+        response = client.request(
+            "DELETE", "/feedback", json={"feedbackId": "legacy-feedback"}
+        )
+
+        assert response.status_code == 200
+        assert (await _stored_feedback(layer, "legacy-feedback"))["value"] == 1
+
+    async def test_delete_of_a_foreign_feedback_is_a_no_op(
+        self, client, sql_grants_active
+    ):
+        layer = sql_grants_active
+        alice = await layer.create_user(User(identifier="alice"))
+        bob = await layer.create_user(User(identifier="bob"))
+        assert alice
+        assert bob
+        await _sql_thread(layer, alice, thread_id="thread-1", step_id="step-1")
+        await _sql_feedback(layer, "victim-feedback", "step-1", "thread-1", value=1)
+        as_user(bob)
+
+        response = client.request(
+            "DELETE", "/feedback", json={"feedbackId": "victim-feedback"}
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"success": True}
+        assert (await _stored_feedback(layer, "victim-feedback"))["value"] == 1
