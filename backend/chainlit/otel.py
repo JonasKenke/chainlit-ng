@@ -37,6 +37,25 @@ _DEFAULT_SERVICE_NAME = "chainlit"
 
 # RFC 7230 token, the only charset OTLP header names may use.
 _HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+# RFC 7230 field-value minus obs-text: printable ASCII and space only. CR, LF,
+# NUL, other C0/DEL and non-ASCII values are dropped before an exporter can
+# reject and log them (D3, §6.3).
+_HEADER_VALUE_RE = re.compile(r"[\x20-\x7e]*")
+
+# §5.4: the only attribute keys any span may carry.
+_ATTRIBUTE_KEYS = frozenset(
+    {
+        "chainlit.span.unclosed",
+        "chainlit.step.is_error",
+        "chainlit.step.type",
+        "chainlit.telemetry.dropped_spans",
+        "chainlit.thread.id",
+        "chainlit.turn.cancelled",
+        "chainlit.turn.kind",
+        "error.type",
+    }
+)
+
 # §4.4: a dynamic exception class name must not bypass the bound.
 _ERROR_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
 
@@ -247,13 +266,22 @@ def _build_exporter() -> Tuple[Any, str, List[str], int]:
 
 
 def _resolve_endpoint() -> str:
-    traces_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "").strip()
-    if traces_endpoint:
-        return traces_endpoint
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
-    if endpoint:
-        return endpoint.rstrip("/") + "/v1/traces"
-    return _DEFAULT_ENDPOINT
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "").strip()
+    if not endpoint:
+        root = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+        endpoint = root.rstrip("/") + "/v1/traces" if root else _DEFAULT_ENDPOINT
+    _validate_endpoint(endpoint)
+    return endpoint
+
+
+def _validate_endpoint(endpoint: str) -> None:
+    """Reject endpoints an exporter error could echo verbatim (D3)."""
+    if not endpoint or not _HEADER_VALUE_RE.fullmatch(endpoint):
+        raise ValueError("invalid OTLP endpoint")
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("invalid OTLP endpoint")
+    parsed.port  # raises ValueError for a malformed or out-of-range port
 
 
 def _loggable_endpoint(endpoint: str) -> str:
@@ -292,8 +320,22 @@ def _parse_otlp_headers(raw: str) -> Tuple[Dict[str, str], List[str], int]:
         if not separator or not _HEADER_NAME_RE.match(name):
             dropped += 1
             continue
-        headers[name] = unquote(value.strip())
+        value = unquote(value.strip())
+        if not _HEADER_VALUE_RE.fullmatch(value):
+            dropped += 1
+            continue
+        headers[name] = value
     return headers, sorted(headers), dropped
+
+
+def _attributes(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Return only allowlisted attributes (§5.4)."""
+    return {key: value for key, value in values.items() if key in _ATTRIBUTE_KEYS}
+
+
+def _set_attributes(span: Any, values: Dict[str, Any]) -> None:
+    for key, value in _attributes(values).items():
+        span.set_attribute(key, value)
 
 
 class _QueueFullFilter(logging.Filter):
@@ -360,7 +402,7 @@ def start_turn(kind: str, thread_id: Optional[str] = None) -> Optional[_Turn]:
             "chainlit.turn",
             context=otel_context.Context(),
             kind=trace.SpanKind.INTERNAL,
-            attributes=attributes,
+            attributes=_attributes(attributes),
             record_exception=False,
             set_status_on_exception=False,
         )
@@ -399,17 +441,19 @@ def end_turn(turn: Optional[_Turn]) -> None:
             if not handle.ended:
                 handle.ended = True
                 try:
-                    handle.span.set_attribute("chainlit.span.unclosed", True)
+                    _set_attributes(handle.span, {"chainlit.span.unclosed": True})
                     handle.span.end()
                 except Exception:
                     pass
             _deactivate(handle)
         if dropped:
-            turn.root.set_attribute("chainlit.telemetry.dropped_spans", dropped)
+            _set_attributes(turn.root, {"chainlit.telemetry.dropped_spans": dropped})
         if turn.cancelled:
-            turn.root.set_attribute("chainlit.turn.cancelled", True)
+            _set_attributes(turn.root, {"chainlit.turn.cancelled": True})
         if turn.error_type is not None:
-            turn.root.set_attribute("error.type", _sanitize_error_type(turn.error_type))
+            _set_attributes(
+                turn.root, {"error.type": _sanitize_error_type(turn.error_type)}
+            )
             _set_error_status(turn.root)
         turn.root.end()
     except Exception:
@@ -446,10 +490,12 @@ def start_step(step: Any) -> None:
                     if step_type in _CLIENT_STEP_TYPES
                     else trace.SpanKind.INTERNAL
                 ),
-                attributes={
-                    "chainlit.step.type": step_type,
-                    "chainlit.step.is_error": False,
-                },
+                attributes=_attributes(
+                    {
+                        "chainlit.step.type": step_type,
+                        "chainlit.step.is_error": False,
+                    }
+                ),
                 record_exception=False,
                 set_status_on_exception=False,
             )
@@ -482,10 +528,14 @@ def end_step(step: Any, exc_type: Any = None) -> None:
 
         span = handle.span
         if exc_type is not None or bool(getattr(step, "is_error", False)):
-            span.set_attribute("chainlit.step.is_error", True)
-            span.set_attribute(
-                "error.type",
-                _sanitize_error_type(exc_type if exc_type is not None else "error"),
+            _set_attributes(span, {"chainlit.step.is_error": True})
+            _set_attributes(
+                span,
+                {
+                    "error.type": _sanitize_error_type(
+                        exc_type if exc_type is not None else "error"
+                    )
+                },
             )
             _set_error_status(span)
         span.end()

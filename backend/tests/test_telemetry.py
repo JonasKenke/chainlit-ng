@@ -882,7 +882,16 @@ async def test_ambient_context_and_baggage_are_ignored(
     ["OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS"],
 )
 def test_header_secrets_never_reach_logs(monkeypatch, caplog, env_var):
-    raw = f"not-a-header-{SENTINEL},x-api-key=abc123"
+    raw = ",".join(
+        [
+            f"not-a-header-{SENTINEL}",
+            "x-api-key=abc123",
+            f"x-bad-newline={SENTINEL}\nINJECTED",
+            f"x-bad-encoded={SENTINEL}%0AINJECTED",
+            f"x-bad-del={SENTINEL}\x7f",
+            f"x-bad-unicode={SENTINEL}\u00e9",
+        ]
+    )
     monkeypatch.setenv(env_var, raw)
     _enable_config(monkeypatch)
 
@@ -906,13 +915,16 @@ def test_header_secrets_never_reach_logs(monkeypatch, caplog, env_var):
         FakeExporter,
     )
 
-    with caplog.at_level(logging.DEBUG, logger="chainlit"):
+    with (
+        caplog.at_level(logging.DEBUG, logger="chainlit"),
+        caplog.at_level(logging.DEBUG, logger="opentelemetry"),
+    ):
         otel.init()
 
     assert otel._provider is not None
     assert captured["headers"] == {"x-api-key": "abc123"}
     assert SENTINEL not in caplog.text
-    assert "dropped 1 malformed OTLP header entry" in caplog.text
+    assert "dropped 5 malformed OTLP header entries" in caplog.text
     assert "x-api-key" in caplog.text
     # The env vars are restored after construction.
     assert os.environ[env_var] == raw
@@ -951,6 +963,20 @@ def test_endpoint_secrets_never_reach_logs(monkeypatch, caplog):
     assert captured["endpoint"] == endpoint
     assert SENTINEL not in caplog.text
     assert "https://collector.example:4318" in caplog.text
+
+
+def test_malformed_endpoint_is_not_echoed(monkeypatch, caplog):
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        f"http://localhost:{SENTINEL}/v1/traces",
+    )
+    _enable_config(monkeypatch)
+
+    with caplog.at_level(logging.DEBUG, logger="chainlit"):
+        otel.init()
+
+    assert otel._provider is None
+    assert SENTINEL not in caplog.text
 
 
 # ---------------------------------------------------------------------------
