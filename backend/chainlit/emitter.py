@@ -148,6 +148,10 @@ class BaseChainlitEmitter:
         """Stub method to open the side view for an element by id."""
         pass
 
+    async def send_question(self, question: Dict[str, Any]):
+        """Stub method to send a question card to the UI."""
+        pass
+
     def send_timeout(self, event: Literal["ask_timeout", "call_fn_timeout"]):
         """Stub method to send a timeout to the UI."""
         pass
@@ -298,6 +302,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
     async def open_side_view(self, element_id: str):
         """Open the side view for an element the client already received."""
         await self.emit("open_side_view", {"id": element_id})
+
+    async def send_question(self, question: Dict[str, Any]):
+        """Send a question card to the UI."""
+        await self.emit("question", question)
 
     def send_timeout(self, event: Literal["ask_timeout", "call_fn_timeout"]):
         return self.emit(event, {})

@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import uuid
 import weakref
@@ -28,6 +29,8 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
+    Union,
+    cast,
 )
 
 from pydantic import (
@@ -44,21 +47,47 @@ from chainlit.data import get_data_layer
 from chainlit.logger import logger
 from chainlit.session import WebsocketSession
 from chainlit.step import Step
-from chainlit.user import User
+from chainlit.user import PersistedUser, User
 
 if TYPE_CHECKING:
     from chainlit.emitter import BaseChainlitEmitter
 
 APPROVAL_METADATA_KEY = "approval"
-MAX_PENDING_APPROVALS_PER_SESSION = 8
+MAX_PENDING_INTERACTIONS_PER_SESSION = 8
+# Historical name; approvals and questions share one cap.
+MAX_PENDING_APPROVALS_PER_SESSION = MAX_PENDING_INTERACTIONS_PER_SESSION
 _TERMINAL_RECORD_LIMIT = 256
+_MAX_QUESTION_PROMPT = 2000
+_MAX_QUESTION_ANSWER = 2000
+_MAX_QUESTION_OPTIONS = 8
+_MAX_OPTION_LABEL = 200
+_MAX_OPTION_DESCRIPTION = 500
+_OPTION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 ApprovalStatus = Literal[
     "pending", "approved", "rejected", "edited", "expired", "superseded", "orphaned"
 ]
+QuestionStatus = Literal["pending", "answered", "expired", "superseded", "orphaned"]
+InteractionStatus = Literal[
+    "pending",
+    "approved",
+    "rejected",
+    "edited",
+    "answered",
+    "expired",
+    "superseded",
+    "orphaned",
+]
+InteractionKind = Literal["approval", "question"]
 Decision = Literal["approve", "reject", "edit", "expired", "superseded", "orphaned"]
 
 _USER_STATUSES = {"approved", "rejected", "edited"}
+_QUESTION_USER_STATUSES = {"answered"}
+_USER_STATUSES_BY_KIND: Dict[str, set[str]] = {
+    "approval": _USER_STATUSES,
+    "question": _QUESTION_USER_STATUSES,
+}
+_ALL_USER_STATUSES = _USER_STATUSES | _QUESTION_USER_STATUSES
 _SYSTEM_STATUSES = {"expired", "superseded", "orphaned"}
 
 _SECRET_KEY_PARTS = (
@@ -159,6 +188,53 @@ class ApprovalPending(ApprovalError):
     status_code = 409
 
 
+class QuestionInvalid(ApprovalError):
+    code = "QuestionInvalid"
+    status_code = 422
+
+
+class QuestionAlreadyAsked(ApprovalError):
+    code = "QuestionAlreadyAsked"
+    status_code = 409
+
+
+@dataclass(frozen=True)
+class QuestionOption:
+    id: str
+    label: str
+    description: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class QuestionAnswer:
+    question_id: str
+    thread_id: str
+    step_id: str
+    status: QuestionStatus
+    option_id: Optional[str]
+    label: Optional[str]
+    text: Optional[str]
+    user: Optional[User]
+    answered_at: str
+    durable: bool
+
+    @property
+    def answered(self) -> bool:
+        return self.status == "answered"
+
+    def as_tool_result(self) -> Dict[str, Any]:
+        """Provenance-marked payload; the answer is untrusted user input."""
+        return {
+            "provenance": "chainlit.question_answer",
+            "trust": "untrusted_user_input",
+            "questionId": self.question_id,
+            "status": self.status,
+            "optionId": self.option_id,
+            "text": self.text,
+            "durable": self.durable,
+        }
+
+
 @dataclass(frozen=True)
 class ApprovalDecision:
     approval_id: str
@@ -188,6 +264,8 @@ class _Entry:
     arguments_schema: Optional[type[BaseModel]] = None
     redact: tuple[str, ...] = ()
     decided_arguments: Optional[Dict[str, Any]] = None
+    kind: InteractionKind = "approval"
+    payload: Dict[str, Any] = field(default_factory=dict)
 
 
 # Module-level, in-process registry. S1 runs in one worker with sticky
@@ -197,7 +275,15 @@ _pending_by_step: Dict[tuple[str, str], str] = {}
 _step_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = (
     weakref.WeakValueDictionary()
 )
-_terminal_records: Dict[str, tuple[str, Dict[str, Any]]] = {}
+_terminal_records: Dict[str, tuple[str, InteractionKind, Dict[str, Any]]] = {}
+
+# Reservations let concurrent asks on distinct steps count against the shared
+# cap before their first write. Keyed by session generation; asyncio is
+# single-threaded, so an unguarded synchronous decrement cannot race.
+_reservations: Dict[str, int] = {}
+_cap_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
 
 # Thread ids deleted while an approval step may still write. In-process, like
 # the registry: a restart also ends the waiting run. Shortcut: keep the most
@@ -208,6 +294,41 @@ _managed_thread_users: Dict[str, str] = {}
 
 _PROCESS_DIGEST_KEY = secrets.token_bytes(32)
 _JSON_ADAPTER = TypeAdapter(Any)
+
+
+def _cap_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _cap_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _cap_locks[loop] = lock
+    return lock
+
+
+async def _reserve_capacity(generation: str) -> None:
+    async with _cap_lock():
+        pending = sum(
+            1
+            for entry in _pending_by_approval.values()
+            if entry.session_generation == generation
+        )
+        if pending + _reservations.get(generation, 0) >= (
+            MAX_PENDING_INTERACTIONS_PER_SESSION
+        ):
+            raise ApprovalLimitReached("Too many pending interactions in this session")
+        _reservations[generation] = _reservations.get(generation, 0) + 1
+
+
+def _release_reservation(generation: str) -> None:
+    remaining = _reservations.get(generation, 0) - 1
+    if remaining > 0:
+        _reservations[generation] = remaining
+    else:
+        _reservations.pop(generation, None)
+
+
+def _commit_reservation(generation: str) -> None:
+    _release_reservation(generation)
 
 
 def step_lock(thread_id: str, step_id: str) -> asyncio.Lock:
@@ -534,29 +655,67 @@ def _payload(record: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict[st
     }
 
 
+def _kind(record: Mapping[str, Any]) -> InteractionKind:
+    return "question" if record.get("kind") == "question" else "approval"
+
+
+def _question_payload(record: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "kind": "question",
+        "id": record["id"],
+        "stepId": record["stepId"],
+        "threadId": record["threadId"],
+        "status": record["status"],
+        "prompt": record.get("prompt"),
+        "options": deepcopy(record.get("options") or []),
+        "allowFreeText": bool(record.get("allowFreeText")),
+        "requestedAt": record.get("requestedAt"),
+        "expiresAt": record.get("expiresAt"),
+        "revision": record.get("revision"),
+        "decidedBy": record.get("decidedBy"),
+        "decidedAt": record.get("decidedAt"),
+        "answer": deepcopy(record.get("answer")),
+        "terminalReason": record.get("terminalReason"),
+        "terminalAt": record.get("terminalAt"),
+    }
+
+
 async def _emit(
     entry: _Entry, record: Mapping[str, Any], arguments: Mapping[str, Any]
 ) -> None:
     try:
-        await entry.emitter.send_approval(_payload(record, arguments))
+        if entry.kind == "question":
+            await entry.emitter.send_question(_question_payload(record))
+        else:
+            await entry.emitter.send_approval(_payload(record, arguments))
     except Exception:
-        logger.exception("Failed to emit approval event")
+        logger.exception("Failed to emit %s event", entry.kind)
 
 
 def _remember_terminal(thread_id: str, record: Dict[str, Any]) -> None:
-    _terminal_records[record["id"]] = (thread_id, deepcopy(record))
+    _terminal_records[record["id"]] = (
+        thread_id,
+        _kind(record),
+        deepcopy(record),
+    )
     while len(_terminal_records) > _TERMINAL_RECORD_LIMIT:
         _terminal_records.pop(next(iter(_terminal_records)))
 
 
-def _raise_missing(approval_id: str, thread_id: Optional[str]) -> NoReturn:
+def _raise_missing(
+    approval_id: str,
+    thread_id: Optional[str],
+    expected_kind: Optional[InteractionKind] = None,
+) -> NoReturn:
     terminal = _terminal_records.get(approval_id)
     if terminal:
-        stored_thread, record = terminal
+        stored_thread, kind, record = terminal
+        if expected_kind is not None and kind != expected_kind:
+            raise ApprovalNotFound("Interaction not found")
         if thread_id is not None and thread_id != stored_thread:
-            raise ApprovalNotFound("Approval not found")
-        raise ApprovalNotPending("Approval is no longer pending", record=record)
-    raise ApprovalNotFound("Approval not found")
+            raise ApprovalNotFound("Interaction not found")
+        raise ApprovalNotPending("Interaction is no longer pending", record=record)
+    raise ApprovalNotFound("Interaction not found")
 
 
 async def _write(
@@ -581,38 +740,80 @@ async def _write(
         return False
 
 
+def _normalize_question_text(value: Any) -> str:
+    if not isinstance(value, str):
+        raise QuestionInvalid("answer text must be a string")
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text or len(text) > _MAX_QUESTION_ANSWER:
+        raise QuestionInvalid("answer text must be 1..2000 characters")
+    if any(ord(char) < 32 and char not in "\n\t" for char in text):
+        raise QuestionInvalid("answer text contains control characters")
+    return text
+
+
+def _validate_question_answer(
+    entry: _Entry, answer: Optional[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """Validate against the ask-time snapshot, never mutable metadata."""
+    if not isinstance(answer, Mapping):
+        raise QuestionInvalid("an answer is required")
+    option_id = answer.get("optionId")
+    text = answer.get("text")
+    if (option_id is None) == (text is None):
+        raise QuestionInvalid("exactly one of optionId or text is required")
+    if option_id is not None:
+        options = entry.payload.get("options") or []
+        match = next(
+            (option for option in options if option.get("id") == option_id), None
+        )
+        if match is None:
+            raise QuestionInvalid("unknown option")
+        return {"optionId": match["id"], "label": match["label"]}
+    if not entry.payload.get("allowFreeText"):
+        raise QuestionInvalid("free text is not allowed for this question")
+    return {"text": _normalize_question_text(text)}
+
+
 async def _transition_locked(
     entry: _Entry,
-    to_status: ApprovalStatus,
+    to_status: InteractionStatus,
     *,
     actor: Optional[User] = None,
     reason: Optional[str] = None,
     decision_request_id: Optional[str] = None,
     retry_on_failure: bool = False,
     edited_arguments: Optional[Mapping[str, Any]] = None,
+    answer: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Persist one terminal record for a live pending entry."""
     pending = entry.step.metadata.get(APPROVAL_METADATA_KEY)
     if not isinstance(pending, dict) or pending.get("status") != "pending":
         raise ApprovalNotPending(
-            "Approval is no longer pending",
+            "Interaction is no longer pending",
             record=deepcopy(pending) if isinstance(pending, dict) else None,
         )
 
-    if to_status in _USER_STATUSES and (
+    kind = entry.kind
+    user_statuses = _USER_STATUSES_BY_KIND[kind]
+    if to_status not in user_statuses and to_status not in _SYSTEM_STATUSES:
+        raise ValueError(f"Cannot transition a {kind} to {to_status}")
+
+    if to_status in user_statuses and (
         actor is None or actor.identifier != entry.requested_by
     ):
-        raise ApprovalNotFound("Approval not found")
+        raise ApprovalNotFound("Interaction not found")
 
     now = datetime.now(timezone.utc)
-    if to_status in _USER_STATUSES and now.timestamp() >= entry.expires_at_ts:
+    if to_status in user_statuses and now.timestamp() >= entry.expires_at_ts:
         stored = await _transition_locked(
             entry, "expired", reason="timeout", retry_on_failure=retry_on_failure
         )
-        raise ApprovalNotPending("Approval has expired", record=stored)
+        raise ApprovalNotPending("Interaction has expired", record=stored)
 
     record = deepcopy(pending)
     final_arguments: Mapping[str, Any] = entry.arguments
+    if kind == "question" and to_status == "answered":
+        record["answer"] = _validate_question_answer(entry, answer)
     if to_status == "edited":
         if entry.arguments_schema is None:
             raise ApprovalEditNotAllowed("This approval does not accept edits")
@@ -648,10 +849,10 @@ async def _transition_locked(
                 if to_status == "edited"
                 else None
             ),
-            "reason": reason if to_status in _USER_STATUSES else None,
+            "reason": reason if to_status in user_statuses else None,
             "terminalReason": (
                 None
-                if to_status in _USER_STATUSES
+                if to_status in user_statuses
                 else reason or ("timeout" if to_status == "expired" else None)
             ),
             "terminalAt": _iso(now),
@@ -714,7 +915,7 @@ async def _transition_locked(
 
 async def transition(
     approval_id: str,
-    to_status: ApprovalStatus,
+    to_status: InteractionStatus,
     *,
     actor: Optional[User] = None,
     thread_id: Optional[str] = None,
@@ -723,37 +924,43 @@ async def transition(
     decision_request_id: Optional[str] = None,
     retry_on_failure: bool = False,
     edited_arguments: Optional[Mapping[str, Any]] = None,
+    expected_kind: Optional[InteractionKind] = None,
+    answer: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """The only terminal writer for an approval.
+    """The only terminal writer for an interaction.
 
     A second transition returns the stored record and changes nothing.
     """
-    if to_status not in _USER_STATUSES and to_status not in _SYSTEM_STATUSES:
-        raise ValueError(f"Cannot transition an approval to {to_status}")
+    if to_status not in _ALL_USER_STATUSES and to_status not in _SYSTEM_STATUSES:
+        raise ValueError(f"Cannot transition an interaction to {to_status}")
 
     entry = _pending_by_approval.get(approval_id)
     if entry is None:
-        _raise_missing(approval_id, thread_id)
+        _raise_missing(approval_id, thread_id, expected_kind)
+    if expected_kind is not None and entry.kind != expected_kind:
+        raise ApprovalNotFound("Interaction not found")
 
     if thread_id is not None and entry.thread_id != thread_id:
-        raise ApprovalNotFound("Approval not found")
+        raise ApprovalNotFound("Interaction not found")
     if (
         session_generation is not None
         and entry.session_generation != session_generation
     ):
-        raise ApprovalSessionMismatch("Approval belongs to another session")
+        raise ApprovalSessionMismatch("Interaction belongs to another session")
 
     async with step_lock(entry.thread_id, entry.step_id):
         current = _pending_by_approval.get(approval_id)
         if current is None:
-            _raise_missing(approval_id, thread_id)
+            _raise_missing(approval_id, thread_id, expected_kind)
+        if expected_kind is not None and current.kind != expected_kind:
+            raise ApprovalNotFound("Interaction not found")
         if thread_id is not None and current.thread_id != thread_id:
-            raise ApprovalNotFound("Approval not found")
+            raise ApprovalNotFound("Interaction not found")
         if (
             session_generation is not None
             and current.session_generation != session_generation
         ):
-            raise ApprovalSessionMismatch("Approval belongs to another session")
+            raise ApprovalSessionMismatch("Interaction belongs to another session")
         return await _transition_locked(
             current,
             to_status,
@@ -762,6 +969,7 @@ async def transition(
             decision_request_id=decision_request_id,
             retry_on_failure=retry_on_failure,
             edited_arguments=edited_arguments,
+            answer=answer,
         )
 
 
@@ -791,6 +999,133 @@ def _decision_from_record(
         user=user if status in _USER_STATUSES else None,
         decided_at=decided_at,
         comment=record.get("reason"),
+    )
+
+
+def _interaction_session(
+    step: Step,
+) -> tuple[Union[User, PersistedUser], str]:
+    session = context.session
+    if not isinstance(session, WebsocketSession):
+        raise ApprovalUnsupported("Structured interactions require a websocket session")
+    user = session.user
+    if not user or not user.identifier:
+        raise ApprovalAuthRequired("An authenticated user is required")
+    if step.thread_id != session.thread_id:
+        raise ApprovalThreadMismatch("Interaction step belongs to another thread")
+    if not session.has_first_interaction:
+        raise ApprovalNotReady("Structured interactions require a user message first")
+    generation = getattr(session, "generation", None)
+    if not isinstance(generation, str):
+        raise ApprovalUnsupported("Interaction session has no generation")
+    return user, generation
+
+
+async def _ask(entry: _Entry, timeout: float) -> Dict[str, Any]:
+    """Shared wait/timeout/stop path for approvals and questions."""
+    try:
+        done, _ = await asyncio.wait([entry.future], timeout=timeout)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(
+                transition(
+                    entry.approval_id,
+                    "superseded",
+                    reason="stopped",
+                    retry_on_failure=True,
+                )
+            )
+        except ApprovalError:
+            pass
+        raise
+
+    if not done:
+        await transition(
+            entry.approval_id,
+            "expired",
+            reason="timeout",
+            retry_on_failure=True,
+        )
+    return entry.future.result()
+
+
+def _validated_question_payload(
+    question: str,
+    options: Sequence[QuestionOption],
+    allow_free_text: bool,
+) -> Dict[str, Any]:
+    if not isinstance(question, str):
+        raise QuestionInvalid("question must be a string")
+    prompt = question.strip()
+    if not prompt or len(prompt) > _MAX_QUESTION_PROMPT:
+        raise QuestionInvalid("question must be 1..2000 characters")
+    if not isinstance(allow_free_text, bool):
+        raise QuestionInvalid("allow_free_text must be a boolean")
+    if options is None:
+        options = ()
+    if isinstance(options, (str, bytes)) or not isinstance(options, Sequence):
+        raise QuestionInvalid("options must be a sequence")
+    if len(options) > _MAX_QUESTION_OPTIONS:
+        raise QuestionInvalid("at most 8 options are allowed")
+
+    normalized: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for option in options:
+        if isinstance(option, QuestionOption):
+            option_id, label, description = (
+                option.id,
+                option.label,
+                option.description,
+            )
+        elif isinstance(option, Mapping):
+            option_id = option.get("id")
+            label = option.get("label")
+            description = option.get("description")
+        else:
+            raise QuestionInvalid("options must be QuestionOption values")
+        if not isinstance(option_id, str) or not _OPTION_ID_PATTERN.match(option_id):
+            raise QuestionInvalid("invalid option id")
+        if option_id in seen:
+            raise QuestionInvalid("duplicate option id")
+        seen.add(option_id)
+        if not isinstance(label, str) or not label.strip():
+            raise QuestionInvalid("option label is required")
+        label = label.strip()
+        if len(label) > _MAX_OPTION_LABEL:
+            raise QuestionInvalid("option label is too long")
+        if description is not None:
+            if not isinstance(description, str):
+                raise QuestionInvalid("option description must be a string")
+            description = description.strip()
+            if len(description) > _MAX_OPTION_DESCRIPTION:
+                raise QuestionInvalid("option description is too long")
+        normalized.append({"id": option_id, "label": label, "description": description})
+
+    if not allow_free_text and not normalized:
+        raise QuestionInvalid("a closed question needs at least one option")
+    return {
+        "prompt": prompt,
+        "options": normalized,
+        "allowFreeText": allow_free_text,
+    }
+
+
+def _question_answer_from_record(
+    record: Mapping[str, Any], user: Optional[User]
+) -> QuestionAnswer:
+    answer = record.get("answer") or {}
+    status = cast(QuestionStatus, record["status"])
+    return QuestionAnswer(
+        question_id=record["id"],
+        thread_id=record["threadId"],
+        step_id=record["stepId"],
+        status=status,
+        option_id=answer.get("optionId"),
+        label=answer.get("label"),
+        text=answer.get("text"),
+        user=user if status == "answered" else None,
+        answered_at=record.get("decidedAt") or record.get("terminalAt") or "",
+        durable=get_data_layer() is not None and status == "answered",
     )
 
 
@@ -832,28 +1167,9 @@ class Approval:
         self.timeout = timeout
 
     async def ask(self) -> ApprovalDecision:
-        session = context.session
-        if not isinstance(session, WebsocketSession):
-            raise ApprovalUnsupported("Approvals require a websocket session")
-        if not session.user or not session.user.identifier:
-            raise ApprovalAuthRequired("An authenticated user is required")
-        if self.step.thread_id != session.thread_id:
-            raise ApprovalThreadMismatch("Approval step belongs to another thread")
-        if not session.has_first_interaction:
-            raise ApprovalNotReady("Approvals require a user message first")
+        user, generation = _interaction_session(self.step)
 
         _canonical_json(self.arguments)
-        generation = getattr(session, "generation", None)
-        if not isinstance(generation, str):
-            raise ApprovalUnsupported("Approval session has no generation")
-
-        pending_count = sum(
-            1
-            for entry in _pending_by_approval.values()
-            if entry.session_generation == generation
-        )
-        if pending_count >= MAX_PENDING_APPROVALS_PER_SESSION:
-            raise ApprovalLimitReached("Too many pending approvals in this session")
 
         timeout = self.timeout
         if timeout is None:
@@ -875,7 +1191,7 @@ class Approval:
             "tool": self.tool,
             "title": self.title,
             "status": "pending",
-            "requestedBy": session.user.identifier,
+            "requestedBy": user.identifier,
             "requestedAt": requested_at,
             "expiresAt": expires_at,
             "editAllowed": self.arguments_schema is not None,
@@ -895,74 +1211,60 @@ class Approval:
 
         # Synchronous, before the first await: later Step writes take the lock.
         self.step._approval_managed = True
-        _remember_managed_thread(self.step.thread_id, session.user.identifier)
+        _remember_managed_thread(self.step.thread_id, user.identifier)
         emitter = context.emitter
         key = (self.step.thread_id, self.step.id)
 
-        async with step_lock(*key):
-            previous_id = _pending_by_step.get(key)
-            if previous_id:
-                previous = _pending_by_approval.get(previous_id)
-                if previous:
-                    await _transition_locked(previous, "superseded", reason="replaced")
-
-            # Drain a create/update scheduled before approval management began.
-            await self.step.flush_persistence()
-
-            previous_record = self.step.metadata.get(APPROVAL_METADATA_KEY)
-            self.step.metadata[APPROVAL_METADATA_KEY] = record
-            entry = _Entry(
-                approval_id=record["id"],
-                thread_id=self.step.thread_id,
-                step_id=self.step.id,
-                step=self.step,
-                future=asyncio.get_running_loop().create_future(),
-                emitter=emitter,
-                requested_by=session.user.identifier,
-                session_generation=generation,
-                revision=1,
-                expires_at_ts=expires_at_ts,
-                arguments=deepcopy(self.arguments),
-                arguments_schema=self.arguments_schema,
-                redact=self.redact,
-            )
-            if not await _write(entry, record, expected_revision=None):
-                if previous_record is None:
-                    self.step.metadata.pop(APPROVAL_METADATA_KEY, None)
-                else:
-                    self.step.metadata[APPROVAL_METADATA_KEY] = previous_record
-                raise ApprovalPersistenceError("Approval persistence failed")
-
-            _pending_by_approval[record["id"]] = entry
-            _pending_by_step[key] = record["id"]
-
-        await _emit(entry, record, self.arguments)
-
+        await _reserve_capacity(generation)
+        reserved = True
         try:
-            done, _ = await asyncio.wait([entry.future], timeout=timeout)
-        except asyncio.CancelledError:
-            try:
-                await asyncio.shield(
-                    transition(
-                        record["id"],
-                        "superseded",
-                        reason="stopped",
-                        retry_on_failure=True,
-                    )
+            async with step_lock(*key):
+                previous_id = _pending_by_step.get(key)
+                if previous_id:
+                    previous = _pending_by_approval.get(previous_id)
+                    if previous:
+                        await _transition_locked(
+                            previous, "superseded", reason="replaced"
+                        )
+
+                # Drain a create/update scheduled before approval management began.
+                await self.step.flush_persistence()
+
+                previous_record = self.step.metadata.get(APPROVAL_METADATA_KEY)
+                self.step.metadata[APPROVAL_METADATA_KEY] = record
+                entry = _Entry(
+                    approval_id=record["id"],
+                    thread_id=self.step.thread_id,
+                    step_id=self.step.id,
+                    step=self.step,
+                    future=asyncio.get_running_loop().create_future(),
+                    emitter=emitter,
+                    requested_by=user.identifier,
+                    session_generation=generation,
+                    revision=1,
+                    expires_at_ts=expires_at_ts,
+                    arguments=deepcopy(self.arguments),
+                    arguments_schema=self.arguments_schema,
+                    redact=self.redact,
                 )
-            except ApprovalError:
-                pass
-            raise
+                if not await _write(entry, record, expected_revision=None):
+                    if previous_record is None:
+                        self.step.metadata.pop(APPROVAL_METADATA_KEY, None)
+                    else:
+                        self.step.metadata[APPROVAL_METADATA_KEY] = previous_record
+                    raise ApprovalPersistenceError("Approval persistence failed")
 
-        if not done:
-            await transition(
-                record["id"],
-                "expired",
-                reason="timeout",
-                retry_on_failure=True,
-            )
+                _pending_by_approval[record["id"]] = entry
+                _pending_by_step[key] = record["id"]
+                _commit_reservation(generation)
+                reserved = False
 
-        stored = entry.future.result()
+            await _emit(entry, record, self.arguments)
+            stored = await _ask(entry, timeout)
+        finally:
+            if reserved:
+                _release_reservation(generation)
+
         if stored["status"] == "edited":
             # Persist the final-argument trace; the record write already landed.
             await self.step.update()
@@ -971,5 +1273,126 @@ class Approval:
             self.arguments
             if entry.decided_arguments is None
             else entry.decided_arguments,
-            session.user,
+            user,
         )
+
+
+async def ask(
+    question: str,
+    *,
+    options: Sequence[QuestionOption] = (),
+    allow_free_text: bool = True,
+    timeout: Optional[float] = None,
+    step: Optional[Step] = None,
+) -> QuestionAnswer:
+    """Ask the user a structured question and wait for one answer."""
+    payload = _validated_question_payload(question, options, allow_free_text)
+    target = step or context.current_step
+    if target is None:
+        raise ApprovalUnsupported("No current step to bind the question to")
+
+    user, generation = _interaction_session(target)
+    if timeout is None:
+        timeout = float(config.project.session_timeout)
+    if not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise ValueError("timeout must be positive")
+
+    now = datetime.now(timezone.utc)
+    record: Dict[str, Any] = {
+        "version": 1,
+        "revision": 1,
+        "kind": "question",
+        "id": str(uuid.uuid4()),
+        "stepId": target.id,
+        "threadId": target.thread_id,
+        "status": "pending",
+        "prompt": payload["prompt"],
+        "options": payload["options"],
+        "allowFreeText": payload["allowFreeText"],
+        "requestedBy": user.identifier,
+        "requestedAt": _iso(now),
+        "expiresAt": _iso(now + timedelta(seconds=timeout)),
+        "answer": None,
+        "decidedBy": None,
+        "decidedAt": None,
+        "decision": None,
+        "decisionRequestId": None,
+        "terminalReason": None,
+        "terminalAt": None,
+    }
+    expires_at_ts = (now + timedelta(seconds=timeout)).timestamp()
+
+    # Synchronous, before the first await: later Step writes take the lock.
+    target._approval_managed = True
+    _remember_managed_thread(target.thread_id, user.identifier)
+    emitter = context.emitter
+    key = (target.thread_id, target.id)
+    entry = _Entry(
+        approval_id=record["id"],
+        thread_id=target.thread_id,
+        step_id=target.id,
+        step=target,
+        future=asyncio.get_running_loop().create_future(),
+        emitter=emitter,
+        requested_by=user.identifier,
+        session_generation=generation,
+        revision=1,
+        expires_at_ts=expires_at_ts,
+        kind="question",
+        payload=payload,
+    )
+
+    await _reserve_capacity(generation)
+    reserved = True
+    try:
+        async with step_lock(*key):
+            # L4: a terminal record in the one slot must not be overwritten.
+            # A pending record is superseded below.
+            previous_record = target.metadata.get(APPROVAL_METADATA_KEY)
+            if isinstance(previous_record, dict) and (
+                previous_record.get("status") != "pending"
+            ):
+                raise QuestionAlreadyAsked(
+                    "This step already asked a terminal question"
+                )
+
+            previous_id = _pending_by_step.get(key)
+            if previous_id:
+                previous = _pending_by_approval.get(previous_id)
+                if previous:
+                    await _transition_locked(previous, "superseded", reason="replaced")
+
+            # Drain a create/update scheduled before interaction management began.
+            await target.flush_persistence()
+
+            target.metadata[APPROVAL_METADATA_KEY] = record
+            if not await _write(entry, record, expected_revision=None):
+                if previous_record is None:
+                    target.metadata.pop(APPROVAL_METADATA_KEY, None)
+                else:
+                    target.metadata[APPROVAL_METADATA_KEY] = previous_record
+                raise ApprovalPersistenceError("Question persistence failed")
+
+            _pending_by_approval[record["id"]] = entry
+            _pending_by_step[key] = record["id"]
+            _commit_reservation(generation)
+            reserved = False
+
+        await _emit(entry, record, {})
+        stored = await _ask(entry, timeout)
+        return _question_answer_from_record(stored, user)
+    finally:
+        if reserved:
+            _release_reservation(generation)
+
+
+# Shared interaction family. An approval and a question are different public
+# contracts over one state machine; apps can catch the readable names.
+QuestionError = ApprovalError
+QuestionAuthRequired = ApprovalAuthRequired
+QuestionUnsupported = ApprovalUnsupported
+QuestionThreadMismatch = ApprovalThreadMismatch
+QuestionNotReady = ApprovalNotReady
+QuestionLimitReached = ApprovalLimitReached
+QuestionPersistenceError = ApprovalPersistenceError
+QuestionNotPending = ApprovalNotPending

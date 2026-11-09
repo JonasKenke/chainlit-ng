@@ -18,6 +18,7 @@ import {
 
 import { ApprovalCard } from '@/components/chat/Approvals/ApprovalCard';
 import { Messages } from '@/components/chat/Messages';
+import { QuestionCard } from '@/components/chat/Questions/QuestionCard';
 import { useTranslation } from 'components/i18n/Translator';
 
 import { useSideElements } from './useSideElements';
@@ -36,6 +37,7 @@ const MessagesContainer = ({ navigate }: Props) => {
   const setSideView = useSetChainlitState('sideView');
   const sessionId = useChainlitStore((state) => state.sessionId);
   const approvals = useChainlitStore((state) => state.approvals);
+  const questions = useChainlitStore((state) => state.questions);
 
   const { t } = useTranslation();
 
@@ -170,6 +172,15 @@ const MessagesContainer = ({ navigate }: Props) => {
         elements={elements}
         actions={actions}
       />
+      {questions.some((question) => question.live) ? (
+        <div className="flex flex-col gap-2 py-2">
+          {questions
+            .filter((question) => question.live)
+            .map((question) => (
+              <QuestionCard key={question.id} question={question} />
+            ))}
+        </div>
+      ) : null}
     </MessageContext.Provider>
   );
 };

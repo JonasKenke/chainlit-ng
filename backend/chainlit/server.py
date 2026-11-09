@@ -129,6 +129,8 @@ from chainlit.types import (
     McpPromptRequest,
     McpResourceRequest,
     PromptDict,
+    QuestionAnswerRequest,
+    QuestionAnswerResponse,
     ScheduledTaskDict,
     SharePromptRequest,
     ShareThreadRequest,
@@ -2560,6 +2562,7 @@ async def decide_approval(
             reason=payload.reason,
             decision_request_id=payload.decisionRequestId,
             edited_arguments=payload.editedArguments,
+            expected_kind="approval",
         )
     except ApprovalNotPending as exc:
         if exc.record is None:
@@ -2584,6 +2587,72 @@ async def decide_approval(
         raise HTTPException(status_code=exc.status_code, detail=exc.code)
 
     return JSONResponse(content=_approval_response(record))
+
+
+def _question_response(record: dict, *, error: Optional[str] = None) -> dict:
+    status = record["status"]
+    return QuestionAnswerResponse(
+        questionId=record["id"],
+        status=status,
+        answer=record.get("answer") if status == "answered" else None,
+        answeredBy=record.get("decidedBy"),
+        answeredAt=record.get("decidedAt") or record.get("terminalAt"),
+        revision=int(record.get("revision", 1)),
+        durable=get_data_layer() is not None and status == "answered",
+        error=error,
+    ).model_dump()
+
+
+@router.post("/project/question")
+async def answer_question(
+    request: Request,
+    payload: QuestionAnswerRequest,
+    current_user: UserParam,
+):
+    """Answer a pending question through the shared transition engine."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not _is_json_same_origin(request):
+        raise HTTPException(status_code=403, detail="Invalid request origin")
+
+    session = WebsocketSession.get_by_id(payload.sessionId)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.user or session.user.identifier != current_user.identifier:
+        raise HTTPException(status_code=403, detail="Question author required")
+    if session.unavailable_chat_profile:
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation is read-only because its chat profile is unavailable.",
+        )
+
+    answer: Dict[str, Any] = (
+        {"optionId": payload.optionId}
+        if payload.optionId is not None
+        else {"text": payload.text}
+    )
+    try:
+        record = await transition(
+            payload.questionId,
+            "answered",
+            actor=session.user,
+            thread_id=session.thread_id,
+            session_generation=session.generation,
+            decision_request_id=payload.decisionRequestId,
+            expected_kind="question",
+            answer=answer,
+        )
+    except ApprovalNotPending as exc:
+        if exc.record is None:
+            raise HTTPException(status_code=exc.status_code, detail=exc.code)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_question_response(exc.record, error="QuestionNotPending"),
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code)
+
+    return JSONResponse(content=_question_response(record))
 
 
 @router.post("/project/action")

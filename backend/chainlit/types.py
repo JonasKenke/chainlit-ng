@@ -291,6 +291,37 @@ class ApprovalDecisionResponse(BaseModel):
     error: Optional[str] = None
 
 
+class QuestionAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sessionId: str = Field(min_length=1, max_length=128)
+    questionId: str = Field(min_length=1, max_length=64)
+    optionId: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    text: Optional[str] = Field(default=None, max_length=2000)
+    decisionRequestId: str = Field(
+        min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+
+    @model_validator(mode="after")
+    def validate_single_answer(self) -> "QuestionAnswerRequest":
+        if (self.optionId is None) == (self.text is None):
+            raise ValueError("exactly one of optionId or text is required")
+        if self.text is not None and not self.text.strip():
+            raise ValueError("text must not be blank")
+        return self
+
+
+class QuestionAnswerResponse(BaseModel):
+    questionId: str
+    status: Literal["pending", "answered", "expired", "superseded", "orphaned"]
+    answer: Optional[Dict[str, Any]] = None
+    answeredBy: Optional[str] = None
+    answeredAt: Optional[str] = None
+    revision: int
+    durable: bool
+    error: Optional[str] = None
+
+
 class ConnectMCPRequest(BaseModel):
     """Request to connect an MCP server.
 

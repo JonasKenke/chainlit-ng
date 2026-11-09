@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a proven terminal write before the tool runs. Manual
   `Step(requires_approval=True)` and `metadata={"approval": ...}` are refused.
   See [the approvals guide](docs/approvals.md).
+- Add `cl.ask(...)` for agent-authored questions on the persisted approvals
+  engine: options plus optional free text, a live `question` card, and
+  `POST /project/question`. Answers are stored on the step record and returned
+  as `cl.QuestionAnswer`; no data-layer or schema change.
 - Add `[features.spontaneous_file_upload] directory` to store uploaded files outside `APP_ROOT`. Relative paths resolve against `APP_ROOT`, absolute paths are used as-is, and startup fails with an actionable error when uploads are enabled and the directory is not writable. Only the legacy default `.files` directory is removed on shutdown; a configured directory is preserved.
 
 ### Changed
