@@ -76,6 +76,45 @@ function approvalFromStep(step: IStep): IApproval | null {
   };
 }
 
+function questionFromStep(step: IStep): IQuestion | null {
+  const raw = (step.metadata as Record<string, any> | undefined)?.approval;
+  let record = raw;
+  if (typeof raw === 'string') {
+    try {
+      record = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (
+    !record ||
+    typeof record !== 'object' ||
+    record.kind !== 'question' ||
+    !record.id
+  ) {
+    return null;
+  }
+  return {
+    kind: 'question',
+    id: record.id,
+    stepId: record.stepId ?? step.id,
+    threadId: record.threadId ?? '',
+    status: record.status ?? 'orphaned',
+    prompt: record.prompt ?? '',
+    options: Array.isArray(record.options) ? record.options : [],
+    allowFreeText: Boolean(record.allowFreeText),
+    requestedAt: record.requestedAt ?? null,
+    expiresAt: record.expiresAt ?? null,
+    revision: record.revision,
+    decidedBy: record.decidedBy ?? null,
+    decidedAt: record.decidedAt ?? null,
+    answer: record.answer ?? null,
+    terminalReason: record.terminalReason ?? null,
+    terminalAt: record.terminalAt ?? null,
+    live: false
+  };
+}
+
 const useChatSession = () => {
   const client = useContext(ChainlitContext);
   const sessionId = useChainlitStore((state) => state.sessionId);
@@ -355,6 +394,33 @@ const useChatSession = () => {
             } else {
               next[index] = item;
             }
+          }
+          return next;
+        });
+        const restoredQuestions = (thread.steps || [])
+          .map(questionFromStep)
+          .filter((question): question is IQuestion => question !== null);
+        setQuestions((old) => {
+          const next = old.filter(
+            (question) => question.threadId === thread.id
+          );
+          for (const item of restoredQuestions) {
+            const index = next.findIndex((question) => question.id === item.id);
+            if (index === -1) {
+              next.push(item);
+              continue;
+            }
+            const existing = next[index];
+            if (existing.live) {
+              // A same-session reconnect must not downgrade the answerable
+              // card or reopen a terminal one from a stale pending row.
+              next[index] =
+                existing.status === 'pending'
+                  ? { ...item, live: true }
+                  : { ...existing, live: true };
+              continue;
+            }
+            next[index] = item;
           }
           return next;
         });
@@ -686,4 +752,4 @@ const useChatSession = () => {
   };
 };
 
-export { useChatSession };
+export { questionFromStep, useChatSession };

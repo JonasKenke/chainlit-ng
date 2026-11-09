@@ -219,6 +219,100 @@ async function connectWithResumeHandler() {
   return { store, resumeHandler };
 }
 
+describe('useChatSession question resume', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    io.mockClear();
+    sockets.length = 0;
+  });
+
+  const record = {
+    kind: 'question',
+    id: 'question-1',
+    stepId: 'step-1',
+    threadId: 'thread-1',
+    status: 'answered',
+    prompt: 'What should I name the release?',
+    options: [],
+    allowFreeText: true,
+    answer: { text: 'Kestrel' },
+    decidedAt: '2026-11-09T00:00:00Z',
+    terminalAt: '2026-11-09T00:00:00Z'
+  };
+
+  it('hydrates an answered question from the resumed thread as read-only', async () => {
+    const { store, resumeHandler } = await connectWithResumeHandler();
+
+    act(() => {
+      resumeHandler({
+        id: 'thread-1',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'question-step',
+            type: 'tool',
+            metadata: { approval: record }
+          }
+        ],
+        elements: []
+      });
+    });
+
+    const [question] = store.getState().questions;
+    expect(question.id).toBe('question-1');
+    expect(question.live).toBe(false);
+    expect(question.status).toBe('answered');
+    expect(question.answer).toEqual({ text: 'Kestrel' });
+  });
+
+  it('keeps a live card answerable when the same session reconnects', async () => {
+    const { store, resumeHandler } = await connectWithResumeHandler();
+    act(() => {
+      store.setState({
+        questions: [
+          {
+            ...record,
+            status: 'pending',
+            answer: null,
+            decidedAt: null,
+            terminalAt: null,
+            live: true
+          }
+        ]
+      });
+    });
+
+    act(() => {
+      resumeHandler({
+        id: 'thread-1',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'question-step',
+            type: 'tool',
+            metadata: {
+              approval: {
+                ...record,
+                status: 'pending',
+                answer: null,
+                decidedAt: null,
+                terminalAt: null
+              }
+            }
+          }
+        ],
+        elements: []
+      });
+    });
+
+    const questions = store.getState().questions;
+    expect(questions).toHaveLength(1);
+    expect(questions[0].status).toBe('pending');
+    expect(questions[0].live).toBe(true);
+  });
+});
+
 describe('useChatSession approval resume', () => {
   afterEach(() => {
     vi.useRealTimers();

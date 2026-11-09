@@ -10,20 +10,21 @@ import {
   useSetChainlitState
 } from '@chainlit/react-client';
 
+import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 
-const statusLabel: Record<IQuestion['status'], string> = {
-  pending: 'Waiting for your answer',
-  answered: 'Answered',
-  expired: 'Expired',
-  superseded: 'Superseded',
-  orphaned: 'Unavailable'
+const statusKey: Record<IQuestion['status'], string> = {
+  pending: 'chat.question.status.pending',
+  answered: 'chat.question.status.answered',
+  expired: 'chat.question.status.expired',
+  superseded: 'chat.question.status.superseded',
+  orphaned: 'chat.question.status.orphaned'
 };
 
-const questionErrorMessage = (error: unknown): string => {
+const questionErrorMessage = (error: unknown, fallback: string): string => {
   const detail = (error as { payload?: { detail?: unknown } })?.payload?.detail;
   if (typeof detail === 'string' && detail) return detail;
-  return error instanceof Error ? error.message : 'Unable to answer question';
+  return error instanceof Error ? error.message : fallback;
 };
 
 interface Props {
@@ -34,6 +35,7 @@ export const QuestionCard = ({ question }: Props) => {
   const apiClient = useContext(ChainlitContext);
   const sessionId = useChainlitStore((state) => state.sessionId);
   const setQuestions = useSetChainlitState('questions');
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | undefined>();
   const [text, setText] = useState('');
@@ -69,7 +71,9 @@ export const QuestionCard = ({ question }: Props) => {
         )
       );
     } catch (error) {
-      toast.error(questionErrorMessage(error));
+      toast.error(
+        questionErrorMessage(error, t('chat.question.errors.answer'))
+      );
     } finally {
       setBusy(false);
     }
@@ -78,14 +82,14 @@ export const QuestionCard = ({ question }: Props) => {
   return (
     <section
       data-testid="question-card"
-      aria-label="Question from the assistant"
+      aria-label={t('chat.question.ariaLabel')}
       aria-live="polite"
       className="rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="text-sm font-semibold">Question</div>
+        <div className="text-sm font-semibold">{t('chat.question.title')}</div>
         <span className="text-xs font-medium uppercase text-muted-foreground">
-          {statusLabel[question.status]}
+          {t(statusKey[question.status])}
         </span>
       </div>
 
@@ -98,7 +102,7 @@ export const QuestionCard = ({ question }: Props) => {
           {question.options.length ? (
             <fieldset className="mt-3">
               <legend className="text-xs font-medium text-muted-foreground">
-                Options
+                {t('chat.question.options')}
               </legend>
               <div className="mt-1 flex flex-col gap-2">
                 {question.options.map((option: IQuestionOption) => {
@@ -148,11 +152,11 @@ export const QuestionCard = ({ question }: Props) => {
                 htmlFor={`question-${question.id}-other`}
                 className="text-xs font-medium text-muted-foreground"
               >
-                Other
+                {t('chat.question.other')}
               </label>
               <textarea
                 id={`question-${question.id}-other`}
-                aria-label="Other answer"
+                aria-label={t('chat.question.otherAriaLabel')}
                 className="mt-1 min-h-20 w-full rounded border border-border bg-background p-2 text-sm"
                 maxLength={2000}
                 value={text}
@@ -171,18 +175,18 @@ export const QuestionCard = ({ question }: Props) => {
               disabled={submitDisabled}
               onClick={submit}
             >
-              Submit
+              {t('common.actions.submit')}
             </Button>
           </div>
         </>
       ) : (
         <div className="mt-3 text-sm text-muted-foreground">
           {isPending ? (
-            <span>This question can no longer be answered.</span>
+            <span>{t('chat.question.readOnly')}</span>
           ) : question.status === 'answered' ? (
             <span>
               {answer?.redacted ? (
-                <span>Answered privately</span>
+                <span>{t('chat.question.answeredPrivately')}</span>
               ) : answer?.label ? (
                 <bdi dir="auto">{answer.label}</bdi>
               ) : answer?.text ? (
@@ -192,12 +196,13 @@ export const QuestionCard = ({ question }: Props) => {
               ) : null}
             </span>
           ) : (
-            <span>{statusLabel[question.status]}</span>
+            <span>{t(statusKey[question.status])}</span>
           )}
           {question.decidedBy ? (
             <span>
               {' '}
-              · By <bdi dir="auto">{question.decidedBy}</bdi>
+              · {t('chat.question.by')}{' '}
+              <bdi dir="auto">{question.decidedBy}</bdi>
             </span>
           ) : null}
           {question.decidedAt ? <span> · {question.decidedAt}</span> : null}

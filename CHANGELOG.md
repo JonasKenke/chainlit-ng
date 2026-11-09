@@ -27,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Redact free-text question answers from shared threads, keep prompt/options
+  and option labels in the read-only question card, and fail closed when share
+  step metadata is malformed or has an unknown interaction kind (closes S1 F1).
+  Resume hydration renders persisted questions read-only after a reload while a
+  same-session reconnect keeps a live question answerable.
 - Render inline LaTeX math literally when its closer is more than ~254 characters away, and bound both the `\(` and `$` inline lookahead so repeated unclosed openers parse in linear time.
 - Declare `aiohttp` and SQLAlchemy's `asyncio` extra in the `custom-data` extra so the SQLAlchemy and DynamoDB data layers import on a clean install.
 - Verify `azure-ad-hybrid` OAuth state and `id_token`, and generate a per-login nonce.
