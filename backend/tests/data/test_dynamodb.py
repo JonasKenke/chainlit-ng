@@ -78,6 +78,7 @@ async def test_list_threads_keeps_thread_ids_ending_in_prefix_characters():
         [
             {
                 "PK": {"S": "THREAD#DEMO"},
+                "SK": {"S": "THREAD"},
                 "UserThreadSK": {"S": "TS#2026-01-01T00:00:00"},
                 "name": {"S": "demo thread"},
             }
@@ -234,7 +235,7 @@ class FakeDynamoDB:
         Key,
         UpdateExpression,
         ExpressionAttributeNames,
-        ExpressionAttributeValues,
+        ExpressionAttributeValues=None,
         **kwargs,
     ):
         self.update_kwargs.append({"Key": Key, "Expression": UpdateExpression})
@@ -244,6 +245,8 @@ class FakeDynamoDB:
             self.items.append(item)
         for name, value in re.findall(r"(#\w+) = (:\w+)", UpdateExpression):
             item[ExpressionAttributeNames[name]] = ExpressionAttributeValues[value]
+        for name in re.findall(r"REMOVE (#\w+)", UpdateExpression):
+            item.pop(ExpressionAttributeNames[name], None)
         return {}
 
     def scan(self, **kwargs):
@@ -765,6 +768,9 @@ async def test_get_feedback_thread_id_parses_the_key_without_a_read():
         "THREAD#thread-1",
         "thread-1::STEP#step-1",
         "THREAD#thread-1::step-1",
+        "THREAD#thread-1::STEP#",
+        "THREAD#thread-1::STEP#step-1::STEP#step-2",
+        "THREAD#thread-1::STEP#step-1::",
     ],
 )
 async def test_get_feedback_thread_id_parse_failure_is_not_found(feedback_id):
@@ -773,6 +779,15 @@ async def test_get_feedback_thread_id_parse_failure_is_not_found(feedback_id):
     assert await layer.get_feedback_thread_id(feedback_id) == FeedbackThreadLookup(
         status="not_found"
     )
+
+
+@pytest.mark.asyncio
+async def test_delete_feedback_rejects_a_malformed_id_without_a_write():
+    layer, client = _make_layer()
+
+    assert await layer.delete_feedback("THREAD#thread-1::STEP#step-1::STEP#x") is False
+    assert await layer.delete_feedback("THREAD#thread-1::STEP#") is False
+    assert client.update_item.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -806,19 +821,27 @@ async def test_list_and_get_thread_omit_a_stale_shared_item():
     step = _step_item("thread-1", "step-1")
     step["id"] = {"S": "step-1"}
     step["createdAt"] = {"S": "2026-01-01T00:00:00"}
+    # Adversarial shape: a shadow row that also carries the grantee's GSI keys.
     stale_shared = {
         "PK": {"S": "THREAD#thread-1"},
         "SK": {"S": "SHARED#bob-id"},
+        "UserThreadPK": {"S": "USER#bob-id"},
+        "UserThreadSK": {"S": "TS#2026-01-01T00:00:00"},
         "sharedWithUserId": {"S": "bob-id"},
     }
     layer, _ = _make_delete_layer(
         [_thread_item("thread-1", "user-1"), step, stale_shared], page_size=10
     )
 
-    listed = await layer.list_threads(
+    owner_list = await layer.list_threads(
         Pagination(first=10), ThreadFilter(userId="user-1")
     )
-    assert [thread["id"] for thread in listed.data] == ["thread-1"]
+    assert [thread["id"] for thread in owner_list.data] == ["thread-1"]
+
+    shared_list = await layer.list_threads(
+        Pagination(first=10), ThreadFilter(userId="bob-id")
+    )
+    assert shared_list.data == []
 
     thread = await layer.get_thread("thread-1")
     assert thread is not None

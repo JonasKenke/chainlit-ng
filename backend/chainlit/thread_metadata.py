@@ -266,4 +266,28 @@ def public_thread(
             if include_settings
             else _public_steps(steps)
         )
+    if not include_owner:
+        # A Dynamo thread carries its item keys inside each nested row; the
+        # share payload must not expose the storage shape (the top-level keys
+        # are removed above).
+        public_steps = result.get("steps")
+        if isinstance(public_steps, list):
+            result["steps"] = [
+                {key: value for key, value in step.items() if key not in ("PK", "SK")}
+                if isinstance(step, dict)
+                else step
+                for step in public_steps
+            ]
+        public_elements = result.get("elements")
+        if isinstance(public_elements, list):
+            result["elements"] = [
+                {
+                    key: value
+                    for key, value in element.items()
+                    if key not in ("PK", "SK", "objectKey")
+                }
+                if isinstance(element, dict)
+                else element
+                for element in public_elements
+            ]
     return cast(ThreadDict, result)

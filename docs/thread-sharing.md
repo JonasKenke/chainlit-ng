@@ -162,8 +162,9 @@ query path.
 
 ## Current limits
 
-- SQL (and any custom layer above) only. `DynamoDBDataLayer` reports no grant
-  support yet, so the feature stays hidden for it.
+- `SQLAlchemyDataLayer` and `DynamoDBDataLayer` support grants; a custom layer
+  can opt in as described above. `ChainlitDataLayer` (the hosted schema) does
+  not yet, so the feature stays hidden for it.
 - A grant is read-only. There is no write grant, no grantee list of shared
   threads, and no group or role-based sharing.
 - The cap is a resource bound, not a security boundary; concurrent creates can

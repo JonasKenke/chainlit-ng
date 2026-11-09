@@ -187,13 +187,29 @@ class DynamoDBDataLayer(BaseDataLayer):
             metadata=metadata,
         )
 
+    @staticmethod
+    def _parse_feedback_id(feedback_id: str) -> Optional[tuple[str, str]]:
+        """Split ``THREAD#<thread>::STEP#<step>``; None on a malformed id."""
+        prefix, marker = "THREAD#", "::STEP#"
+        if not isinstance(feedback_id, str) or not feedback_id.startswith(prefix):
+            return None
+        rest = feedback_id[len(prefix) :]
+        separator = rest.find(marker)
+        if separator <= 0:
+            return None
+        thread_id = rest[:separator]
+        step_id = rest[separator + len(marker) :]
+        if not step_id or "::" in thread_id or "::" in step_id:
+            return None
+        return thread_id, step_id
+
     async def delete_feedback(self, feedback_id: str) -> bool:
         _logger.info("DynamoDB: delete_feedback feedback_id=%s", feedback_id)
 
-        # feedback id = THREAD#{thread_id}::STEP#{step_id}
-        thread_id, step_id = feedback_id.split("::")
-        thread_id = thread_id.removeprefix("THREAD#")
-        step_id = step_id.removeprefix("STEP#")
+        parsed = self._parse_feedback_id(feedback_id)
+        if parsed is None:
+            return False
+        thread_id, step_id = parsed
 
         self.client.update_item(
             TableName=self.table_name,
@@ -567,14 +583,10 @@ class DynamoDBDataLayer(BaseDataLayer):
 
     async def get_feedback_thread_id(self, feedback_id: str) -> FeedbackThreadLookup:
         # Dynamo has no client-keyed feedback row: the id is the key space.
-        marker = "::STEP#"
-        if not isinstance(feedback_id, str) or not feedback_id.startswith("THREAD#"):
+        parsed = self._parse_feedback_id(feedback_id)
+        if parsed is None:
             return FeedbackThreadLookup(status="not_found")
-        rest = feedback_id[len("THREAD#") :]
-        separator = rest.find(marker)
-        if separator <= 0:
-            return FeedbackThreadLookup(status="not_found")
-        return FeedbackThreadLookup(status="found", thread_id=rest[:separator])
+        return FeedbackThreadLookup(status="found", thread_id=parsed[0])
 
     async def step_belongs_to_thread(self, thread_id: str, step_id: str) -> bool:
         try:
@@ -772,6 +784,10 @@ class DynamoDBDataLayer(BaseDataLayer):
             )
 
         for item in response["Items"]:
+            # Only the THREAD marker is a thread row; a stale GSI-shaped
+            # SHARED# shadow must not be parsed as one.
+            if item.get("SK", {}).get("S") != "THREAD":
+                continue
             deserialized_item: Dict[str, Any] = self._deserialize_item(item)
             thread = ThreadDict(  # type: ignore
                 id=deserialized_item["PK"].removeprefix("THREAD#"),
@@ -870,8 +886,9 @@ class DynamoDBDataLayer(BaseDataLayer):
             metadata = {}
 
         # An ownership change invalidates every grant (M3: user_id=None deletes
-        # nothing). Read the current marker before this write can replace it.
-        owner_changed = False
+        # nothing). Delete grants before the owner write: if the cleanup fails,
+        # the old owner keeps the thread instead of a stale grant surviving a
+        # successful ownership flip.
         if user_id is not None:
             stored = self.client.get_item(
                 TableName=self.table_name,
@@ -884,9 +901,8 @@ class DynamoDBDataLayer(BaseDataLayer):
             )
             if "Item" in stored:
                 stored_owner = self._deserialize_item(stored["Item"]).get("userId")
-                owner_changed = stored_owner is None or str(stored_owner) != str(
-                    user_id
-                )
+                if stored_owner is None or str(stored_owner) != str(user_id):
+                    await self._delete_thread_grants(thread_id)
 
         ts = self._get_current_timestamp()
 
@@ -914,9 +930,6 @@ class DynamoDBDataLayer(BaseDataLayer):
             },
             updates=item,
         )
-
-        if owner_changed:
-            await self._delete_thread_grants(thread_id)
 
     async def get_favorite_steps(self, user_id: str) -> List["StepDict"]:
         _logger.info("DynamoDB: get_favorite_steps user_id=%s", user_id)
