@@ -17,7 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add `cl.ask(...)` for agent-authored questions on the persisted approvals
   engine: options plus optional free text, a live `question` card, and
   `POST /project/question`. Answers are stored on the step record and returned
-  as `cl.QuestionAnswer`; no data-layer or schema change.
+  as `cl.QuestionAnswer`; its `as_tool_result()` handoff carries explicit
+  `provenance`/`trust: "untrusted_user_input"`/`durable` markers. No data-layer
+  or schema change. See [the questions guide](docs/questions.md).
 - Add `[features.spontaneous_file_upload] directory` to store uploaded files outside `APP_ROOT`. Relative paths resolve against `APP_ROOT`, absolute paths are used as-is, and startup fails with an actionable error when uploads are enabled and the directory is not writable. Only the legacy default `.files` directory is removed on shutdown; a configured directory is preserved.
 - Add opt-in OpenTelemetry trace export from the Step tree (`feat(otel)`):
   `[features.telemetry] enabled = true` plus the new `chainlit[otel]` extra

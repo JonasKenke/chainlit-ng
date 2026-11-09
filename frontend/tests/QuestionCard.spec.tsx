@@ -203,4 +203,48 @@ describe('QuestionCard', () => {
     expect(container.querySelector('b')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
   });
+
+  it('renders Markdown syntax literally', () => {
+    const prompt = '**not bold** [not a link](https://example.com)';
+    const { container } = renderCard({
+      prompt,
+      options: [{ id: 'a', label: '`not code`', description: '_not em_' }]
+    });
+
+    expect(screen.getByText(prompt)).toBeInTheDocument();
+    expect(screen.getByText('`not code`')).toBeInTheDocument();
+    expect(screen.getByText('_not em_')).toBeInTheDocument();
+    expect(container.querySelector('strong, a, em, code')).toBeNull();
+  });
+
+  it('isolates bidi payloads so they cannot reorder the header or labels', () => {
+    const prompt = '\u202Egnp.yek \u202C';
+    const label = '\u202Eeurt si siht\u202C';
+    renderCard({
+      prompt,
+      options: [{ id: 'a', label, description: null }]
+    });
+
+    const header = screen.getByText('Question');
+    const promptNode = screen.getByText(prompt);
+    const labelNode = screen.getByText(label);
+
+    expect(promptNode.closest('bdi')).toHaveAttribute('dir', 'auto');
+    expect(labelNode.closest('bdi')).toHaveAttribute('dir', 'auto');
+    expect(
+      header.compareDocumentPosition(promptNode) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('renders zero-width text without creating an approval control', () => {
+    const prompt = 'A\u200Bpprove this request';
+    renderCard({ prompt });
+
+    expect(screen.getByText(prompt)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Approve/i })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('approval-card')).toBeNull();
+  });
 });

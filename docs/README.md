@@ -16,6 +16,7 @@ See also:
 - [Controlling automatic side-panel opening](side-panel-auto-expand.md)
 - [Thread resume with unavailable chat profiles](thread-resume.md)
 - [Tool-call approvals](approvals.md)
+- [Agent questions (`cl.ask`)](questions.md)
 
 ## Research
 
