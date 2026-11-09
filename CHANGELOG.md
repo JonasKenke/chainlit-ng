@@ -43,6 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Return a structured 422 instead of a 500 when a request body contains a lone
+  UTF-16 surrogate. Validation errors keep the `{"detail": [...]}` envelope
+  but no longer echo the rejected `input`/`ctx` values.
 - Redact free-text question answers from shared threads, keep prompt/options
   and option labels in the read-only question card, and fail closed when share
   step metadata is malformed or has an unknown interaction kind (closes S1 F1).
