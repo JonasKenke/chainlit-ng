@@ -280,6 +280,33 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
     return True
 
 
+async def _run_in_turn(kind: str, thread_id, coro):
+    """Run a callback inside one telemetry turn root."""
+    turn = otel.start_turn(kind, thread_id)
+    try:
+        return await coro
+    except asyncio.CancelledError:
+        otel.mark_turn_cancelled(turn)
+        raise
+    except Exception as exc:
+        otel.mark_turn_error(turn, type(exc))
+        raise
+    finally:
+        otel.end_turn(turn)
+
+
+def _start_chat_start(session) -> asyncio.Task:
+    task = asyncio.create_task(
+        _run_in_turn(
+            "chat_start",
+            getattr(session, "thread_id", None),
+            config.code.on_chat_start(),
+        )
+    )
+    session.current_task = task
+    return task
+
+
 @sio.on("connection_successful")  # pyright: ignore [reportOptionalCall]
 async def connection_successful(sid):
     context = init_ws_context(sid)
@@ -306,8 +333,7 @@ async def connection_successful(sid):
                 and not context.session.chat_started
             ):
                 context.session.chat_started = True
-                task = asyncio.create_task(config.code.on_chat_start())
-                context.session.current_task = task
+                _start_chat_start(context.session)
             return
 
         if context.session.thread_id_to_resume and config.code.on_chat_resume:
@@ -339,7 +365,11 @@ async def connection_successful(sid):
                         "first_interaction",
                         {"interaction": "resume", "thread_id": thread.get("id")},
                     )
-                    await config.code.on_chat_resume(thread)
+                    await _run_in_turn(
+                        "chat_resume",
+                        thread.get("id"),
+                        config.code.on_chat_resume(thread),
+                    )
 
                     for step in thread.get("steps", []):
                         try:
@@ -384,8 +414,7 @@ async def connection_successful(sid):
 
         if config.code.on_chat_start and not context.session.chat_started:
             context.session.chat_started = True
-            task = asyncio.create_task(config.code.on_chat_start())
-            context.session.current_task = task
+            _start_chat_start(context.session)
 
 
 @sio.on("clear_session")  # pyright: ignore [reportOptionalCall]
@@ -691,6 +720,7 @@ async def audio_end(sid):
     if await _refuse_if_approval_pending(session, context):
         return
 
+    turn = otel.start_turn("audio_end", getattr(session, "thread_id", None))
     try:
         await context.emitter.task_start()
 
@@ -704,14 +734,18 @@ async def audio_end(sid):
             await config.code.on_audio_end()
 
     except asyncio.CancelledError:
-        pass
+        otel.mark_turn_cancelled(turn)
     except Exception as e:
+        otel.mark_turn_error(turn, type(e))
         logger.exception(e)
         await ErrorMessage(
             author="Error", content=str(e) or e.__class__.__name__
         ).send()
     finally:
-        await context.emitter.task_end()
+        try:
+            await context.emitter.task_end()
+        finally:
+            otel.end_turn(turn)
 
 
 @sio.on("chat_settings_change")

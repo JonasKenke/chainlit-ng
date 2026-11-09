@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -47,6 +48,7 @@ _ATTRIBUTE_KEYS = frozenset(
     {
         "chainlit.span.unclosed",
         "chainlit.step.is_error",
+        "chainlit.step.name",
         "chainlit.step.type",
         "chainlit.telemetry.dropped_spans",
         "chainlit.thread.id",
@@ -88,6 +90,7 @@ class _StepHandle:
 class _Turn:
     root: Any
     trace_id: int
+    activation: Any = None
     spans: Dict[str, _StepHandle] = field(default_factory=dict)
     count: int = 0
     dropped: int = 0
@@ -482,6 +485,78 @@ def _env_int(name: str, default: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# App context
+# ---------------------------------------------------------------------------
+
+
+def get_tracer(name: str = "app") -> Any:
+    """Return Chainlit's tracer, or a no-op tracer when telemetry is off."""
+    if _tracer is not None:
+        return _tracer
+    try:
+        from opentelemetry.trace import NoOpTracerProvider
+    except ImportError:
+        return _NullTracer()
+    return NoOpTracerProvider().get_tracer(name)
+
+
+def current_traceparent() -> Optional[str]:
+    """Return the W3C traceparent of the current span, or None."""
+    if _tracer is None:
+        return None
+    try:
+        from opentelemetry import trace
+
+        span_context = trace.get_current_span().get_span_context()
+        if not span_context.is_valid:
+            return None
+        return (
+            f"00-{span_context.trace_id:032x}-{span_context.span_id:016x}-"
+            f"{int(span_context.trace_flags):02x}"
+        )
+    except Exception:
+        return None
+
+
+class _NullSpan:
+    def get_span_context(self) -> None:
+        return None
+
+    def is_recording(self) -> bool:
+        return False
+
+    def set_attribute(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def set_status(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def add_event(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def record_exception(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def update_name(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def end(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+class _NullTracer:
+    """Fallback when telemetry is off and opentelemetry-api is absent."""
+
+    def start_span(self, *args: Any, **kwargs: Any) -> _NullSpan:
+        return _NullSpan()
+
+    def start_as_current_span(self, *args: Any, **kwargs: Any) -> Any:
+        from contextlib import nullcontext
+
+        return nullcontext(_NullSpan())
+
+
+# ---------------------------------------------------------------------------
 # Turns
 # ---------------------------------------------------------------------------
 
@@ -506,7 +581,18 @@ def start_turn(kind: str, thread_id: Optional[str] = None) -> Optional[_Turn]:
             record_exception=False,
             set_status_on_exception=False,
         )
-        turn = _Turn(root=root, trace_id=root.get_span_context().trace_id)
+        activation = trace.use_span(
+            root,
+            end_on_exit=False,
+            record_exception=False,
+            set_status_on_exception=False,
+        )
+        activation.__enter__()
+        turn = _Turn(
+            root=root,
+            trace_id=root.get_span_context().trace_id,
+            activation=activation,
+        )
         _turn.set(turn)
         return turn
     except Exception:
@@ -558,6 +644,14 @@ def end_turn(turn: Optional[_Turn]) -> None:
         turn.root.end()
     except Exception:
         _warn_once("end_turn", "telemetry: failed to end the turn span")
+    finally:
+        activation = turn.activation
+        if activation is not None:
+            turn.activation = None
+            try:
+                activation.__exit__(None, None, None)
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -582,20 +676,22 @@ def start_step(step: Any) -> None:
                 return
             turn.count += 1
             parent = _parent_span(turn, step)
+            name = _capture_step_name(step) if _capture_names() else ""
+            attributes: Dict[str, Any] = {
+                "chainlit.step.type": step_type,
+                "chainlit.step.is_error": False,
+            }
+            if name:
+                attributes["chainlit.step.name"] = name
             span = tracer.start_span(
-                f"chainlit.{step_type}",
+                name or f"chainlit.{step_type}",
                 context=trace.set_span_in_context(parent, otel_context.Context()),
                 kind=(
                     trace.SpanKind.CLIENT
                     if step_type in _CLIENT_STEP_TYPES
                     else trace.SpanKind.INTERNAL
                 ),
-                attributes=_attributes(
-                    {
-                        "chainlit.step.type": step_type,
-                        "chainlit.step.is_error": False,
-                    }
-                ),
+                attributes=_attributes(attributes),
                 record_exception=False,
                 set_status_on_exception=False,
             )
@@ -669,6 +765,22 @@ def _parent_span(turn: _Turn, step: Any) -> Any:
 def _step_type(step: Any) -> str:
     value = getattr(step, "type", "undefined")
     return value if value in _STEP_TYPES else "undefined"
+
+
+def _capture_names() -> bool:
+    settings = getattr(config.features, "telemetry", None)
+    return bool(settings is not None and settings.capture_names)
+
+
+def _capture_step_name(step: Any) -> str:
+    """Bound and sanitize an opt-in step name (§4.4)."""
+    name = getattr(step, "name", "")
+    if not isinstance(name, str):
+        return ""
+    cleaned = "".join(
+        char for char in name if unicodedata.category(char) not in ("Cc", "Cf")
+    )
+    return cleaned[:128]
 
 
 def _sanitize_error_type(exc_type: Any) -> str:
