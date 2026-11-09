@@ -21,6 +21,7 @@ from chainlit.step import StepDict
 from chainlit.types import (
     Feedback,
     FeedbackDict,
+    FeedbackThreadLookup,
     PageInfo,
     PaginatedResponse,
     Pagination,
@@ -29,6 +30,7 @@ from chainlit.types import (
     ScheduledTaskDict,
     ThreadDict,
     ThreadFilter,
+    ThreadGrant,
     ThreadOwner,
 )
 from chainlit.user import PersistedUser, User
@@ -39,6 +41,11 @@ if TYPE_CHECKING:
 
 
 class SQLAlchemyDataLayer(BaseDataLayer):
+    # Opt-in capabilities: the grant table is ensured lazily and the typed
+    # feedback/step lookups below are implemented on this layer.
+    thread_grants_supported = True
+    feedback_authorization_supported = True
+
     def __init__(
         self,
         conninfo: str,
@@ -82,7 +89,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         parameters: dict,
         expanding: Optional[List[str]] = None,
         quiet: bool = False,
+        raise_on_error: bool = False,
     ) -> Union[List[Dict[str, Any]], int, None]:
+        """Run one statement; ``raise_on_error`` lets a caller tell no-row from failure."""
         parameterized_query = text(query)
         if expanding:
             parameterized_query = parameterized_query.bindparams(
@@ -104,6 +113,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     return result.rowcount
             except SQLAlchemyError as e:
                 await session.rollback()
+                if raise_on_error:
+                    raise
                 if quiet:
                     # The exception text can render query parameters; keep them out of the log.
                     logger.warning(
@@ -114,6 +125,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 return None
             except Exception as e:
                 await session.rollback()
+                if raise_on_error:
+                    raise
                 if quiet:
                     logger.warning(
                         "SQLAlchemy: quiet lookup failed (%s)", type(e).__name__
@@ -282,17 +295,19 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             metadata = {}
 
         existing = await self.execute_sql(
-            query='SELECT "metadata" FROM threads WHERE "id" = :id',
+            query='SELECT "metadata", "userId" FROM threads WHERE "id" = :id',
             parameters={"id": thread_id},
         )
 
-        thread_exists = isinstance(existing, list) and len(existing) > 0
+        existing_rows = existing if isinstance(existing, list) else []
+        thread_exists = len(existing_rows) > 0
+        stored_owner = existing_rows[0].get("userId") if existing_rows else None
         if thread_exists and not has_updates:
             return
 
         base = {}
-        if isinstance(existing, list) and existing:
-            raw = existing[0].get("metadata") or {}
+        if existing_rows:
+            raw = existing_rows[0].get("metadata") or {}
             if isinstance(raw, str):
                 try:
                     base = json.loads(raw)
@@ -337,6 +352,14 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         """
         await self.execute_sql(query=query, parameters=parameters)
 
+        # An ownership change invalidates every grant (M3: user_id=None deletes nothing).
+        if (
+            user_id is not None
+            and thread_exists
+            and (stored_owner is None or str(stored_owner) != str(user_id))
+        ):
+            await self._delete_thread_grants(thread_id)
+
     async def delete_thread(self, thread_id: str):
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_thread, thread_id={thread_id}")
@@ -356,6 +379,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         steps_query = """DELETE FROM steps WHERE "threadId" = :id"""
         thread_query = """DELETE FROM threads WHERE "id" = :id"""
         parameters = {"id": thread_id}
+        await self._delete_thread_grants(thread_id)
         await self.execute_sql(query=feedbacks_query, parameters=parameters)
         await self.execute_sql(query=elements_query, parameters=parameters)
         await self.execute_sql(query=steps_query, parameters=parameters)
@@ -399,6 +423,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         """
         thread_query = """DELETE FROM threads WHERE "userId" = :user_id"""
         parameters = {"user_id": user_id}
+        await self._delete_all_thread_grants(user_id)
         deleted_threads = 0
         for query in (feedbacks_query, elements_query, steps_query, thread_query):
             result = await self.execute_sql(query=query, parameters=parameters)
@@ -407,6 +432,159 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             deleted_threads = result
 
         return deleted_threads
+
+    ###### Thread grants ######
+    _thread_grants_table_checked: bool = False
+    _thread_grants_table_ready: bool = False
+
+    async def _ensure_thread_grants_table(self) -> bool:
+        """Create the grants table best-effort. False means grants are unavailable."""
+        if self._thread_grants_table_checked:
+            return self._thread_grants_table_ready
+
+        created = await self.execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS thread_grants (
+                "threadId"             TEXT NOT NULL,
+                "granteeUserId"        TEXT NOT NULL,
+                "granteeUserCreatedAt" TEXT NOT NULL,
+                "granteeIdentifier"    TEXT NOT NULL,
+                "grantedByUserId"      TEXT NOT NULL,
+                "grantedAt"            TEXT NOT NULL,
+                "role"                 TEXT NOT NULL DEFAULT 'read',
+                PRIMARY KEY ("threadId", "granteeUserId")
+            )
+            """,
+            {},
+            quiet=True,
+        )
+        await self.execute_sql(
+            """
+            CREATE INDEX IF NOT EXISTS thread_grants_grantee
+            ON thread_grants ("granteeUserId", "threadId")
+            """,
+            {},
+            quiet=True,
+        )
+
+        if created is None:
+            logger.warning(
+                "SQLAlchemy: thread_grants table unavailable; thread grants are disabled"
+            )
+        self._thread_grants_table_ready = created is not None
+        self._thread_grants_table_checked = True
+        return self._thread_grants_table_ready
+
+    @staticmethod
+    def _grant_from_row(row: Dict[str, Any]) -> ThreadGrant:
+        return ThreadGrant(
+            thread_id=str(row["threadId"]),
+            grantee_user_id=str(row["granteeUserId"]),
+            grantee_user_created_at=str(row["granteeUserCreatedAt"]),
+            grantee_identifier=str(row["granteeIdentifier"]),
+            granted_by_user_id=str(row["grantedByUserId"]),
+            granted_at=str(row["grantedAt"]),
+            role=str(row["role"]),
+        )
+
+    async def get_thread_grant(
+        self, thread_id: str, grantee_user_id: str
+    ) -> Optional[ThreadGrant]:
+        # Grant lookups are quiet: an error must not render the grantee id.
+        if not await self._ensure_thread_grants_table():
+            return None
+        result = await self.execute_sql(
+            """
+            SELECT * FROM thread_grants
+            WHERE "threadId" = :thread_id
+              AND "granteeUserId" = :grantee_user_id
+              AND "role" = 'read'
+            """,
+            {"thread_id": thread_id, "grantee_user_id": grantee_user_id},
+            quiet=True,
+        )
+        if not isinstance(result, list) or not result:
+            return None
+        return self._grant_from_row(result[0])
+
+    async def list_thread_grants(self, thread_id: str) -> List[ThreadGrant]:
+        if not await self._ensure_thread_grants_table():
+            return []
+        result = await self.execute_sql(
+            """
+            SELECT * FROM thread_grants
+            WHERE "threadId" = :thread_id
+            ORDER BY "grantedAt" ASC
+            """,
+            {"thread_id": thread_id},
+            quiet=True,
+        )
+        if not isinstance(result, list):
+            return []
+        return [self._grant_from_row(row) for row in result]
+
+    async def create_thread_grant(self, grant: ThreadGrant) -> None:
+        if not await self._ensure_thread_grants_table():
+            raise RuntimeError("Thread grants are unavailable: table creation failed")
+        try:
+            await self.execute_sql(
+                """
+                INSERT INTO thread_grants (
+                    "threadId", "granteeUserId", "granteeUserCreatedAt",
+                    "granteeIdentifier", "grantedByUserId", "grantedAt", "role"
+                ) VALUES (
+                    :thread_id, :grantee_user_id, :grantee_user_created_at,
+                    :grantee_identifier, :granted_by_user_id, :granted_at, :role
+                )
+                ON CONFLICT ("threadId", "granteeUserId") DO NOTHING
+                """,
+                asdict(grant),
+                quiet=True,
+                raise_on_error=True,
+            )
+        except Exception as e:
+            # The driver error can render the grantee id; keep it out of the log.
+            logger.warning(
+                "SQLAlchemy: thread grant create failed (%s)", type(e).__name__
+            )
+            raise RuntimeError("Failed to create the thread grant") from None
+
+    async def delete_thread_grant(self, thread_id: str, grantee_user_id: str) -> bool:
+        if not await self._ensure_thread_grants_table():
+            return False
+        result = await self.execute_sql(
+            'DELETE FROM thread_grants WHERE "threadId" = :thread_id AND "granteeUserId" = :grantee_user_id',
+            {"thread_id": thread_id, "grantee_user_id": grantee_user_id},
+            quiet=True,
+        )
+        if result is None:
+            # Do not let a silent no-op look like a successful revoke.
+            raise RuntimeError("Failed to revoke the thread grant")
+        return isinstance(result, int) and result > 0
+
+    async def _delete_thread_grants(self, thread_id: str) -> None:
+        """Guarded: a missing grants table must not break thread deletion."""
+        if not await self._ensure_thread_grants_table():
+            return
+        await self.execute_sql(
+            'DELETE FROM thread_grants WHERE "threadId" = :thread_id',
+            {"thread_id": thread_id},
+            quiet=True,
+        )
+
+    async def _delete_all_thread_grants(self, user_id: str) -> None:
+        """Guarded; cast because threads.id is operator-defined (UUID or TEXT)."""
+        if not await self._ensure_thread_grants_table():
+            return
+        await self.execute_sql(
+            """
+            DELETE FROM thread_grants WHERE "threadId" IN (
+                SELECT CAST(t."id" AS TEXT) FROM threads t WHERE t."userId" = :user_id
+            )
+            """,
+            {"user_id": user_id},
+            quiet=True,
+        )
 
     async def list_threads(
         self, pagination: Pagination, filters: ThreadFilter
@@ -606,6 +784,19 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         await self.execute_sql(query=elements_query, parameters=parameters)
         await self.execute_sql(query=steps_query, parameters=parameters)
 
+    async def step_belongs_to_thread(self, thread_id: str, step_id: str) -> bool:
+        """Point check used by the feedback gate; no row or any failure denies."""
+        try:
+            result = await self.execute_sql(
+                'SELECT 1 AS "found" FROM steps WHERE "id" = :step_id AND "threadId" = :thread_id',
+                {"step_id": step_id, "thread_id": thread_id},
+                quiet=True,
+                raise_on_error=True,
+            )
+        except Exception:
+            return False
+        return isinstance(result, list) and bool(result)
+
     async def get_step(self, step_id: str) -> Optional["StepDict"]:
         if self.show_logger:
             logger.info(f"SQLAlchemy: get_step, step_id={step_id}")
@@ -683,6 +874,26 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         )
 
     ###### Feedback ######
+    async def get_feedback_thread_id(self, feedback_id: str) -> FeedbackThreadLookup:
+        """Typed lookup: only ``not_found`` may lead to an insert (H1b)."""
+        try:
+            result = await self.execute_sql(
+                'SELECT "threadId" FROM feedbacks WHERE "id" = :feedback_id',
+                {"feedback_id": feedback_id},
+                quiet=True,
+                raise_on_error=True,
+            )
+        except Exception:
+            return FeedbackThreadLookup(status="error")
+        if not isinstance(result, list):
+            return FeedbackThreadLookup(status="error")
+        if not result:
+            return FeedbackThreadLookup(status="not_found")
+        thread_id = result[0].get("threadId")
+        return FeedbackThreadLookup(
+            status="found", thread_id=str(thread_id) if thread_id is not None else None
+        )
+
     async def upsert_feedback(self, feedback: Feedback) -> str:
         if self.show_logger:
             logger.info(f"SQLAlchemy: upsert_feedback, feedback_id={feedback.id}")
@@ -692,16 +903,22 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             key: value for key, value in feedback_dict.items() if value is not None
         }
 
+        # Defense in depth for the route's not_found lookup: a conflicting row
+        # in another thread becomes a no-op instead of an overwrite.
         columns = ", ".join(f'"{key}"' for key in parameters.keys())
         values = ", ".join(f":{key}" for key in parameters.keys())
         updates = ", ".join(
             f'"{key}" = :{key}' for key in parameters.keys() if key != "id"
         )
+        conflict_guard = ""
+        if feedback.threadId is not None:
+            parameters["guard_thread_id"] = feedback.threadId
+            conflict_guard = ' WHERE feedbacks."threadId" = :guard_thread_id'
         query = f"""
             INSERT INTO feedbacks ({columns})
             VALUES ({values})
             ON CONFLICT (id) DO UPDATE
-            SET {updates};
+            SET {updates}{conflict_guard};
         """
         await self.execute_sql(query=query, parameters=parameters)
         return feedback.id
