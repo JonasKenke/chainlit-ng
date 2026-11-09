@@ -33,11 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - Harden and document the OpenTelemetry export bounds: a turn exports at most
   200 step spans (excess spans are counted in
-  `chainlit.telemetry.dropped_spans`), each span carries at most 8 scalar
-  attributes with string values capped at 128 characters, and shutdown returns
-  within 2 seconds even when the collector stalls. The telemetry guide now
-  covers verify/disable, resource-attribute exclusion, and the failure matrix.
-  See [the telemetry guide](docs/telemetry.md).
+  `chainlit.telemetry.dropped_spans`), each span Chainlit creates carries at
+  most 8 scalar attributes with string values capped at 128 characters, and
+  shutdown returns within 2 seconds even when the collector stalls. The
+  telemetry guide now covers verify/disable, resource-attribute exclusion, and
+  the failure matrix. See [the telemetry guide](docs/telemetry.md).
 - **Breaking (MCP):** Configure MCP servers by name under `[[features.mcp.servers]]`; the client no longer supplies stdio commands or named-server URLs. User-provided SSE/streamable-HTTP servers require `[features.mcp.user_servers]` with `enabled = true` and `allowed_urls`. Legacy `[features.mcp.sse|stdio|streamable-http]` keys (including `allowed_executables`) abort startup only when `features.mcp.enabled = true`; MCP remains off by default. See the [2.12.0 MCP advisory and migration guide](docs/security-advisory-2026-mcp.md#migrating-a-211-config).
 - **Breaking (`@chainlit/react-client`):** `connectMcp(sessionId, name)` replaces the removed `connectStdioMCP`, `connectSseMCP` and `connectStreamableHttpMCP`; user-provided servers use `connectUserMcp(...)`. The next release bumps the package to `0.7.0`; see the [client migration table](docs/security-advisory-2026-mcp.md#5-client-library-changes).
 

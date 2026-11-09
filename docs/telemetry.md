@@ -43,9 +43,12 @@ telemetry: exporting traces to http://localhost:4318
 
 Send one message, then look for a `chainlit.turn` span with
 `chainlit.turn.kind=message` and its `chainlit.step.*` children in the
-collector. No spans means the flag, the `otel` extra, or one of the two
-override variables above is still off. An unreachable collector logs a bounded
-warning and never changes the chat turn.
+collector. A turn may be sampled out: with the default `sample_ratio = 0.1`
+most turns record nothing and export no spans, so set `sample_ratio = 1` while
+verifying. If a sampled-in turn still produces no spans, the flag, the `otel`
+extra, or one of the two override variables above is still off. An unreachable
+collector logs a bounded set of SDK exporter records per failed batch and never
+changes the chat turn.
 
 ### Disable
 
@@ -183,10 +186,14 @@ excluded from the 8-attribute count. They are operator-controlled; bound them
 at the collector if they can contain sensitive values.
 
 Exporter failures, a full export queue, and a slow or unreachable collector are
-isolated from the turn: the turn completes normally, and each failure class is
-logged at most once per rate-limit window instead of once per span. Shutdown
-flushes on a daemon thread for at most 2 seconds, so a stalled collector cannot
-hold up process exit; spans still queued at that point are dropped.
+isolated from the turn: the turn completes normally. Chainlit's own warnings
+for a failure class are logged once per process; the queue-full warning is
+logged at most once per 60 seconds. Export failures inside the OTLP SDK are not
+filtered by Chainlit: the SDK logs a bounded set of records per failed batch (a
+warning per retry and one error per failed batch), not once per span or per
+window. Shutdown flushes on a daemon thread for at most 2 seconds, so a
+stalled collector cannot hold up process exit; spans still queued at that
+point are dropped.
 
 ## App spans and propagation
 
