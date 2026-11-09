@@ -21,7 +21,7 @@ import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from chainlit.config import config
 from chainlit.logger import logger
@@ -386,6 +386,13 @@ _ENDPOINT_LOGGERS = (
 )
 
 
+def _redaction_needles(value: str) -> set:
+    """Every form of one endpoint component the HTTP client may log (D3)."""
+    forms = {value, quote(value, safe="/"), unquote(value)}
+    forms.add(quote(unquote(value), safe="/"))
+    return {form for form in forms if len(form) > 1}
+
+
 class _EndpointRedactionFilter(logging.Filter):
     """Strip the endpoint path from exporter logs (D3, AC 10)."""
 
@@ -394,7 +401,9 @@ class _EndpointRedactionFilter(logging.Filter):
         try:
             parsed = urlparse(endpoint)
             self._needles = tuple(
-                needle for needle in {parsed.path, parsed.query} if len(needle) > 1
+                needle
+                for value in (parsed.path, parsed.query)
+                for needle in _redaction_needles(value)
             )
         except Exception:
             self._needles = ()
