@@ -230,6 +230,7 @@ def test_shared_thread_redacts_a_free_text_question_answer():
         "kind",
         "id",
         "stepId",
+        "threadId",
         "version",
         "status",
         "prompt",
@@ -241,6 +242,7 @@ def test_shared_thread_redacts_a_free_text_question_answer():
         "terminalAt",
     }
     assert approval["kind"] == "question"
+    assert approval["threadId"] == "thread-1"
     assert approval["answer"] == {"text": None, "redacted": True}
     assert approval["prompt"] == "Which environment?"
     assert approval["options"] == [

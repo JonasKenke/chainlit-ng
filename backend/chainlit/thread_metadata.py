@@ -22,6 +22,7 @@ _PUBLIC_QUESTION_FIELDS = (
     "kind",
     "id",
     "stepId",
+    "threadId",
     "version",
     "status",
     "prompt",
@@ -46,6 +47,7 @@ def _public_question(record: Mapping[str, Any]) -> Optional[dict]:
     valid = (
         isinstance(record.get("id"), str)
         and isinstance(record.get("stepId"), str)
+        and isinstance(record.get("threadId"), str)
         and isinstance(record.get("version"), int)
         and isinstance(record.get("status"), str)
         and isinstance(record.get("prompt"), str)
