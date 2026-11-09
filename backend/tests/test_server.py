@@ -2480,3 +2480,45 @@ def test_thread_element_route_exposes_live_request(test_client, monkeypatch):
     assert captured["request"] is not None
     assert captured["request"].url.path == "/project/thread/thread-1/element/element-1"
     assert captured["request"].headers["x-trace"] == "abc"
+
+
+def test_question_route_rejects_lone_surrogate_with_422(
+    test_client: TestClient, mock_get_current_user: Mock
+):
+    """A lone surrogate in the body must not crash JSON rendering into a 500."""
+    body = (
+        '{"sessionId": "session-1", "questionId": "question-1", '
+        '"text": "before\\ud800after", "decisionRequestId": "request-1"}'
+    )
+    response = test_client.post(
+        "/project/question",
+        content=body.encode("ascii"),
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.headers["content-type"] == "application/json"
+    response.content.decode("utf-8")
+    errors = response.json()["detail"]
+    assert errors
+    assert all("input" not in error and "ctx" not in error for error in errors)
+    assert "before" not in response.text
+
+
+def test_question_route_keeps_validation_envelope(
+    test_client: TestClient, mock_get_current_user: Mock
+):
+    """The regular validation response keeps the FastAPI {"detail": [...]} shape."""
+    response = test_client.post(
+        "/project/question",
+        json={"sessionId": "session-1"},
+    )
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert errors
+    assert {error["loc"][-1] for error in errors} == {
+        "questionId",
+        "decisionRequestId",
+    }
+    assert all("input" not in error and "ctx" not in error for error in errors)

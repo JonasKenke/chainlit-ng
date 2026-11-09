@@ -28,6 +28,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -333,6 +334,25 @@ build_dir = get_build_dir("frontend", "frontend")
 copilot_build_dir = get_build_dir(os.path.join("libs", "copilot"), "copilot")
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> Response:
+    # Rejected input is not echoed back: it can hold lone surrogates that
+    # JSONResponse cannot encode. ensure_ascii keeps the body valid even when a
+    # field name (loc) carries one.
+    errors = [
+        {key: value for key, value in error.items() if key not in ("input", "ctx")}
+        for error in exc.errors()
+    ]
+    return Response(
+        content=json.dumps({"detail": errors}, ensure_ascii=True),
+        status_code=422,
+        media_type="application/json",
+    )
+
 
 # Engine.IO silently drops frames above this limit. The composer enforces the
 # same limit (isMessageTooLarge in frontend/src/lib/utils.ts) so an oversized
