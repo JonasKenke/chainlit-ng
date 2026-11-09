@@ -161,3 +161,67 @@ it('keeps container directive content rendered', () => {
 
   expect(container.textContent).toBe('Hello alert');
 });
+
+const inlineTextElement = (forId: string): ITextElement => ({
+  id: `${forId}-element`,
+  name: 'Inline Element',
+  type: 'text',
+  display: 'inline',
+  url: 'inline-element.txt',
+  forId
+});
+
+const renderWithElementsPosition = (elementsPosition?: string) => {
+  const id = `elements-position-${elementsPosition ?? 'unset'}`;
+  const result = render(
+    <MessageContent
+      message={{
+        threadId: 'test',
+        type: 'assistant_message',
+        output: 'Hello World',
+        id,
+        name: 'Assistant',
+        createdAt: 0,
+        metadata:
+          elementsPosition === undefined ? undefined : { elementsPosition }
+      }}
+      elements={[inlineTextElement(id)]}
+    />
+  );
+
+  const content = result.container.querySelector('.message-content');
+  const text = content?.textContent ?? '';
+  return {
+    textIndex: text.indexOf('Hello World'),
+    elementIndex: text.indexOf('Inline Element')
+  };
+};
+
+it('renders inline elements below the content by default', () => {
+  const { textIndex, elementIndex } = renderWithElementsPosition();
+
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  expect(elementIndex).toBeGreaterThan(textIndex);
+});
+
+it('renders inline elements below the content for elementsPosition "below"', () => {
+  const { textIndex, elementIndex } = renderWithElementsPosition('below');
+
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  expect(elementIndex).toBeGreaterThan(textIndex);
+});
+
+it('renders inline elements above the content for elementsPosition "above"', () => {
+  const { textIndex, elementIndex } = renderWithElementsPosition('above');
+
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  expect(elementIndex).toBeGreaterThanOrEqual(0);
+  expect(elementIndex).toBeLessThan(textIndex);
+});
+
+it('treats an unknown elementsPosition as below', () => {
+  const { textIndex, elementIndex } = renderWithElementsPosition('sideways');
+
+  expect(textIndex).toBeGreaterThanOrEqual(0);
+  expect(elementIndex).toBeGreaterThan(textIndex);
+});

@@ -27,7 +27,8 @@ const getMessageRenderProps = (message: IStep) => ({
   language: message.language,
   streaming: message.streaming,
   showInput: message.showInput,
-  type: message.type
+  type: message.type,
+  elementsPosition: message.metadata?.elementsPosition
 });
 
 const MessageContent = memo(
@@ -112,6 +113,8 @@ const MessageContent = memo(
         );
       }
 
+      const elementsAbove = message.metadata?.elementsPosition === 'above';
+
       const markdownContent = (
         <div className="flex flex-col gap-4">
           {inputMarkdown}
@@ -119,12 +122,15 @@ const MessageContent = memo(
         </div>
       );
 
+      const inlinedElements = displayOutput ? (
+        <InlinedElements elements={outputInlinedElements} />
+      ) : null;
+
       return (
         <div ref={ref} className="message-content w-full flex flex-col gap-2">
+          {elementsAbove ? inlinedElements : null}
           {displayInput || (displayOutput && output) ? markdownContent : null}
-          {displayOutput ? (
-            <InlinedElements elements={outputInlinedElements} />
-          ) : null}
+          {elementsAbove ? null : inlinedElements}
         </div>
       );
     }
