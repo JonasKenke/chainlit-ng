@@ -55,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Security
 
 - Port the upstream MCP endpoint fixes for CVE-2026-45018 (client-supplied stdio command execution) and CVE-2026-45019 (SSRF via user-provided MCP URLs/headers). See the [security advisory](docs/security-advisory-2026-mcp.md).
+- Require `opentelemetry-api>=1.45.1,<2.0.0` in the core install, so the `>=1.28.0` floor admitted by the core `mcp` dependency can no longer resolve to a version affected by CVE-2026-114603 (unbounded `tracestate` parsing). No new package: `opentelemetry-api` was already installed through `mcp` and `fastapi`.
 
 ## [2.12.0]
 
