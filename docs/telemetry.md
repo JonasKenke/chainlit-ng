@@ -33,6 +33,28 @@ config says enabled:
 - `OTEL_SDK_DISABLED=true`
 - `OTEL_TRACES_EXPORTER=none`
 
+### Verify
+
+After a restart the startup log shows one line such as:
+
+```
+telemetry: exporting traces to http://localhost:4318
+```
+
+Send one message, then look for a `chainlit.turn` span with
+`chainlit.turn.kind=message` and its `chainlit.step.*` children in the
+collector. No spans means the flag, the `otel` extra, or one of the two
+override variables above is still off. An unreachable collector logs a bounded
+warning and never changes the chat turn.
+
+### Disable
+
+Set `enabled = false`, or remove the section, and restart the process. Chainlit
+then creates no provider and exports nothing. To keep the config and override
+it for one run, start with `OTEL_SDK_DISABLED=true` or
+`OTEL_TRACES_EXPORTER=none`. Uninstalling the `otel` extra also stops export,
+but logs a one-time warning while the config still enables it.
+
 ## Export to a collector
 
 The exporter is fixed to OTLP/HTTP/protobuf. The default endpoint is
@@ -137,6 +159,34 @@ Root spans carry no inbound parent. Chainlit does not read `traceparent`,
 `tracestate`, or `baggage` from the browser or from message payloads, and does
 not inject baggage. Do not treat a traced request as authenticated because it
 has a trace context.
+
+## Bounds and failure behavior
+
+The bounds below apply to spans Chainlit creates. Spans made with
+`chainlit.otel.get_tracer()` export through Chainlit's exporter but are not
+filtered by Chainlit: their attributes, value length, events, and links are the
+app's responsibility. Enforcing the bound on app spans is out of scope for this
+slice.
+
+For each turn, Chainlit exports at most 200 of its own step spans plus its
+root span. Steps after the cap are not exported and are counted in
+`chainlit.telemetry.dropped_spans` on the root, so a 1,000-step turn produces
+200 step spans and `dropped_spans=800`. The per-turn handle registry is released
+when the turn ends.
+
+Every span Chainlit creates carries at most 8 attributes, and every string
+value is at most 128 characters. Attribute values are scalars only: no dict,
+list, tuple, or set. Chainlit adds no events and no links to its spans.
+Resource attributes (`service.name`, `service.version`, and anything from
+`OTEL_RESOURCE_ATTRIBUTES`) are attached to the resource, not the span, and are
+excluded from the 8-attribute count. They are operator-controlled; bound them
+at the collector if they can contain sensitive values.
+
+Exporter failures, a full export queue, and a slow or unreachable collector are
+isolated from the turn: the turn completes normally, and each failure class is
+logged at most once per rate-limit window instead of once per span. Shutdown
+flushes on a daemon thread for at most 2 seconds, so a stalled collector cannot
+hold up process exit; spans still queued at that point are dropped.
 
 ## App spans and propagation
 
