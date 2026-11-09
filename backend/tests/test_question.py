@@ -330,6 +330,25 @@ async def test_late_answer_returns_the_terminal_record_and_changes_nothing(
     assert stored["answer"] == {"text": "first"}
 
 
+async def test_terminal_memo_after_thread_delete_is_not_found(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="deploy", type="tool")
+        await step.send()
+        task, entry = await _pending_question(step)
+        await _answer(mock_session, entry, text="secret")
+        await task
+
+        mark_thread_deleted(step.thread_id)
+        with pytest.raises(ApprovalNotFound):
+            await _answer(mock_session, entry, text="secret")
+
+
 async def test_ninth_pending_ask_raises_before_any_write(
     layer, mock_chainlit_context, mock_session, monkeypatch
 ):
@@ -505,6 +524,58 @@ async def test_answer_uses_the_ask_time_snapshot_not_mutated_metadata(
         answer = await task
 
         assert answer.option_id == "a"
+        assert answer.label == "Original A"
+        assert step.metadata["approval"]["answer"] == {
+            "optionId": "a",
+            "label": "Original A",
+        }
+
+
+async def test_inplace_option_append_is_not_accepted(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="deploy", type="tool")
+        await step.send()
+        task, entry = await _pending_question(
+            step, options=[QuestionOption("a", "Original A")]
+        )
+
+        step.metadata["approval"]["options"].append(
+            {"id": "evil", "label": "Injected", "description": None}
+        )
+        with pytest.raises(QuestionInvalid):
+            await _answer(mock_session, entry, option_id="evil")
+        assert step.metadata["approval"]["status"] == "pending"
+
+        await _answer(mock_session, entry, option_id="a")
+        answer = await task
+
+    assert answer.label == "Original A"
+
+
+async def test_inplace_label_mutation_cannot_change_the_stored_label(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="deploy", type="tool")
+        await step.send()
+        task, entry = await _pending_question(
+            step, options=[QuestionOption("a", "Original A")]
+        )
+
+        step.metadata["approval"]["options"][0]["label"] = "Hacked"
+        await _answer(mock_session, entry, option_id="a")
+        answer = await task
+
         assert answer.label == "Original A"
         assert step.metadata["approval"]["answer"] == {
             "optionId": "a",
@@ -830,6 +901,47 @@ async def test_route_rejects_wrong_user_and_foreign_origin(
         )
         assert wrong.status_code == 403
         assert cross_origin.status_code == 403
+        assert task.done() is False
+
+        await _answer(mock_session, entry, text="yes")
+        await task
+
+
+async def test_route_rejects_foreign_thread_and_generation(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="deploy", type="tool")
+        await step.send()
+        task, entry = await _pending_question(step)
+
+        mock_session.thread_id = "other-thread"
+        foreign_thread = await _post(
+            monkeypatch,
+            "/project/question",
+            _question_payload(mock_session, entry, text="no"),
+            mock_session.user,
+            mock_session,
+        )
+        mock_session.thread_id = step.thread_id
+
+        mock_session.generation = "other-generation"
+        foreign_generation = await _post(
+            monkeypatch,
+            "/project/question",
+            _question_payload(mock_session, entry, text="no"),
+            mock_session.user,
+            mock_session,
+        )
+        mock_session.generation = "gen-1"
+
+        assert foreign_thread.status_code == 404
+        assert foreign_generation.status_code == 403
         assert task.done() is False
 
         await _answer(mock_session, entry, text="yes")

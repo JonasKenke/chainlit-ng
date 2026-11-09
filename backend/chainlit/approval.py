@@ -710,6 +710,9 @@ def _raise_missing(
     terminal = _terminal_records.get(approval_id)
     if terminal:
         stored_thread, kind, record = terminal
+        if is_thread_deleted(stored_thread):
+            # The row is gone; a duplicate submit must not recover the answer.
+            raise ApprovalNotFound("Interaction not found")
         if expected_kind is not None and kind != expected_kind:
             raise ApprovalNotFound("Interaction not found")
         if thread_id is not None and thread_id != stored_thread:
@@ -1307,7 +1310,8 @@ async def ask(
         "threadId": target.thread_id,
         "status": "pending",
         "prompt": payload["prompt"],
-        "options": payload["options"],
+        # Separate copy: step.metadata must not alias the ask-time snapshot.
+        "options": deepcopy(payload["options"]),
         "allowFreeText": payload["allowFreeText"],
         "requestedBy": user.identifier,
         "requestedAt": _iso(now),
@@ -1339,7 +1343,7 @@ async def ask(
         revision=1,
         expires_at_ts=expires_at_ts,
         kind="question",
-        payload=payload,
+        payload=deepcopy(payload),
     )
 
     await _reserve_capacity(generation)
