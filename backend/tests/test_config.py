@@ -12,6 +12,7 @@ from chainlit.config import (
     SpontaneousFileUploadFeature,
     SseMcpServer,
     StdioMcpServer,
+    TelemetryFeature,
     UISettings,
     _check_legacy_mcp_config,
     resolve_files_directory,
@@ -380,6 +381,28 @@ class TestMcpConfig:
         settings = chainlit_config.load_settings()
 
         assert settings["features"].mcp.servers == []
+
+
+class TestTelemetryConfig:
+    def test_default_template_section_is_disabled(self):
+        import tomli
+
+        telemetry = tomli.loads(DEFAULT_CONFIG_STR)["features"]["telemetry"]
+        assert telemetry == {
+            "enabled": False,
+            "capture_names": False,
+            "capture_content": False,
+            "sample_ratio": 0.1,
+        }
+
+    def test_content_capture_cannot_be_enabled(self):
+        with pytest.raises(ValidationError):
+            TelemetryFeature(capture_content=True)
+
+    @pytest.mark.parametrize("ratio", [-0.1, 1.1])
+    def test_sample_ratio_is_bounded(self, ratio):
+        with pytest.raises(ValidationError):
+            TelemetryFeature(sample_ratio=ratio)
 
 
 def _template_with_mcp(enabled: bool) -> str:

@@ -19,6 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `POST /project/question`. Answers are stored on the step record and returned
   as `cl.QuestionAnswer`; no data-layer or schema change.
 - Add `[features.spontaneous_file_upload] directory` to store uploaded files outside `APP_ROOT`. Relative paths resolve against `APP_ROOT`, absolute paths are used as-is, and startup fails with an actionable error when uploads are enabled and the directory is not writable. Only the legacy default `.files` directory is removed on shutdown; a configured directory is preserved.
+- Add opt-in OpenTelemetry trace export from the Step tree (`feat(otel)`):
+  `[features.telemetry] enabled = true` plus the new `chainlit[otel]` extra
+  exports one OTLP/HTTP trace per message or edit turn, with one span per
+  executed step. Attributes are a fixed redaction allowlist; content, names,
+  inputs, outputs, metadata, elements and exception messages are never
+  exported. Telemetry is off by default, and a missing extra or export failure
+  never affects a turn.
 
 ### Changed
 

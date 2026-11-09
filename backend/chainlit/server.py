@@ -38,6 +38,7 @@ from starlette.types import Receive, Scope, Send
 from typing_extensions import Annotated
 from watchfiles import awatch
 
+from chainlit import otel
 from chainlit.approval import (
     ApprovalError,
     ApprovalInvalidArguments,
@@ -175,6 +176,7 @@ def _cleanup_files_directory() -> None:
 async def lifespan(app: FastAPI):
     """Context manager to handle app start and shutdown."""
     load_skills()
+    otel.init()
 
     if config.code.on_app_startup:
         await config.code.on_app_startup()
@@ -293,8 +295,11 @@ async def lifespan(app: FastAPI):
 
         _cleanup_files_directory()
 
-        # Force exit the process to avoid potential AnyIO threads still running
-        os._exit(0)
+        try:
+            otel.shutdown()
+        finally:
+            # Force exit the process to avoid potential AnyIO threads still running
+            os._exit(0)
 
 
 def get_build_dir(local_target: str, packaged_target: str) -> str:

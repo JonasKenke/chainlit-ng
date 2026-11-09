@@ -6,6 +6,7 @@ from urllib.parse import unquote
 from starlette.requests import cookie_parser
 from typing_extensions import TypeAlias
 
+from chainlit import otel
 from chainlit.approval import (
     ApprovalPending,
     guard_pending_approval,
@@ -479,6 +480,8 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
     """Process a message from the user."""
     if session.unavailable_chat_profile:
         return
+    turn = otel.start_turn("message", getattr(session, "thread_id", None))
+    context = None
     try:
         context = init_ws_context(session)
         await context.emitter.task_start()
@@ -488,42 +491,59 @@ async def process_message(session: WebsocketSession, payload: MessagePayload):
             await asyncio.sleep(0.001)
             await config.code.on_message(message)
     except asyncio.CancelledError:
-        pass
+        otel.mark_turn_cancelled(turn)
     except Exception as e:
+        otel.mark_turn_error(turn, type(e))
         logger.exception(e)
+        if context is None:
+            raise
         await ErrorMessage(
             author="Error", content=str(e) or e.__class__.__name__
         ).send()
     finally:
-        await context.emitter.task_end()
+        try:
+            if context is not None:
+                await context.emitter.task_end()
+        finally:
+            otel.end_turn(turn)
 
 
 async def process_edit_message(session: WebsocketSession, payload: MessagePayload):
-    context = init_ws_context(session)
+    turn = otel.start_turn("edit_message", getattr(session, "thread_id", None))
+    try:
+        context = init_ws_context(session)
 
-    messages = chat_context.get()
+        messages = chat_context.get()
 
-    orig_message = None
+        orig_message = None
 
-    for message in messages:
-        if orig_message:
-            await message.remove()
+        for message in messages:
+            if orig_message:
+                await message.remove()
 
-        if message.id == payload["message"]["id"]:
-            message.content = payload["message"]["output"]
-            await message.update()
-            await message.remove_children()
-            orig_message = message
+            if message.id == payload["message"]["id"]:
+                message.content = payload["message"]["output"]
+                await message.update()
+                await message.remove_children()
+                orig_message = message
 
-    await context.emitter.task_start()
+        await context.emitter.task_start()
 
-    if config.code.on_message:
-        try:
-            await config.code.on_message(orig_message)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            await context.emitter.task_end()
+        if config.code.on_message:
+            try:
+                await config.code.on_message(orig_message)
+            except asyncio.CancelledError:
+                otel.mark_turn_cancelled(turn)
+            finally:
+                await context.emitter.task_end()
+    except asyncio.CancelledError:
+        otel.mark_turn_cancelled(turn)
+        raise
+    except Exception as exc:
+        otel.mark_turn_error(turn, type(exc))
+        raise
+    finally:
+        otel.end_turn(turn)
 
 
 @sio.on("edit_message")  # pyright: ignore [reportOptionalCall]
