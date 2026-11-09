@@ -17,6 +17,7 @@ See also:
 - [Thread resume with unavailable chat profiles](thread-resume.md)
 - [Tool-call approvals](approvals.md)
 - [Agent questions (`cl.ask`)](questions.md)
+- [OpenTelemetry traces](telemetry.md)
 
 ## Research
 
