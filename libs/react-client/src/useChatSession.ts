@@ -3,6 +3,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
 import {
+  getChainlitStore,
   useChainlitState,
   useChainlitStore,
   useResetChainlitState,
@@ -521,6 +522,17 @@ const useChatSession = () => {
           }
         }
       );
+
+      socket.on('open_side_view', ({ id }: { id: string }) => {
+        const element = getChainlitStore(client)
+          .getState()
+          .elements.find((element) => element.id === id);
+        if (!element) {
+          console.debug(`open_side_view: element ${id} not found`);
+          return;
+        }
+        setSideView({ title: element.name, elements: [element] });
+      });
 
       socket.on('element', (element: IElement) => {
         if (!element.url && element.chainlitKey) {

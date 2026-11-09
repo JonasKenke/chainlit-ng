@@ -54,6 +54,7 @@ from chainlit.element import (
     Text,
     Video,
 )
+from chainlit.emitter import open_side_view
 from chainlit.message import (
     AskActionMessage,
     AskElementMessage,
@@ -247,6 +248,7 @@ __all__ = [
     "on_slack_reaction_added",
     "on_stop",
     "on_window_message",
+    "open_side_view",
     "password_auth_callback",
     "render_skill",
     "request",

@@ -209,3 +209,13 @@ async def test_send_toast_invalid_type(emitter: ChainlitEmitter) -> None:
     message = "This is a test message"
     with pytest.raises(ValueError, match="Invalid toast type: invalid"):
         await emitter.send_toast(message, type="invalid")  # type: ignore[arg-type]
+
+
+async def test_open_side_view(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    await emitter.open_side_view("element-1")
+
+    mock_websocket_session.emit.assert_called_once_with(
+        "open_side_view", {"id": "element-1"}
+    )
