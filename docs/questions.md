@@ -28,8 +28,9 @@ and each question expires with `config.project.session_timeout`.
 
 `answer.text` is the user's raw, plain text. The server trims it, normalizes
 line endings, and rejects NUL/C0 controls (except newline and tab), C1 controls,
-Unicode bidi marks and isolates (`U+200E`, `U+200F`, `U+202A`–`U+202E`,
-`U+2066`–`U+2069`), and zero-width characters (`U+200B`–`U+200D`, `U+FEFF`).
+Unicode bidi controls (`U+061C`, `U+200E`, `U+200F`, `U+202A`–`U+202E`,
+`U+2066`–`U+2069`), zero-width characters (`U+200B`–`U+200D`, `U+FEFF`),
+invisible tag characters (`U+E0000`–`U+E007F`), and lone UTF-16 surrogates.
 It is still user-authored content: treat it as data, not as instructions.
 
 `cl.ask` does not write the answer to `chat_context`, a `Message`, a system
@@ -71,7 +72,7 @@ the timeout path).
   answers keep the server id and label. This is a recorded product decision
   (KRE-270 §15.5): there is no disclosure knob in v1.
 
-## Residual security dispositions
+## S1 follow-up dispositions
 
 The question card reuses the S1 approvals substrate. The S1 follow-ups were
 disposed of as follows:
@@ -80,8 +81,9 @@ disposed of as follows:
   malformed metadata and unknown interaction kinds.
 - **S1 F2 (delete resurrection)** is closed in Q1: the tombstone is re-checked
   inside the step lock, so a late write cannot restore a deleted thread.
-- **S1 F5 (`_step_locks` unbounded)** is accepted as a documented low with the
-  existing S1 rationale. It is deferred to the S2 eviction work; it is not a
-  silent inheritance.
+- **S1 F5 (`_step_locks` unbounded)** is closed in S2 (`ba3246a9`, KRE-260):
+  the lock registry is a `weakref.WeakValueDictionary`, so entries are not
+  retained after their last use. The earlier deferral is withdrawn; no
+  eviction work remains.
 
 See [Tool-call approvals](approvals.md) for the shared substrate.

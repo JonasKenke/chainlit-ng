@@ -63,9 +63,10 @@ _MAX_QUESTION_OPTIONS = 8
 _MAX_OPTION_LABEL = 200
 _MAX_OPTION_DESCRIPTION = 500
 _OPTION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-# Bidi marks/embeddings/isolates and zero-width characters can reorder or hide
-# card text, so typed answers refuse them. Plain text only.
+# Bidi marks/embeddings/isolates, zero-width and invisible tag characters can
+# reorder or hide card text, so typed answers refuse them. Plain text only.
 _FORBIDDEN_ANSWER_CHARS = frozenset(
+    "\u061c"
     "\u200b\u200c\u200d\u200e\u200f"
     "\u202a\u202b\u202c\u202d\u202e"
     "\u2066\u2067\u2068\u2069"
@@ -770,6 +771,8 @@ def _normalize_question_text(value: Any) -> str:
         if (
             (codepoint < 32 and char not in "\n\t")
             or 0x7F <= codepoint <= 0x9F
+            or 0xD800 <= codepoint <= 0xDFFF
+            or 0xE0000 <= codepoint <= 0xE007F
             or char in _FORBIDDEN_ANSWER_CHARS
         ):
             raise QuestionInvalid("answer text contains control characters")

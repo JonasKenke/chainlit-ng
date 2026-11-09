@@ -147,12 +147,17 @@ async def test_option_answer_payload_has_no_free_text(
         "\x1f",
         "\x7f",
         "\x85",
+        "\u061c",
         "\u200b",
         "\u200e",
         "\u202e",
         "\u202c",
         "\u2066",
         "\ufeff",
+        chr(0xD800),
+        chr(0xDFFF),
+        "\U000e0000",
+        "\U000e0041",
     ],
 )
 async def test_typed_answer_refuses_control_bidi_and_zero_width(
