@@ -1,6 +1,6 @@
 """OpenTelemetry export from the Step tree.
 
-Slice 1 of the KRE-338 design (§11). Chainlit owns its tracer provider, exporter
+Implements the KRE-338 design (§11). Chainlit owns its tracer provider, exporter
 and processor (D1): app spans never pass through Chainlit's path, and Chainlit
 never mutates or shuts down a provider it does not own.
 
@@ -652,6 +652,8 @@ def end_turn(turn: Optional[_Turn]) -> None:
                 activation.__exit__(None, None, None)
             except Exception:
                 pass
+        # Release the per-turn handle registry; the turn is over.
+        turn.spans.clear()
 
 
 # ---------------------------------------------------------------------------
