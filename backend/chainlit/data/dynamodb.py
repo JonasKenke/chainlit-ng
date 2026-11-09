@@ -746,6 +746,13 @@ class DynamoDBDataLayer(BaseDataLayer):
         if filters.feedback:
             _logger.warning("DynamoDB: filters on feedback not supported")
 
+        if filters.sharedWithUserId:
+            # v1 does not list granted threads: a grant has no UserThread row,
+            # and a SHARED# shadow would break id mapping and cleanup (M5).
+            _logger.info(
+                "DynamoDB: shared threads are not listed; returning owned threads only"
+            )
+
         paginated_response: PaginatedResponse[ThreadDict] = PaginatedResponse(
             data=[],
             pageInfo=PageInfo(

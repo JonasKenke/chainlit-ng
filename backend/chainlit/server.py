@@ -1610,13 +1610,42 @@ async def get_user_threads(
         persisted_user = await data_layer.get_user(identifier=current_user.identifier)
         if not persisted_user:
             raise HTTPException(status_code=404, detail="User not found")
-        payload.filter.userId = persisted_user.id
     else:
-        payload.filter.userId = current_user.id
+        persisted_user = current_user
+    payload.filter.userId = persisted_user.id
+
+    grants_active = _thread_grants_active(data_layer)
+    if grants_active:
+        payload.filter.sharedWithUserId = persisted_user.id
+        payload.filter.sharedWithUserCreatedAt = persisted_user.createdAt
+    else:
+        # M7: a client-crafted filter can neither add rows nor survive the off path.
+        payload.filter.sharedWithUserId = None
+        payload.filter.sharedWithUserCreatedAt = None
 
     res = await data_layer.list_threads(payload.pagination, payload.filter)
     response = res.to_dict()
-    response["data"] = [public_thread(thread) for thread in response["data"]]
+    if not grants_active:
+        response["data"] = [public_thread(thread) for thread in response["data"]]
+        return JSONResponse(content=response)
+
+    visible_threads = []
+    visible_ids = []
+    for thread in response["data"]:
+        # L2: decide without the row, so an owner-only Dynamo list row is not
+        # mistaken for an ownerless thread; this check can only remove rows.
+        access = await authorize_thread_read(
+            thread["id"], persisted_user, data_layer=data_layer
+        )
+        if access not in (ThreadAccess.OWNER, ThreadAccess.SHARED):
+            continue
+        visible_ids.append(thread["id"])
+        visible_threads.append(
+            public_thread(thread, include_owner=access == ThreadAccess.OWNER)
+        )
+    response["data"] = visible_threads
+    response["pageInfo"]["startCursor"] = visible_ids[0] if visible_ids else None
+    response["pageInfo"]["endCursor"] = visible_ids[-1] if visible_ids else None
     return JSONResponse(content=response)
 
 

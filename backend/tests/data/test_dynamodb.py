@@ -847,3 +847,23 @@ async def test_list_and_get_thread_omit_a_stale_shared_item():
     assert thread is not None
     assert "sharedWithUserId" not in thread
     assert [s["id"] for s in thread["steps"]] == ["step-1"]
+
+
+@pytest.mark.asyncio
+async def test_list_threads_ignores_the_shared_filter_and_logs_the_omission(
+    caplog: pytest.LogCaptureFixture,
+):
+    layer, _ = _make_delete_layer([_thread_item("thread-1", "user-1")], page_size=10)
+
+    with caplog.at_level(logging.INFO, logger="chainlit.DynamoDB"):
+        page = await layer.list_threads(
+            Pagination(first=10),
+            ThreadFilter(
+                userId="user-1",
+                sharedWithUserId="bob-id",
+                sharedWithUserCreatedAt="2026-01-01T00:00:00Z",
+            ),
+        )
+
+    assert [thread["id"] for thread in page.data] == ["thread-1"]
+    assert "shared threads are not listed" in caplog.text

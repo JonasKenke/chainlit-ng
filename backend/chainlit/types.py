@@ -93,6 +93,8 @@ class Pagination(BaseModel):
 class ThreadFilter(BaseModel):
     feedback: Literal[0, 1] | None = None
     userId: str | None = None
+    sharedWithUserId: str | None = None
+    sharedWithUserCreatedAt: str | None = None
     search: str | None = None
 
 

@@ -595,8 +595,31 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             )
         if not filters.userId:
             raise ValueError("userId is required")
+
+        shared_with_user_id = filters.sharedWithUserId
+        shared_with_user_created_at = filters.sharedWithUserCreatedAt
+        if shared_with_user_id:
+            try:
+                grants_available = await self._ensure_thread_grants_table()
+            except Exception:
+                grants_available = False
+            if not grants_available:
+                # Fail closed to the owner-only list; never a partial/foreign set.
+                logger.warning(
+                    "SQLAlchemy: thread_grants unavailable; listing owned threads only"
+                )
+                shared_with_user_id = None
+                shared_with_user_created_at = None
+        else:
+            shared_with_user_created_at = None
+
         all_user_threads: List[ThreadDict] = (
-            await self.get_all_user_threads(user_id=filters.userId) or []
+            await self.get_all_user_threads(
+                user_id=filters.userId,
+                shared_with_user_id=shared_with_user_id,
+                shared_with_user_created_at=shared_with_user_created_at,
+            )
+            or []
         )
 
         search_keyword = filters.search.lower() if filters.search else None
@@ -1067,12 +1090,38 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         await self.execute_sql(query=query, parameters=params)
 
     async def get_all_user_threads(
-        self, user_id: Optional[str] = None, thread_id: Optional[str] = None
+        self,
+        user_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        shared_with_user_id: Optional[str] = None,
+        shared_with_user_created_at: Optional[str] = None,
     ) -> Optional[List[ThreadDict]]:
-        """Fetch all user threads up to self.user_thread_limit, or one thread by id if thread_id is provided."""
+        """Fetch all user threads up to self.user_thread_limit, or one thread by id if thread_id is provided.
+
+        ``shared_with_user_id``/``shared_with_user_created_at`` add the grant
+        visibility predicate; omit both for the owner-only path.
+        """
         if self.show_logger:
             logger.info("SQLAlchemy: get_all_user_threads")
-        user_threads_query = """
+        granted_visibility = ""
+        parameters = {
+            "user_id": user_id,
+            "limit": self.user_thread_limit,
+            "thread_id": thread_id,
+        }
+        if shared_with_user_id and shared_with_user_created_at:
+            granted_visibility = """
+               OR EXISTS (
+                    SELECT 1 FROM thread_grants g
+                    WHERE g."threadId" = CAST(t."id" AS TEXT)
+                      AND g."granteeUserId" = :shared_with_user_id
+                      AND g."granteeUserCreatedAt" = :shared_with_user_created_at
+                      AND g."role" = 'read'
+               )
+            """
+            parameters["shared_with_user_id"] = shared_with_user_id
+            parameters["shared_with_user_created_at"] = shared_with_user_created_at
+        user_threads_query = f"""
             SELECT
                 t."id" AS thread_id,
                 t."createdAt" AS thread_createdat,
@@ -1085,6 +1134,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             FROM threads t
             LEFT JOIN steps s ON t."id" = s."threadId"
             WHERE t."userId" = :user_id OR t."id" = :thread_id
+            {granted_visibility}
             GROUP BY
                 t."id",
                 t."createdAt",
@@ -1098,11 +1148,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         """
         user_threads = await self.execute_sql(
             query=user_threads_query,
-            parameters={
-                "user_id": user_id,
-                "limit": self.user_thread_limit,
-                "thread_id": thread_id,
-            },
+            parameters=parameters,
         )
         if not isinstance(user_threads, list):
             return None
