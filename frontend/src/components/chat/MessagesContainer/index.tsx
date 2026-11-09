@@ -31,7 +31,7 @@ const MessagesContainer = ({ navigate }: Props) => {
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
   const { elements, askUser, loading, actions } = useChatData();
-  const { messages } = useChatMessages();
+  const { messages, threadId } = useChatMessages();
   const { uploadFile: _uploadFile } = useChatInteract();
   const setMessages = useSetChainlitState('messages');
   const setSideView = useSetChainlitState('sideView');
@@ -96,6 +96,12 @@ const MessagesContainer = ({ navigate }: Props) => {
   );
 
   useSideElements(elements, setSideView);
+
+  // Live events are answerable; hydrated resume records are read-only and
+  // only shown for the thread currently on screen.
+  const visibleQuestions = questions.filter(
+    (question) => question.live || question.threadId === threadId
+  );
 
   const onElementRefClick = useCallback(
     (element: IMessageElement) => {
@@ -172,13 +178,11 @@ const MessagesContainer = ({ navigate }: Props) => {
         elements={elements}
         actions={actions}
       />
-      {questions.some((question) => question.live) ? (
+      {visibleQuestions.length ? (
         <div className="flex flex-col gap-2 py-2">
-          {questions
-            .filter((question) => question.live)
-            .map((question) => (
-              <QuestionCard key={question.id} question={question} />
-            ))}
+          {visibleQuestions.map((question) => (
+            <QuestionCard key={question.id} question={question} />
+          ))}
         </div>
       ) : null}
     </MessageContext.Provider>

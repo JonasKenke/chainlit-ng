@@ -13,6 +13,29 @@ const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 
 vi.mock('sonner', () => ({ toast: { error: toastError } }));
 
+vi.mock('@/components/i18n/Translator', () => ({
+  useTranslation: () => ({
+    t: (key: string) =>
+      ({
+        'chat.question.title': 'Question',
+        'chat.question.ariaLabel': 'Question from the assistant',
+        'chat.question.options': 'Options',
+        'chat.question.other': 'Other',
+        'chat.question.otherAriaLabel': 'Other answer',
+        'chat.question.readOnly': 'This question can no longer be answered.',
+        'chat.question.answeredPrivately': 'Answered privately',
+        'chat.question.by': 'By',
+        'chat.question.status.pending': 'Waiting for your answer',
+        'chat.question.status.answered': 'Answered',
+        'chat.question.status.expired': 'Expired',
+        'chat.question.status.superseded': 'Superseded',
+        'chat.question.status.orphaned': 'Unavailable',
+        'chat.question.errors.answer': 'Unable to answer question',
+        'common.actions.submit': 'Submit'
+      })[key] ?? key
+  })
+}));
+
 vi.mock('@chainlit/react-client', async () => {
   const ReactModule = await import('react');
   return {

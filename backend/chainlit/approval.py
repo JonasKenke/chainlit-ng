@@ -376,6 +376,14 @@ def managed_thread_ids_for(identifier: str) -> set[str]:
     }
 
 
+def has_live_interaction(
+    interaction_id: str, *, kind: Optional[InteractionKind] = None
+) -> bool:
+    """True while this process still holds the answerable registry entry."""
+    entry = _pending_by_approval.get(interaction_id)
+    return entry is not None and (kind is None or entry.kind == kind)
+
+
 def pending_approvals_for_thread(thread_id: str) -> list[_Entry]:
     return [
         entry for entry in _pending_by_approval.values() if entry.thread_id == thread_id

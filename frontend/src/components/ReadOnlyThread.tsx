@@ -9,9 +9,11 @@ import {
   IAction,
   IFeedback,
   IMessageElement,
+  IQuestion,
   IStep,
   IThread,
   nestMessages,
+  questionFromStep,
   useApi,
   useChainlitStore,
   useConfig,
@@ -23,6 +25,7 @@ import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Loader } from './Loader';
 import { Messages } from './chat/Messages';
+import { QuestionCard } from './chat/Questions/QuestionCard';
 
 type Props = {
   id: string;
@@ -151,6 +154,13 @@ const ReadOnlyThread = ({ id }: Props) => {
   const elements = thread?.elements || [];
   const actions: IAction[] = [];
   const messages = nestMessages(steps);
+  const questions = useMemo(
+    () =>
+      (thread?.steps || [])
+        .map(questionFromStep)
+        .filter((question): question is IQuestion => question !== null),
+    [thread]
+  );
 
   const memoizedContext = useMemo(() => {
     return {
@@ -208,6 +218,13 @@ const ReadOnlyThread = ({ id }: Props) => {
               elements={elements as any}
               actions={actions}
             />
+            {questions.length ? (
+              <div className="flex flex-col gap-2 py-2">
+                {questions.map((question) => (
+                  <QuestionCard key={question.id} question={question} />
+                ))}
+              </div>
+            ) : null}
           </div>
         </MessageContext.Provider>
       </ErrorBoundary>

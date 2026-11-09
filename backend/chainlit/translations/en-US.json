@@ -377,6 +377,26 @@
         "bodyTooLarge": "Instructions are {{size}} bytes; maximum is {{max}}.",
         "fileTooLarge": "File is {{size}} bytes; maximum is {{max}}."
       }
+    },
+    "question": {
+      "title": "Question",
+      "ariaLabel": "Question from the assistant",
+      "options": "Options",
+      "other": "Other",
+      "otherAriaLabel": "Other answer",
+      "readOnly": "This question can no longer be answered.",
+      "answeredPrivately": "Answered privately",
+      "by": "By",
+      "status": {
+        "pending": "Waiting for your answer",
+        "answered": "Answered",
+        "expired": "Expired",
+        "superseded": "Superseded",
+        "orphaned": "Unavailable"
+      },
+      "errors": {
+        "answer": "Unable to answer question"
+      }
     }
   },
   "threadHistory": {
