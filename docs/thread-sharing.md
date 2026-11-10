@@ -40,11 +40,15 @@ thread owned by somebody else. A cross-origin `Origin` header is rejected with
 
 ## What the grantee can do
 
-Only `GET /project/share/{id}`. The response is the same public payload as an
-anonymous share link: no `userId`, no `userIdentifier`, no Dynamo keys, and no
-`chat_settings`. The owner-only `GET /project/thread/{id}` and the thread list
-stay owner-only. Feedback mutations stay owner-only, and the grantee never gets
-a websocket session, so a read grant cannot write messages or steps.
+`GET /project/share/{id}` and, on `SQLAlchemyDataLayer`, the thread list. The
+share response is the same public payload as an anonymous share link: no
+`userId`, no `userIdentifier`, no Dynamo keys, and no `chat_settings`. The
+owner-only `GET /project/thread/{id}` route stays owner-only. `POST
+/project/threads` returns the threads the caller owns or was granted on
+`SQLAlchemyDataLayer`; `DynamoDBDataLayer` keeps its list owner-only (see
+below). List rows for a thread the caller does not own are stripped the same way
+as the share payload. Feedback mutations stay owner-only, and the grantee never
+gets a websocket session, so a read grant cannot write messages or steps.
 
 A grant is authorized on the persisted user id **and** the user generation
 (`createdAt`). A grant whose generation is missing or does not match, whose id
@@ -86,6 +90,15 @@ the grants on those threads. Calling `update_thread` without an owner (the
 normal step-write path) leaves grants alone; changing the owner of a thread
 deletes them.
 
+Listing is part of the same feature: the layer adds the grant predicate to the
+list query before pagination, so a grantee's page contains exactly the threads
+they own or were granted and `hasNextPage`/cursors count only those rows. The
+route fills `ThreadFilter.sharedWithUserId` and `sharedWithUserCreatedAt` from
+the authenticated user only while the feature is active; a value sent by the
+client is overwritten or cleared. If the `thread_grants` table cannot be created
+at list time, the layer logs a warning and returns the owner-only list (fail
+closed) instead of failing the request.
+
 ## DynamoDBDataLayer
 
 `DynamoDBDataLayer` supports grants without a new table or index. A grant is one
@@ -113,9 +126,11 @@ without an owner (the normal step-write path) leaves grants alone; changing the
 owner deletes them.
 
 Shared threads are not listed: the Dynamo thread list is built from the
-`UserThread` GSI and a grant adds no `UserThread` row. A grantee reaches a
-shared thread only through `/project/share/{id}`. A stale `SHARED#` item is
-ignored by both the list and `get_thread`. Operator query for a thread's grants:
+`UserThread` GSI and a grant adds no `UserThread` row. The
+`sharedWithUserId`/`sharedWithUserCreatedAt` filter is ignored, so a crafted
+value cannot add rows. A grantee reaches a shared thread only through
+`/project/share/{id}`. A stale `SHARED#` item is ignored by both the list and
+`get_thread`. Operator query for a thread's grants:
 
 ```bash
 aws dynamodb query --table-name <table> \
@@ -134,7 +149,9 @@ class MyDataLayer(BaseDataLayer):
     feedback_authorization_supported = True
 
     async def get_thread_owner(self, thread_id: str) -> Optional[ThreadOwner]: ...
-    async def get_thread_grant(self, thread_id, grantee_user_id) -> Optional[ThreadGrant]: ...
+    async def get_thread_grant(
+        self, thread_id, grantee_user_id
+    ) -> Optional[ThreadGrant]: ...
     async def list_thread_grants(self, thread_id) -> List[ThreadGrant]: ...
     async def create_thread_grant(self, grant: ThreadGrant) -> None: ...
     async def delete_thread_grant(self, thread_id, grantee_user_id) -> bool: ...
@@ -152,6 +169,12 @@ Implementation rules:
   no thread id is a legacy row and must be denied.
 - `step_belongs_to_thread` must be a point check and must return `False` on any
   error.
+- To list granted threads, honor `ThreadFilter.sharedWithUserId` and
+  `sharedWithUserCreatedAt` inside `list_threads`, before pagination, and match
+  both the grantee id and the stored generation. A layer that implements only
+  the single-thread lookups is a supported partial implementation: reads work
+  and shared threads are absent from the list. Never append grants to a page
+  that was already paginated.
 - Honor the cleanup rules above and set the capability flags only after every
   method is implemented. The chokepoint fails closed on a layer that reports the
   capability but raises.
@@ -165,7 +188,8 @@ query path.
 - `SQLAlchemyDataLayer` and `DynamoDBDataLayer` support grants; a custom layer
   can opt in as described above. `ChainlitDataLayer` (the hosted schema) does
   not yet, so the feature stays hidden for it.
-- A grant is read-only. There is no write grant, no grantee list of shared
-  threads, and no group or role-based sharing.
+- A grant is read-only. There is no write grant and no group or role-based
+  sharing. `DynamoDBDataLayer` lists only owned threads; grantees there must
+  open the share link.
 - The cap is a resource bound, not a security boundary; concurrent creates can
   exceed it by the number of in-flight requests.

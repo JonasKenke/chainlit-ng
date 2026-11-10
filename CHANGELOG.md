@@ -11,9 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Add opt-in read-only thread sharing with named users (`feat(data)`):
   `[features] thread_grants = true` plus a data layer that implements the grant
   contract. `SQLAlchemyDataLayer` stores grants in a lazily created
-  `thread_grants` table, the grantee reads through the existing share route
-  without owner identity or settings, and feedback writes are owner-gated with
-  a typed, non-swallowing thread lookup. Off by default. See
+  `thread_grants` table, a grantee's thread list includes the threads they own
+  or were granted, the grantee reads through the existing share route without
+  owner identity or settings, and feedback writes are owner-gated with a typed,
+  non-swallowing thread lookup. `DynamoDBDataLayer` supports direct reads but
+  omits shared threads from its list. Off by default. See
   [the thread-sharing guide](docs/thread-sharing.md).
 - Add opt-in tool-call approvals: `@cl.step(requires_approval=True)` with an
   optional `approval_schema`, or the explicit `cl.Approval` API. The server
@@ -37,6 +39,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   never affects a turn.
 
 ### Changed
+
+- `thread_grants` (opt-in): the owner check uses the typed `ThreadOwner`
+  predicate, so a row whose `userId` and `userIdentifier` disagree is owned only
+  by the matching `userId` (an identifier-only match fails closed), and a row
+  with `userId` but no `userIdentifier` becomes readable by its owner by id.
+  The flag-off owner path keeps the legacy comparison unchanged. DynamoDB's
+  thread list stays owner-only, so grantees reach shared threads through
+  `/project/share/{id}` only.
 
 - Harden and document the OpenTelemetry export bounds: a turn exports at most
   200 step spans (excess spans are counted in
@@ -73,6 +83,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 
+- `thread_grants` (opt-in): list rows for a thread the caller does not own drop
+  `userId`, `userIdentifier` and the Dynamo internal key fields, so a grantee
+  never sees the owner's identity. The strip is gated on the flag like the
+  feature itself; with the flag off a public share still returns the
+  pre-existing `userId`/`userIdentifier` fields. Unconditionally stripping them
+  is a response-shape change and needs explicit approval, so it is not part of
+  this release.
 - Port the upstream MCP endpoint fixes for CVE-2026-45018 (client-supplied stdio command execution) and CVE-2026-45019 (SSRF via user-provided MCP URLs/headers). See the [security advisory](docs/security-advisory-2026-mcp.md).
 - Require `opentelemetry-api>=1.45.1,<2.0.0` in the core install, so the `>=1.28.0` floor admitted by the core `mcp` dependency can no longer resolve to a version affected by CVE-2026-114603 (unbounded `tracestate` parsing). No new package: `opentelemetry-api` was already installed through `mcp` and `fastapi`.
 

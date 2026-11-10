@@ -675,6 +675,173 @@ async def test_list_threads_requires_a_user_id(data_layer: SQLAlchemyDataLayer):
         await data_layer.list_threads(Pagination(first=50), ThreadFilter())
 
 
+async def test_list_threads_includes_granted_threads(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="grant_list_alice"))
+    bob = await data_layer.create_user(User(identifier="grant_list_bob"))
+    carol = await data_layer.create_user(User(identifier="grant_list_carol"))
+    assert alice
+    assert bob
+    assert carol
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+    await data_layer.create_thread_grant(
+        _grant(
+            thread_id="alice_thread_0",
+            grantee_user_id=bob.id,
+            grantee_user_created_at=bob.createdAt,
+        )
+    )
+
+    granted = await data_layer.list_threads(
+        Pagination(first=50),
+        ThreadFilter(
+            userId=bob.id,
+            sharedWithUserId=bob.id,
+            sharedWithUserCreatedAt=bob.createdAt,
+        ),
+    )
+    owner_only = await data_layer.list_threads(
+        Pagination(first=50), ThreadFilter(userId=bob.id)
+    )
+
+    assert {thread["id"] for thread in granted.data} == {
+        "alice_thread_0",
+        "bob_thread_0",
+        "bob_thread_1",
+    }
+    assert {thread["id"] for thread in owner_only.data} == {
+        "bob_thread_0",
+        "bob_thread_1",
+    }
+
+    non_grantee = await data_layer.list_threads(
+        Pagination(first=50),
+        ThreadFilter(
+            userId=carol.id,
+            sharedWithUserId=carol.id,
+            sharedWithUserCreatedAt=carol.createdAt,
+        ),
+    )
+    assert non_grantee.data == []
+
+
+async def test_list_threads_grant_requires_the_matching_generation(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="generation_alice"))
+    bob = await data_layer.create_user(User(identifier="generation_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await data_layer.create_thread_grant(
+        _grant(
+            thread_id="alice_thread_0",
+            grantee_user_id=bob.id,
+            grantee_user_created_at="2020-01-01T00:00:00Z",
+        )
+    )
+
+    page = await data_layer.list_threads(
+        Pagination(first=50),
+        ThreadFilter(
+            userId=bob.id,
+            sharedWithUserId=bob.id,
+            sharedWithUserCreatedAt=bob.createdAt,
+        ),
+    )
+
+    assert page.data == []
+
+
+async def test_list_threads_paginates_only_visible_granted_rows(
+    data_layer: SQLAlchemyDataLayer,
+):
+    alice = await data_layer.create_user(User(identifier="cursor_alice"))
+    bob = await data_layer.create_user(User(identifier="cursor_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    for index in range(2):
+        await data_layer.execute_sql(
+            query='UPDATE steps SET "createdAt" = :created_at WHERE "threadId" = :thread_id',
+            parameters={
+                "created_at": f"2026-01-0{index + 1}T00:00:00Z",
+                "thread_id": f"alice_thread_{index}",
+            },
+        )
+        await data_layer.create_thread_grant(
+            _grant(
+                thread_id=f"alice_thread_{index}",
+                grantee_user_id=bob.id,
+                grantee_user_created_at=bob.createdAt,
+            )
+        )
+
+    filters = ThreadFilter(
+        userId=bob.id,
+        sharedWithUserId=bob.id,
+        sharedWithUserCreatedAt=bob.createdAt,
+    )
+    first_page = await data_layer.list_threads(Pagination(first=1), filters)
+    assert len(first_page.data) == 1
+    assert first_page.pageInfo.hasNextPage is True
+    assert first_page.pageInfo.startCursor == first_page.data[0]["id"]
+    assert first_page.pageInfo.endCursor == first_page.data[0]["id"]
+
+    second_page = await data_layer.list_threads(
+        Pagination(first=10, cursor=first_page.pageInfo.endCursor), filters
+    )
+    assert len(second_page.data) == 1
+    assert second_page.pageInfo.hasNextPage is False
+    assert {
+        first_page.data[0]["id"],
+        second_page.data[0]["id"],
+    } == {"alice_thread_0", "alice_thread_1"}
+
+
+async def test_list_threads_falls_back_to_owner_only_when_the_table_is_unavailable(
+    data_layer: SQLAlchemyDataLayer,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    alice = await data_layer.create_user(User(identifier="fallback_alice"))
+    bob = await data_layer.create_user(User(identifier="fallback_bob"))
+    assert alice
+    assert bob
+    await _seed_thread_with_children(data_layer, alice.id, "alice")
+    await _seed_thread_with_children(data_layer, bob.id, "bob")
+    await data_layer.create_thread_grant(
+        _grant(
+            thread_id="alice_thread_0",
+            grantee_user_id=bob.id,
+            grantee_user_created_at=bob.createdAt,
+        )
+    )
+
+    async def unavailable() -> bool:
+        return False
+
+    monkeypatch.setattr(data_layer, "_ensure_thread_grants_table", unavailable)
+
+    with caplog.at_level(logging.WARNING):
+        page = await data_layer.list_threads(
+            Pagination(first=50),
+            ThreadFilter(
+                userId=bob.id,
+                sharedWithUserId=bob.id,
+                sharedWithUserCreatedAt=bob.createdAt,
+            ),
+        )
+
+    assert {thread["id"] for thread in page.data} == {
+        "bob_thread_0",
+        "bob_thread_1",
+    }
+    assert "listing owned threads only" in caplog.text
+
+
 async def test_get_element_is_scoped_to_its_thread(data_layer: SQLAlchemyDataLayer):
     alice = await data_layer.create_user(User(identifier="element_alice"))
     bob = await data_layer.create_user(User(identifier="element_bob"))

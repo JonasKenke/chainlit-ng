@@ -195,6 +195,171 @@ class TestThreadListFilter:
         filters = data_layer.list_threads.await_args.args[1]
         assert filters.userId == BOB.id
 
+    def test_client_supplied_shared_filter_is_overwritten(self, client, grants_active):
+        as_user(BOB)
+        grants_active.list_threads.return_value = PaginatedResponse(
+            pageInfo=PageInfo(hasNextPage=False, startCursor=None, endCursor=None),
+            data=[],
+        )
+
+        with patch("chainlit.server.get_data_layer", return_value=grants_active):
+            response = client.post(
+                "/project/threads",
+                json={
+                    "pagination": Pagination(first=10).model_dump(),
+                    "filter": {
+                        "userId": ALICE.id,
+                        "sharedWithUserId": ALICE.id,
+                        "sharedWithUserCreatedAt": ALICE.createdAt,
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+        filters = grants_active.list_threads.await_args.args[1]
+        assert filters.userId == BOB.id
+        assert filters.sharedWithUserId == BOB.id
+        assert filters.sharedWithUserCreatedAt == BOB.createdAt
+
+    def test_client_supplied_shared_filter_is_cleared_when_the_flag_is_off(
+        self, client, data_layer
+    ):
+        as_user(BOB)
+        data_layer.list_threads.return_value = PaginatedResponse(
+            pageInfo=PageInfo(hasNextPage=False, startCursor=None, endCursor=None),
+            data=[],
+        )
+
+        with patch("chainlit.server.get_data_layer", return_value=data_layer):
+            response = client.post(
+                "/project/threads",
+                json={
+                    "pagination": Pagination(first=10).model_dump(),
+                    "filter": {
+                        "sharedWithUserId": ALICE.id,
+                        "sharedWithUserCreatedAt": ALICE.createdAt,
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+        filters = data_layer.list_threads.await_args.args[1]
+        assert filters.sharedWithUserId is None
+        assert filters.sharedWithUserCreatedAt is None
+        data_layer.get_thread_owner.assert_not_awaited()
+
+    def test_foreign_rows_are_dropped_without_the_row(self, client, grants_active):
+        as_user(BOB)
+        owned = {"id": "owned-thread", "createdAt": "2026-01-01T00:00:00Z"}
+        foreign = {"id": "foreign-thread", "createdAt": "2026-01-01T00:00:00Z"}
+        grants_active.list_threads.return_value = PaginatedResponse(
+            pageInfo=PageInfo(
+                hasNextPage=True, startCursor="owned-thread", endCursor="foreign-thread"
+            ),
+            data=[owned, foreign],
+        )
+        decided = []
+
+        async def decide(thread_id, user, **kwargs):
+            decided.append((thread_id, kwargs))
+            if thread_id == "owned-thread":
+                return ThreadAccess.OWNER
+            return ThreadAccess.NONE
+
+        with (
+            patch("chainlit.server.get_data_layer", return_value=grants_active),
+            patch("chainlit.server.authorize_thread_read", side_effect=decide),
+        ):
+            response = client.post(
+                "/project/threads",
+                json={
+                    "pagination": Pagination(first=10).model_dump(),
+                    "filter": {},
+                },
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert [item["id"] for item in body["data"]] == ["owned-thread"]
+        assert body["pageInfo"]["startCursor"] == "owned-thread"
+        assert body["pageInfo"]["endCursor"] == "owned-thread"
+        assert {thread_id for thread_id, _ in decided} == {
+            "owned-thread",
+            "foreign-thread",
+        }
+        assert all("thread" not in kwargs for _, kwargs in decided)
+
+    def test_shared_rows_hide_the_owner_identity(self, client, grants_active):
+        as_user(BOB)
+        owned = {
+            "id": "owned-thread",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "userId": BOB.id,
+            "userIdentifier": BOB.identifier,
+        }
+        shared = {
+            "id": "shared-thread",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "userId": ALICE.id,
+            "userIdentifier": ALICE.identifier,
+        }
+        grants_active.list_threads.return_value = PaginatedResponse(
+            pageInfo=PageInfo(
+                hasNextPage=False, startCursor="owned-thread", endCursor="shared-thread"
+            ),
+            data=[owned, shared],
+        )
+
+        async def decide(thread_id, user, **kwargs):
+            if thread_id == "owned-thread":
+                return ThreadAccess.OWNER
+            return ThreadAccess.SHARED
+
+        with (
+            patch("chainlit.server.get_data_layer", return_value=grants_active),
+            patch("chainlit.server.authorize_thread_read", side_effect=decide),
+        ):
+            response = client.post(
+                "/project/threads",
+                json={
+                    "pagination": Pagination(first=10).model_dump(),
+                    "filter": {},
+                },
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        by_id = {item["id"]: item for item in body["data"]}
+        assert by_id["owned-thread"]["userId"] == BOB.id
+        assert by_id["shared-thread"]["userId"] is None
+        assert by_id["shared-thread"]["userIdentifier"] is None
+
+    def test_dynamo_shaped_owner_rows_survive_the_per_page_check(
+        self, client, grants_active
+    ):
+        """L2: the row carries no owner fields, so the check must not use it."""
+        as_user(BOB)
+        grants_active.list_threads.return_value = PaginatedResponse(
+            pageInfo=PageInfo(hasNextPage=False, startCursor=None, endCursor=None),
+            data=[{"id": "owned-thread", "createdAt": "2026-01-01T00:00:00Z"}],
+        )
+        grants_active.get_thread_owner.return_value = ThreadOwner(
+            user_id=BOB.id, identifier=BOB.identifier
+        )
+
+        with patch("chainlit.server.get_data_layer", return_value=grants_active):
+            response = client.post(
+                "/project/threads",
+                json={
+                    "pagination": Pagination(first=10).model_dump(),
+                    "filter": {},
+                },
+            )
+
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["data"]] == ["owned-thread"]
+        grants_active.get_thread.assert_not_awaited()
+
 
 class TestSharedThreadExposure:
     def test_unshared_thread_is_404(self, client, data_layer):
