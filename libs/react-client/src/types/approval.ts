@@ -15,6 +15,7 @@ export interface IApproval {
   threadId: string;
   tool: string;
   title?: string | null;
+  content?: string | null;
   status: ApprovalStatus;
   requestedBy?: string | null;
   requestedAt?: string | null;

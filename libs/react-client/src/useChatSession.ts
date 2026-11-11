@@ -60,6 +60,7 @@ function approvalFromStep(step: IStep): IApproval | null {
     threadId: record.threadId ?? '',
     tool: record.tool ?? step.name,
     title: record.title ?? null,
+    content: record.content ?? null,
     status: record.status ?? 'orphaned',
     requestedBy: record.requestedBy ?? null,
     requestedAt: record.requestedAt ?? null,

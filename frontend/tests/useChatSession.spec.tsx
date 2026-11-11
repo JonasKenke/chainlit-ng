@@ -356,6 +356,40 @@ describe('useChatSession approval resume', () => {
     expect(approval.arguments).toEqual({ to: 'person@example.com' });
   });
 
+  it('hydrates the persisted markdown content from the resumed thread', async () => {
+    const { store, resumeHandler } = await connectWithResumeHandler();
+
+    act(() => {
+      resumeHandler({
+        id: 'thread-1',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'apply_changes',
+            type: 'tool',
+            metadata: {
+              approval: {
+                id: 'approval-1',
+                stepId: 'step-1',
+                threadId: 'thread-1',
+                tool: 'apply_changes',
+                status: 'orphaned',
+                revision: 2,
+                content: '| change | risk |\n| --- | --- |\n| deploy | low |',
+                argumentsPreview: { target: 'production' }
+              }
+            }
+          }
+        ],
+        elements: []
+      });
+    });
+
+    const [approval] = store.getState().approvals;
+    expect(approval.content).toContain('| deploy | low |');
+    expect(approval.title).toBeNull();
+  });
+
   it('does not hydrate a question record as an approval', async () => {
     const { store, resumeHandler } = await connectWithResumeHandler();
 
