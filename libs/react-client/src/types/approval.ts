@@ -3,11 +3,28 @@ export type ApprovalStatus =
   | 'approved'
   | 'rejected'
   | 'edited'
+  | 'changes_requested'
   | 'expired'
   | 'superseded'
   | 'orphaned';
 
-export type ApprovalDecision = 'approve' | 'reject' | 'edit' | null;
+export type ApprovalDecision =
+  'approve' | 'reject' | 'edit' | 'request_changes' | null;
+
+export type ApprovalEditFieldKind =
+  'string' | 'text' | 'integer' | 'number' | 'boolean' | 'enum' | 'string_list';
+
+export interface IApprovalEditField {
+  name: string;
+  label: string;
+  kind: ApprovalEditFieldKind;
+  required: boolean;
+  nullable: boolean;
+  secret: boolean;
+  options?: (string | number | boolean)[] | null;
+  description?: string | null;
+  default?: unknown;
+}
 
 export interface IApproval {
   id: string;
@@ -24,6 +41,9 @@ export interface IApproval {
   argumentsPreview?: Record<string, unknown> | null;
   editedArgumentsPreview?: Record<string, unknown> | null;
   editAllowed?: boolean;
+  editFields?: IApprovalEditField[] | null;
+  live?: boolean;
+  reason?: string | null;
   decidedBy?: string | null;
   decidedAt?: string | null;
   decision?: ApprovalDecision;
@@ -34,7 +54,7 @@ export interface IApproval {
 export interface IApprovalDecisionPayload {
   sessionId: string;
   approvalId: string;
-  decision: 'approve' | 'reject' | 'edit';
+  decision: 'approve' | 'reject' | 'edit' | 'request_changes';
   editedArguments?: Record<string, unknown>;
   decisionRequestId: string;
   reason?: string;
@@ -47,6 +67,7 @@ export interface IApprovalDecisionResponse {
   decidedBy?: string | null;
   decidedAt?: string | null;
   terminalReason?: string | null;
+  reason?: string | null;
   revision: number;
   error?: string | null;
 }

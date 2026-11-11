@@ -112,6 +112,139 @@ The explicit API never runs the tool; the app decides what to do with
 `decision.arguments`. Always use those final arguments, not the originals. On
 reject, expiry, supersede or orphan, `decision.approved` is `False`.
 
+### Markdown content without a JSON block
+
+The card never renders raw approval arguments. Send the content as a normal
+markdown message, then gate it with a title-only approval:
+
+```python
+DRAFT = """# Release notes
+
+- Added approvals
+- Added `cl.ask`
+"""
+
+await cl.Message(content=DRAFT).send()
+
+async with cl.Step(name="publish_release", type="tool") as step:
+    decision = await cl.Approval(
+        step=step,
+        arguments={},
+        title="Publish this document?",
+        timeout=120,
+    ).ask()
+
+if decision.approved:
+    publish()
+```
+
+The card then shows only the title and Approve / Reject, directly below the
+message. Use this when users should review rendered content rather than edited
+JSON; add an `arguments_schema` only when structured edits are required.
+
+### Rich review content
+
+`content` renders markdown inside the card: GFM tables, lists, code, links and
+images by URL. It is the only review body; the card does not render the raw
+arguments. Provide `content` whenever the approver must see values — the
+arguments are execution data, not a display format. Edit opens a form generated
+from `arguments_schema` when its fields are simple (see below), with a JSON
+editor as the fallback.
+
+```python
+async with cl.Step(name="apply_changes", type="tool") as step:
+    decision = await cl.Approval(
+        step=step,
+        arguments={"rows": 3, "target": "production"},
+        title="Apply these changes?",
+        content="""\
+| change | risk |
+| --- | --- |
+| approvals | low |
+| `cl.ask` | medium |
+""",
+    ).ask()
+```
+
+The decorator accepts the same content as a static string:
+
+```python
+@cl.step(
+    type="tool",
+    requires_approval=True,
+    approval_content="| change | risk |\n| --- | --- |\n| deploy | low |",
+)
+async def deploy(...): ...
+```
+
+Content is capped at 16 KiB, rendered with HTML escaped unless
+`unsafe_allow_html` is enabled, preserved with the persisted approval so it
+reappears after a thread resume, and excluded from the public shared-thread
+projection. It is display-only: execution still uses the server-held JSON
+arguments. After an edit it still describes the requested draft; the
+**Original → edited** diff and the final arguments are authoritative.
+
+Set `show_input=False` on the step; otherwise the decorator's redacted argument
+preview can render as JSON above the card.
+
+### Editing with a generated form
+
+With `arguments_schema`, the live card renders one input per simple field:
+strings, multiline text, integers, numbers, booleans, enums and string lists.
+Pydantic field metadata supplies the label, help text and textarea hint:
+
+```python
+class TicketDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(title="Title", description="Shown in the ticket list")
+    description: str = Field(
+        title="Description",
+        json_schema_extra={"format": "multiline"},
+    )
+    priority: Literal["low", "medium", "high"] = "medium"
+    assignee: str | None = None
+    labels: list[str] = []
+```
+
+Schemas with nested models or unsupported field types fall back to the JSON
+editor. Editing needs the live arguments; a resumed card only has the redacted
+preview, so its Edit action is hidden.
+
+### Review actions and feedback
+
+| Action          | Effect                                                                                                          |
+| --------------- | --------------------------------------------------------------------------------------------------------------- |
+| Approve         | Runs with the server-held arguments.                                                                            |
+| Edit            | Opens the generated form; saving approves the edited values.                                                    |
+| Reject          | Stops execution immediately, without a comment box. Explicit API callers may still attach an optional `reason`. |
+| Request changes | Opens a comment box. The comment is required and tells the model what to revise.                                |
+
+`request_changes` is a distinct terminal status (`changes_requested`) so the app
+can re-plan instead of treating it as a plain rejection:
+
+```python
+decision = await cl.Approval(
+    step=step,
+    arguments=draft.model_dump(),
+    arguments_schema=TicketDraft,
+    content=render_ticket(draft),
+    title="Create this ticket?",
+).ask()
+
+if decision.decision == "request_changes":
+    await cl.Message(content=f"Changes requested: {decision.comment}").send()
+    return
+if not decision.approved:
+    return
+create_ticket(**decision.arguments)
+```
+
+Comments are trimmed, capped at 500 characters, and stored as `reason` on the
+record; public shares exclude them. The decorator path records a rejection
+comment on the step output. Use the explicit `cl.Approval` API when the model
+must read the comment and re-plan.
+
 ## Contract
 
 ### Server-held arguments
@@ -120,7 +253,8 @@ reject, expiry, supersede or orphan, `decision.approved` is `False`.
   are JSON-compatible. Non-JSON arguments raise `ApprovalInvalidArguments`; they
   are never stringified.
 - A decision request carries no arguments. It contains only the session id, the
-  approval id, the decision, an optional edit payload and a client request id.
+  approval id, the decision, an optional edit payload, an optional comment (up
+  to 500 characters), and a client request id.
 - The approval card and the decision endpoint use the server record. The client
   cannot replace the arguments by editing the payload.
 - Approval arguments are keyed by the function signature. For methods, `self`
@@ -128,14 +262,15 @@ reject, expiry, supersede or orphan, `decision.approved` is `False`.
 
 ### Decisions and execution
 
-| Decision                              | Record status | `approved` | Runs? | Arguments                                                      |
-| ------------------------------------- | ------------- | ---------- | ----- | -------------------------------------------------------------- |
-| approve                               | `approved`    | `True`     | Yes   | Original server-held arguments                                 |
-| reject                                | `rejected`    | `False`    | No    | None executed; original arguments remain in the waiter context |
-| edit                                  | `edited`      | `True`     | Yes   | Validated edited arguments                                     |
-| timeout                               | `expired`     | `False`    | No    | None                                                           |
-| stop / replace / delete / session end | `superseded`  | `False`    | No    | None                                                           |
-| restart / resume without a waiter     | `orphaned`    | `False`    | No    | None                                                           |
+| Decision                              | Record status       | `approved` | Runs? | Arguments                                         |
+| ------------------------------------- | ------------------- | ---------- | ----- | ------------------------------------------------- |
+| approve                               | `approved`          | `True`     | Yes   | Original server-held arguments                    |
+| reject                                | `rejected`          | `False`    | No    | None executed; the optional comment is returned   |
+| edit                                  | `edited`            | `True`     | Yes   | Validated edited arguments                        |
+| request changes                       | `changes_requested` | `False`    | No    | None executed; a comment is required and returned |
+| timeout                               | `expired`           | `False`    | No    | None                                              |
+| stop / replace / delete / session end | `superseded`        | `False`    | No    | None                                              |
+| restart / resume without a waiter     | `orphaned`          | `False`    | No    | None                                              |
 
 The framework does not auto-approve, remember decisions, or provide an admin
 override.
@@ -147,8 +282,8 @@ may have at most 8 pending approvals; the 9th raises `ApprovalLimitReached`.
 
 ### One run per thread
 
-While a thread has a pending approval, every framework entry point that could
-start a run is refused with `ApprovalPending`:
+While a thread has a pending interaction (approval or question), every
+framework entry point that could start a run is refused with `ApprovalPending`:
 
 - `client_message`
 - `edit_message`
@@ -157,7 +292,7 @@ start a run is refused with `ApprovalPending`:
 - `config.code.on_message` (covers Slack, Teams, Discord, the scheduler, and
   direct calls)
 
-The pending approval stays pending. `stop` is the explicit cancel path. Tasks
+The pending interaction stays pending. `stop` is the explicit cancel path. Tasks
 that an app spawns with `asyncio.create_task` are outside this guard.
 
 ### Authorization
@@ -179,10 +314,12 @@ record is refused without changing state.
 
 The record lives under `step.metadata["approval"]`. It contains the approval id,
 revision, tool, title, status, requesting user, timestamps, expiry, edit flag, a
-per-approval salt, an HMAC digest of the full arguments, and a recursively
-redacted preview. The preview is key-name based: a value under a
-non-secret-looking key stays in the record even though the full-argument digest
-also covers it. Raw argument objects are never stored.
+per-approval salt, an HMAC digest of the full arguments, a recursively redacted
+preview, and the decision comment (`reason`) when one was supplied. The preview
+is key-name based: a value under a non-secret-looking key stays in the record
+even though the full-argument digest also covers it. Raw argument objects are
+never stored. Public shares keep only the fields in the approval allowlist, so
+`reason`, `content`, the previews and the digest stay owner-only.
 
 Writes for an approval-bearing step are serialized by a per-step lock and
 awaited while the step is approval-managed. A terminal decision is written
@@ -217,42 +354,42 @@ treated as absent, never as pending.
 
 ## Resume and lifecycle
 
-| Case                                | Outcome                                                                              | Executes?                  |
-| ----------------------------------- | ------------------------------------------------------------------------------------ | -------------------------- |
-| Approve now                         | Terminal write succeeds, then the waiter resolves                                    | Yes, once                  |
-| Reject now                          | `rejected`                                                                           | No                         |
-| Edit now                            | Schema-validated final arguments, final redacted trace                               | Yes, with edited arguments |
-| Same-session socket reconnect       | The waiter survives; the server does not re-emit the card                            | After a decision, once     |
-| Page reload / new session           | No waiter; resume marks a persisted pending record `orphaned`; the app may ask again | No                         |
-| Process restart                     | No waiter; resume marks the record `orphaned`                                        | No                         |
-| Stop while pending                  | Pending approvals in the thread are superseded before the run is cancelled           | No                         |
-| Thread or bulk delete               | Pending approvals are superseded before the rows are deleted                         | No                         |
-| Session delete / disconnect timeout | Pending approvals are orphaned                                                       | No                         |
-| Duplicate decision retry            | The stored terminal result is returned                                               | No, already decided        |
-| Terminal write fails                | Stays `pending`, the waiter is not resolved, a retry is allowed                      | No                         |
-| Pending request write fails         | `ApprovalPersistenceError`, no record, no waiter                                     | No                         |
-| Decision after expiry               | `expired`; the card is read-only                                                     | No                         |
-| Decision on another worker          | No registry entry; cross-worker decisions are not supported                          | No                         |
+| Case                                | Outcome                                                                                          | Executes?                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------- |
+| Approve now                         | Terminal write succeeds, then the waiter resolves                                                | Yes, once                  |
+| Reject now                          | `rejected`                                                                                       | No                         |
+| Edit now                            | Schema-validated final arguments, final redacted trace                                           | Yes, with edited arguments |
+| Same-session socket reconnect       | The waiter survives; the server does not re-emit the card, so Edit is hidden until a fresh event | After a decision, once     |
+| Page reload / new session           | No waiter; resume marks a persisted pending record `orphaned`; the app may ask again             | No                         |
+| Process restart                     | No waiter; resume marks the record `orphaned`                                                    | No                         |
+| Stop while pending                  | Pending approvals in the thread are superseded before the run is cancelled                       | No                         |
+| Thread or bulk delete               | Pending approvals are superseded before the rows are deleted                                     | No                         |
+| Session delete / disconnect timeout | Pending approvals are orphaned                                                                   | No                         |
+| Duplicate decision retry            | The stored terminal result is returned                                                           | No, already decided        |
+| Terminal write fails                | Stays `pending`, the waiter is not resolved, a retry is allowed                                  | No                         |
+| Pending request write fails         | `ApprovalPersistenceError`, no record, no waiter                                                 | No                         |
+| Decision after expiry               | `expired`; the card is read-only                                                                 | No                         |
+| Decision on another worker          | No registry entry; cross-worker decisions are not supported                                      | No                         |
 
 A stale card can receive the terminal state in the 409 response body, so it can
 render the final status without waiting for another event.
 
 ## Refusal codes
 
-| Code                       | Typical HTTP status | Meaning                                                                |
-| -------------------------- | ------------------- | ---------------------------------------------------------------------- |
-| `ApprovalAuthRequired`     | 401                 | No authenticated user                                                  |
-| `ApprovalNotReady`         | 409                 | No user message has happened yet                                       |
-| `ApprovalUnsupported`      | 400                 | Wrong session type, missing generation, manual flag, or sync decorator |
-| `ApprovalThreadMismatch`   | 403                 | The step belongs to another thread                                     |
-| `ApprovalSessionMismatch`  | 403                 | The decision comes from another session generation                     |
-| `ApprovalNotFound`         | 404                 | Unknown approval, or it does not belong to this thread                 |
-| `ApprovalNotPending`       | 409                 | The approval is already terminal or has expired                        |
-| `ApprovalPersistenceError` | 500                 | The terminal record could not be proven durable                        |
-| `ApprovalInvalidArguments` | 422                 | Arguments are not JSON-compatible, or an edit failed validation        |
-| `ApprovalEditNotAllowed`   | 422                 | Edit was requested without an edit schema                              |
-| `ApprovalLimitReached`     | 429                 | More than 8 pending approvals in one session                           |
-| `ApprovalPending`          | 409                 | A new run was attempted while an approval is pending                   |
+| Code                       | Typical HTTP status | Meaning                                                                                                          |
+| -------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `ApprovalAuthRequired`     | 401                 | No authenticated user                                                                                            |
+| `ApprovalNotReady`         | 409                 | No user message has happened yet                                                                                 |
+| `ApprovalUnsupported`      | 400                 | Wrong session type, missing generation, manual flag, or sync decorator                                           |
+| `ApprovalThreadMismatch`   | 403                 | The step belongs to another thread                                                                               |
+| `ApprovalSessionMismatch`  | 403                 | The decision comes from another session generation                                                               |
+| `ApprovalNotFound`         | 404                 | Unknown approval, or it does not belong to this thread                                                           |
+| `ApprovalNotPending`       | 409                 | The approval is already terminal or has expired                                                                  |
+| `ApprovalPersistenceError` | 500                 | The terminal record could not be proven durable                                                                  |
+| `ApprovalInvalidArguments` | 422                 | Arguments are not JSON-compatible, an edit failed validation, or a request-change comment is missing or too long |
+| `ApprovalEditNotAllowed`   | 422                 | Edit was requested without an edit schema                                                                        |
+| `ApprovalLimitReached`     | 429                 | More than 8 pending approvals in one session                                                                     |
+| `ApprovalPending`          | 409                 | A new run was attempted while an approval is pending                                                             |
 
 Invalid edit responses contain only a field path and an error type. They never
 echo the submitted value. Invalid arguments produce no write and no execution.

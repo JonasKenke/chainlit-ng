@@ -74,7 +74,14 @@ _FORBIDDEN_ANSWER_CHARS = frozenset(
 )
 
 ApprovalStatus = Literal[
-    "pending", "approved", "rejected", "edited", "expired", "superseded", "orphaned"
+    "pending",
+    "approved",
+    "rejected",
+    "edited",
+    "changes_requested",
+    "expired",
+    "superseded",
+    "orphaned",
 ]
 QuestionStatus = Literal["pending", "answered", "expired", "superseded", "orphaned"]
 InteractionStatus = Literal[
@@ -82,15 +89,18 @@ InteractionStatus = Literal[
     "approved",
     "rejected",
     "edited",
+    "changes_requested",
     "answered",
     "expired",
     "superseded",
     "orphaned",
 ]
 InteractionKind = Literal["approval", "question"]
-Decision = Literal["approve", "reject", "edit", "expired", "superseded", "orphaned"]
+Decision = Literal[
+    "approve", "reject", "edit", "request_changes", "expired", "superseded", "orphaned"
+]
 
-_USER_STATUSES = {"approved", "rejected", "edited"}
+_USER_STATUSES = {"approved", "rejected", "edited", "changes_requested"}
 _QUESTION_USER_STATUSES = {"answered"}
 _USER_STATUSES_BY_KIND: Dict[str, set[str]] = {
     "approval": _USER_STATUSES,
@@ -110,6 +120,10 @@ _SECRET_KEY_PARTS = (
 )
 _MAX_PREVIEW_DEPTH = 8
 _MAX_PREVIEW_CHARS = 16 * 1024
+_MAX_CONTENT_CHARS = 16 * 1024
+_MAX_COMMENT_CHARS = 500
+_MAX_EDIT_FIELDS = 32
+_TEXT_FIELD_NAMES = frozenset({"body", "description", "message", "notes", "text"})
 
 
 class ApprovalError(Exception):
@@ -400,9 +414,11 @@ def pending_approvals_for_thread(thread_id: str) -> list[_Entry]:
 
 
 def guard_pending_approval(thread_id: Optional[str]) -> None:
-    """Refuse a new run while an approval owns the thread."""
+    """Refuse a new run while a pending interaction owns the thread."""
     if thread_id and pending_approvals_for_thread(thread_id):
-        raise ApprovalPending("Resolve the pending approval before starting a run")
+        raise ApprovalPending(
+            "Resolve the pending approval or question before starting a run"
+        )
 
 
 async def supersede_thread_approvals(thread_id: str, reason: str = "deleted") -> None:
@@ -649,13 +665,131 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
 
-def _payload(record: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict[str, Any]:
+def _is_secret_name(name: str) -> bool:
+    lower = name.lower().replace("-", "_")
+    return any(part in lower for part in _SECRET_KEY_PARTS)
+
+
+def _unwrap_optional_schema(
+    prop: Mapping[str, Any],
+) -> tuple[Dict[str, Any], bool]:
+    variants = prop.get("anyOf") or prop.get("oneOf")
+    if isinstance(variants, list):
+        non_null = [
+            variant
+            for variant in variants
+            if isinstance(variant, dict) and variant.get("type") != "null"
+        ]
+        if len(non_null) == 1 and len(non_null) != len(variants):
+            merged = {
+                key: value
+                for key, value in prop.items()
+                if key not in {"anyOf", "oneOf"}
+            }
+            merged.update(non_null[0])
+            return merged, True
+    declared = prop.get("type")
+    if isinstance(declared, list):
+        non_null_types = [value for value in declared if value != "null"]
+        if len(non_null_types) == 1:
+            merged = {**prop, "type": non_null_types[0]}
+            return merged, len(non_null_types) != len(declared)
+    return dict(prop), False
+
+
+def _field_kind(
+    name: str, prop: Mapping[str, Any]
+) -> Optional[tuple[str, Optional[list[Any]]]]:
+    unwrapped, _nullable = _unwrap_optional_schema(prop)
+    options = unwrapped.get("enum")
+    if isinstance(options, list) and all(
+        isinstance(option, (str, int, float, bool)) for option in options
+    ):
+        return "enum", options
+    declared = unwrapped.get("type")
+    if declared == "string":
+        if (
+            unwrapped.get("format") in {"multiline", "textarea"}
+            or name in _TEXT_FIELD_NAMES
+        ):
+            return "text", None
+        return "string", None
+    if declared == "integer":
+        return "integer", None
+    if declared == "number":
+        return "number", None
+    if declared == "boolean":
+        return "boolean", None
+    if declared == "array":
+        items = unwrapped.get("items")
+        if isinstance(items, dict):
+            item_options = items.get("enum")
+            if items.get("type") == "string" and not item_options:
+                return "string_list", None
+            if isinstance(item_options, list) and all(
+                isinstance(option, str) for option in item_options
+            ):
+                return "string_list", item_options
+    return None
+
+
+def _edit_fields(
+    schema: Optional[type[BaseModel]],
+) -> Optional[list[Dict[str, Any]]]:
+    """Describe schema fields for a form; never include argument values."""
+    if schema is None:
+        return None
+    try:
+        json_schema = schema.model_json_schema()
+    except Exception:
+        return None
+    properties = json_schema.get("properties")
+    if not isinstance(properties, dict):
+        return None
+    required = set(json_schema.get("required") or ())
+    fields: list[Dict[str, Any]] = []
+    for name, raw in properties.items():
+        if not isinstance(name, str) or not isinstance(raw, dict):
+            return None
+        kind = _field_kind(name, raw)
+        if kind is None:
+            return None
+        field_kind, options = kind
+        _unwrapped, nullable = _unwrap_optional_schema(raw)
+        fields.append(
+            {
+                "name": name,
+                "label": str(raw.get("title") or name.replace("_", " ").title())[:80],
+                "kind": field_kind,
+                "required": name in required,
+                "nullable": nullable,
+                "secret": _is_secret_name(name)
+                or raw.get("format") == "password"
+                or bool(raw.get("writeOnly")),
+                "options": options,
+                "description": raw.get("description"),
+                "default": raw.get("default"),
+            }
+        )
+        if len(fields) > _MAX_EDIT_FIELDS:
+            return None
+    if len(json.dumps(fields, default=str)) > _MAX_CONTENT_CHARS:
+        return None
+    return fields
+
+
+def _payload(
+    record: Mapping[str, Any],
+    arguments: Mapping[str, Any],
+    edit_fields: Optional[list[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     return {
         "id": record["id"],
         "stepId": record["stepId"],
         "threadId": record["threadId"],
         "tool": record["tool"],
         "title": record.get("title"),
+        "content": record.get("content"),
         "status": record["status"],
         "requestedBy": record.get("requestedBy"),
         "requestedAt": record.get("requestedAt"),
@@ -664,8 +798,10 @@ def _payload(record: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict[st
         "decidedBy": record.get("decidedBy"),
         "decidedAt": record.get("decidedAt"),
         "decision": record.get("decision"),
+        "reason": record.get("reason"),
         "terminalReason": record.get("terminalReason"),
         "editAllowed": bool(record.get("editAllowed")),
+        "editFields": edit_fields,
         "argumentsPreview": record.get("argumentsPreview"),
         "editedArgumentsPreview": record.get("editedArgumentsPreview"),
         "arguments": dict(arguments),
@@ -704,7 +840,9 @@ async def _emit(
         if entry.kind == "question":
             await entry.emitter.send_question(_question_payload(record))
         else:
-            await entry.emitter.send_approval(_payload(record, arguments))
+            await entry.emitter.send_approval(
+                _payload(record, arguments, _edit_fields(entry.arguments_schema))
+            )
     except Exception:
         logger.exception("Failed to emit %s event", entry.kind)
 
@@ -838,6 +976,23 @@ async def _transition_locked(
         )
         raise ApprovalNotPending("Interaction has expired", record=stored)
 
+    comment: Optional[str] = None
+    if to_status in user_statuses:
+        comment = reason.strip() if isinstance(reason, str) else None
+        comment = comment or None
+        if comment is not None and len(comment) > _MAX_COMMENT_CHARS:
+            raise ApprovalInvalidArguments(
+                "comment is too long",
+                field="reason",
+                error_type="too_long",
+            )
+        if to_status == "changes_requested" and comment is None:
+            raise ApprovalInvalidArguments(
+                "a comment is required when requesting changes",
+                field="reason",
+                error_type="missing",
+            )
+
     record = deepcopy(pending)
     final_arguments: Mapping[str, Any] = entry.arguments
     if kind == "question" and to_status == "answered":
@@ -875,9 +1030,11 @@ async def _transition_locked(
                 if to_status == "rejected"
                 else "edit"
                 if to_status == "edited"
+                else "request_changes"
+                if to_status == "changes_requested"
                 else None
             ),
-            "reason": reason if to_status in user_statuses else None,
+            "reason": comment if to_status in user_statuses else None,
             "terminalReason": (
                 None
                 if to_status in user_statuses
@@ -1014,6 +1171,8 @@ def _decision_from_record(
         if status == "rejected"
         else "edit"
         if status == "edited"
+        else "request_changes"
+        if status == "changes_requested"
         else status
     )
     decided_at = record.get("decidedAt") or record.get("terminalAt") or ""
@@ -1171,6 +1330,7 @@ class Approval:
         arguments: Mapping[str, Any],
         tool: Optional[str] = None,
         title: Optional[str] = None,
+        content: Optional[str] = None,
         arguments_schema: Optional[type[BaseModel]] = None,
         redact: Sequence[str] = (),
         timeout: Optional[float] = None,
@@ -1190,6 +1350,16 @@ class Approval:
         self.arguments = deepcopy(dict(arguments))
         self.tool = tool or step.name
         self.title = title[:200] if title else None
+        if content is not None:
+            if not isinstance(content, str):
+                raise ValueError("content must be a string")
+            content = content.strip()
+            if len(content) > _MAX_CONTENT_CHARS:
+                raise ValueError(
+                    f"content must be at most {_MAX_CONTENT_CHARS} characters"
+                )
+            content = content or None
+        self.content = content
         self.arguments_schema = arguments_schema
         self.redact = tuple(redact)
         self.timeout = timeout
@@ -1218,6 +1388,7 @@ class Approval:
             "threadId": self.step.thread_id,
             "tool": self.tool,
             "title": self.title,
+            "content": self.content,
             "status": "pending",
             "requestedBy": user.identifier,
             "requestedAt": requested_at,

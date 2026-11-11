@@ -157,6 +157,7 @@ def step(
     auto_collapse: bool = False,
     requires_approval: bool = False,
     approval_schema: Optional[Type[BaseModel]] = None,
+    approval_content: Optional[str] = None,
 ):
     """Step decorator for async and sync functions."""
 
@@ -198,6 +199,7 @@ def step(
                     metadata=metadata,
                     requires_approval=requires_approval,
                     approval_schema=approval_schema,
+                    approval_content=approval_content,
                 )
                 if requires_approval:
                     step_instance.input = _approval_preview_input(
@@ -214,6 +216,7 @@ def step(
                         decision = await Approval(
                             step=step,
                             arguments=approval_arguments,
+                            content=approval_content,
                             arguments_schema=approval_schema,
                         ).ask()
                         if not decision.approved:
@@ -224,6 +227,8 @@ def step(
                                 else decision.decision
                             )
                             step.output = f"Approval {label}"
+                            if decision.comment:
+                                step.output += f": {decision.comment}"
                             return None
                         call_args, call_kwargs = _approval_call_arguments(
                             func,
@@ -332,6 +337,7 @@ class Step:
         thread_id: str | None = None,
         requires_approval: bool = False,
         approval_schema: Optional[Type[BaseModel]] = None,
+        approval_content: Optional[str] = None,
     ):
         if metadata and "approval" in metadata:
             raise ValueError("metadata['approval'] is reserved")
@@ -344,6 +350,7 @@ class Step:
         self._approval_decorated = False
         self.requires_approval = requires_approval
         self.approval_schema = approval_schema
+        self.approval_content = approval_content
         self.thread_id = thread_id or context.session.thread_id
         self.name = name or ""
         self.type = type
@@ -627,6 +634,7 @@ class Step:
             thread_id=self.thread_id,
             requires_approval=self.requires_approval,
             approval_schema=self.approval_schema,
+            approval_content=self.approval_content,
         )
 
     def _check_manual_approval(self) -> None:

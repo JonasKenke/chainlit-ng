@@ -111,6 +111,7 @@ def _approval_thread():
                         "threadId": "thread-1",
                         "tool": "dangerous_tool",
                         "title": "Send money",
+                        "content": "| internal | details |",
                         "status": "edited",
                         "requestedBy": "user-1",
                         "decidedBy": "user-1",
@@ -158,9 +159,11 @@ def test_shared_thread_exposes_only_the_approval_whitelist():
         "digestSalt",
         "requestedBy",
         "decidedBy",
+        "content",
     ):
         assert hidden not in approval
         assert hidden not in json.dumps(result)
+    assert "internal" not in json.dumps(result)
 
     # The stored thread is not mutated.
     assert thread["steps"][0]["metadata"]["approval"]["requestedBy"] == "user-1"
@@ -174,6 +177,7 @@ def test_owner_view_keeps_the_full_approval_record():
 
     approval = result["steps"][0]["metadata"]["approval"]
     assert approval["requestedBy"] == "user-1"
+    assert approval["content"] == "| internal | details |"
     assert approval["editedArgumentsPreview"] == {"apiKey": "[redacted]", "amount": 2}
     assert result["steps"][0]["input"] == thread["steps"][0]["input"]
 

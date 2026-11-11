@@ -62,6 +62,8 @@ function approvalFromStep(step: IStep): IApproval | null {
     title: record.title ?? null,
     content: record.content ?? null,
     status: record.status ?? 'orphaned',
+    reason: record.reason ?? null,
+    live: false,
     requestedBy: record.requestedBy ?? null,
     requestedAt: record.requestedAt ?? null,
     expiresAt: record.expiresAt ?? null,
@@ -647,13 +649,14 @@ const useChatSession = () => {
       socket.on('approval', (approval: IApproval) => {
         setApprovals((old) => {
           const index = old.findIndex((item) => item.id === approval.id);
-          if (index === -1) return [...old, approval];
+          if (index === -1) return [...old, { ...approval, live: true }];
           const previous = old[index];
           // A late pending event must not overwrite a terminal decision.
           if ((approval.revision ?? 0) < (previous.revision ?? 0)) return old;
           const merged = {
             ...previous,
             ...approval,
+            live: true,
             arguments: approval.arguments ?? previous.arguments
           };
           return [...old.slice(0, index), merged, ...old.slice(index + 1)];

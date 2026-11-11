@@ -145,6 +145,42 @@ describe('useChatSession approval events', () => {
 
     expect(store.getState().approvals[0].status).toBe('approved');
   });
+
+  it('marks a socket approval live and keeps its edit fields', async () => {
+    const { store } = await connectWithResumeHandler();
+    const socket = sockets[0];
+    const handler = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'approval'
+    )?.[1] as (approval: unknown) => void;
+    expect(handler).toBeTruthy();
+
+    act(() => {
+      handler({
+        id: 'approval-1',
+        stepId: 'step-1',
+        threadId: 'thread-1',
+        tool: 'send_email',
+        status: 'pending',
+        revision: 1,
+        arguments: { amount: 1 },
+        editAllowed: true,
+        editFields: [
+          {
+            name: 'amount',
+            label: 'Amount',
+            kind: 'integer',
+            required: true,
+            nullable: false,
+            secret: false
+          }
+        ]
+      });
+    });
+
+    const [approval] = store.getState().approvals;
+    expect(approval.live).toBe(true);
+    expect(approval.editFields).toHaveLength(1);
+  });
 });
 
 describe('useChatSession question events', () => {
@@ -341,6 +377,7 @@ describe('useChatSession approval resume', () => {
                 status: 'orphaned',
                 revision: 2,
                 terminalReason: 'server_restart',
+                reason: 'not now',
                 argumentsPreview: { to: 'person@example.com' }
               }
             }
@@ -353,6 +390,8 @@ describe('useChatSession approval resume', () => {
     const [approval] = store.getState().approvals;
     expect(approval.id).toBe('approval-1');
     expect(approval.status).toBe('orphaned');
+    expect(approval.live).toBe(false);
+    expect(approval.reason).toBe('not now');
     expect(approval.arguments).toEqual({ to: 'person@example.com' });
   });
 

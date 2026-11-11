@@ -23,6 +23,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a proven terminal write before the tool runs. Manual
   `Step(requires_approval=True)` and `metadata={"approval": ...}` are refused.
   See [the approvals guide](docs/approvals.md).
+- Add markdown `content` to tool-call approvals (`cl.Approval(content=...)`,
+  `@cl.step(approval_content=...)`) so the card shows tables and formatted text
+  instead of raw JSON. Content is display-only, capped at 16 KiB, preserved
+  across resume, and excluded from public shares.
+- Add schema-generated editing and review feedback to tool-call approvals:
+  `arguments_schema` fields render as inputs (string, multiline text, integer,
+  number, boolean, enum, string list) with a JSON fallback for complex schemas.
+  Reject stops immediately; Request changes opens a required comment box. The
+  comment is returned as `decision.comment` with `decision.decision ==
+"request_changes"` and persisted as the `changes_requested` status. The card
+  never renders raw arguments; `content` is the review body. Edit is hidden
+  once only a redacted resume preview remains.
 - Add `cl.ask(...)` for agent-authored questions on the persisted approvals
   engine: options plus optional free text, a live `question` card, and
   `POST /project/question`. Answers are stored on the step record and returned
@@ -81,6 +93,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Raise `AttributeError` for unknown lazy `chainlit` attributes so `hasattr` works.
 - Serialize generation objects with `to_dict()` when persisting steps, preserving compatibility with legacy generation models.
 - Render pending approval and question cards inline at the step that created them, between the user's input and the assistant's follow-up, and scroll a newly pending card into view. Approvals previously rendered above the whole conversation and questions after every message, so the active controls could be misplaced or off-screen.
+- Do not render raw approval arguments in the card. A title-only approval shows only the title and Approve/Reject buttons, and markdown `content` is the review surface.
+- Name both pending interactions in the run guard: a pending question now refuses a new run with "Resolve the pending approval or question", matching the shared registry and the toast.
 
 ### Security
 

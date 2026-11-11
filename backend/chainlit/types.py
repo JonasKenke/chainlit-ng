@@ -300,7 +300,7 @@ class ApprovalDecisionRequest(BaseModel):
 
     sessionId: str = Field(min_length=1, max_length=128)
     approvalId: str = Field(min_length=1, max_length=64)
-    decision: Literal["approve", "reject", "edit"]
+    decision: Literal["approve", "reject", "edit", "request_changes"]
     # Validated against the server-held schema, never typed here: a FastAPI
     # validation error would echo the client value in the response body.
     editedArguments: Optional[Any] = None
@@ -317,14 +317,16 @@ class ApprovalDecisionResponse(BaseModel):
         "approved",
         "rejected",
         "edited",
+        "changes_requested",
         "expired",
         "superseded",
         "orphaned",
     ]
-    decision: Optional[Literal["approve", "reject", "edit"]] = None
+    decision: Optional[Literal["approve", "reject", "edit", "request_changes"]] = None
     decidedBy: Optional[str] = None
     decidedAt: Optional[str] = None
     terminalReason: Optional[str] = None
+    reason: Optional[str] = None
     revision: int
     error: Optional[str] = None
 

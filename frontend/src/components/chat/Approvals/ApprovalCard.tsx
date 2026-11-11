@@ -1,3 +1,4 @@
+import { MessageContext } from 'contexts/MessageContext';
 import { useContext, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -5,10 +6,12 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   ChainlitContext,
   IApproval,
+  IApprovalEditField,
   useChainlitStore,
   useSetChainlitState
 } from '@chainlit/react-client';
 
+import { Markdown } from '@/components/Markdown';
 import { Button } from '@/components/ui/button';
 
 const statusLabel: Record<IApproval['status'], string> = {
@@ -16,6 +19,7 @@ const statusLabel: Record<IApproval['status'], string> = {
   approved: 'Approved',
   rejected: 'Rejected',
   edited: 'Edited',
+  changes_requested: 'Changes requested',
   expired: 'Expired',
   superseded: 'Superseded',
   orphaned: 'Orphaned'
@@ -63,17 +67,100 @@ const diffPreviews = (before: Preview, after: Preview): string[] => {
 };
 
 const approvalErrorMessage = (error: unknown): string => {
-  const detail = (error as { payload?: { detail?: unknown } })?.payload?.detail;
-  if (typeof detail === 'string' && detail) return detail;
-  if (detail && typeof detail === 'object') {
-    // 422 ApprovalInvalidArguments carries the schema field path and the
-    // Pydantic error type; never the submitted value.
-    const { field, type } = detail as { field?: unknown; type?: unknown };
-    if (typeof field === 'string') {
-      return typeof type === 'string' ? `${field} (${type})` : field;
+  if (typeof error === 'object' && error !== null && 'payload' in error) {
+    const payload = error.payload;
+    if (
+      typeof payload === 'object' &&
+      payload !== null &&
+      'detail' in payload
+    ) {
+      const detail = payload.detail;
+      if (typeof detail === 'string' && detail) return detail;
+      if (typeof detail === 'object' && detail !== null) {
+        // 422 ApprovalInvalidArguments carries the schema field path and the
+        // Pydantic error type; never the submitted value.
+        const field = 'field' in detail ? detail.field : undefined;
+        const type = 'type' in detail ? detail.type : undefined;
+        if (typeof field === 'string') {
+          return typeof type === 'string' ? `${field} (${type})` : field;
+        }
+      }
     }
   }
   return error instanceof Error ? error.message : 'Unable to decide approval';
+};
+
+type FieldValues = Record<string, string | boolean>;
+
+const initialFieldValues = (
+  fields: IApprovalEditField[],
+  args: Record<string, unknown>
+): FieldValues => {
+  const values: FieldValues = {};
+  for (const field of fields) {
+    const value = args[field.name] ?? field.default;
+    if (field.kind === 'boolean') {
+      values[field.name] = Boolean(value);
+    } else if (field.kind === 'string_list') {
+      values[field.name] = Array.isArray(value) ? value.join('\n') : '';
+    } else {
+      values[field.name] =
+        value === null || value === undefined ? '' : String(value);
+    }
+  }
+  return values;
+};
+
+const buildEditedArguments = (
+  fields: IApprovalEditField[],
+  values: FieldValues
+): Record<string, unknown> | string => {
+  const edited: Record<string, unknown> = {};
+  for (const field of fields) {
+    const raw = values[field.name];
+    if (field.kind === 'boolean') {
+      edited[field.name] = Boolean(raw);
+      continue;
+    }
+    const text = typeof raw === 'string' ? raw : '';
+    if (field.kind === 'string_list') {
+      edited[field.name] = text
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      continue;
+    }
+    if (text.trim() === '') {
+      if (field.required) return `${field.label} is required`;
+      if (field.nullable) edited[field.name] = null;
+      continue;
+    }
+    if (field.kind === 'enum') {
+      const match = (field.options ?? []).find(
+        (option) => String(option) === text
+      );
+      edited[field.name] = match ?? text;
+      continue;
+    }
+    if (field.kind === 'integer') {
+      const number = Number(text);
+      if (!Number.isInteger(number)) {
+        return `${field.label} must be a whole number`;
+      }
+      edited[field.name] = number;
+      continue;
+    }
+    if (field.kind === 'number') {
+      const number = Number(text);
+      if (!Number.isFinite(number)) {
+        return `${field.label} must be a number`;
+      }
+      edited[field.name] = number;
+      continue;
+    }
+    edited[field.name] = text;
+  }
+  return edited;
 };
 
 interface Props {
@@ -82,12 +169,20 @@ interface Props {
 
 export const ApprovalCard = ({ approval }: Props) => {
   const apiClient = useContext(ChainlitContext);
+  const { allowHtml, latex } = useContext(MessageContext);
   const sessionId = useChainlitStore((state) => state.sessionId);
   const setApprovals = useSetChainlitState('approvals');
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editMode, setEditMode] = useState<'form' | 'json' | null>(null);
   const [draft, setDraft] = useState('');
+  const [fieldValues, setFieldValues] = useState<FieldValues>({});
+  const [requestingChanges, setRequestingChanges] = useState(false);
+  const [comment, setComment] = useState('');
 
+  const fields = Array.isArray(approval.editFields)
+    ? approval.editFields
+    : null;
+  const canEdit = Boolean(approval.editAllowed) && approval.live !== false;
   const isPending = approval.status === 'pending';
   const diff = useMemo(
     () =>
@@ -96,8 +191,8 @@ export const ApprovalCard = ({ approval }: Props) => {
   );
 
   const decide = async (
-    decision: 'approve' | 'reject' | 'edit',
-    editedArguments?: Record<string, unknown>
+    decision: 'approve' | 'reject' | 'edit' | 'request_changes',
+    options: { editedArguments?: Record<string, unknown>; reason?: string } = {}
   ) => {
     setBusy(true);
     try {
@@ -105,7 +200,10 @@ export const ApprovalCard = ({ approval }: Props) => {
         sessionId,
         approvalId: approval.id,
         decision,
-        ...(editedArguments ? { editedArguments } : {}),
+        ...(options.editedArguments
+          ? { editedArguments: options.editedArguments }
+          : {}),
+        ...(options.reason ? { reason: options.reason } : {}),
         decisionRequestId: uuidv4()
       });
       setApprovals((old) =>
@@ -118,7 +216,11 @@ export const ApprovalCard = ({ approval }: Props) => {
                 decidedBy: response.decidedBy,
                 decidedAt: response.decidedAt,
                 terminalReason: response.terminalReason,
-                revision: response.revision
+                reason: response.reason ?? options.reason ?? item.reason,
+                revision: response.revision,
+                ...(options.editedArguments
+                  ? { arguments: options.editedArguments }
+                  : {})
               }
             : item
         )
@@ -131,11 +233,27 @@ export const ApprovalCard = ({ approval }: Props) => {
   };
 
   const startEdit = () => {
+    if (fields && fields.length) {
+      setFieldValues(initialFieldValues(fields, approval.arguments ?? {}));
+      setEditMode('form');
+      return;
+    }
     setDraft(JSON.stringify(approval.arguments ?? {}, null, 2));
-    setEditing(true);
+    setEditMode('json');
   };
 
-  const submitEdit = () => {
+  const submitForm = () => {
+    if (!fields) return;
+    const edited = buildEditedArguments(fields, fieldValues);
+    if (typeof edited === 'string') {
+      toast.error(edited);
+      return;
+    }
+    setEditMode(null);
+    void decide('edit', { editedArguments: edited });
+  };
+
+  const submitJson = () => {
     let parsed: unknown;
     try {
       parsed = JSON.parse(draft);
@@ -147,8 +265,119 @@ export const ApprovalCard = ({ approval }: Props) => {
       toast.error('Arguments must be a JSON object');
       return;
     }
-    setEditing(false);
-    decide('edit', parsed as Record<string, unknown>);
+    setEditMode(null);
+    void decide('edit', { editedArguments: parsed as Record<string, unknown> });
+  };
+
+  const startRequestChanges = () => {
+    setComment('');
+    setRequestingChanges(true);
+  };
+
+  const submitRequestChanges = () => {
+    const reason = comment.trim();
+    if (!reason) {
+      toast.error('A comment is required when requesting changes');
+      return;
+    }
+    setRequestingChanges(false);
+    void decide('request_changes', { reason });
+  };
+
+  const renderField = (field: IApprovalEditField) => {
+    const id = `approval-${approval.id}-${field.name}`;
+    const value = fieldValues[field.name];
+    const className =
+      'mt-1 w-full rounded border border-border bg-background p-2 text-sm';
+    if (field.kind === 'boolean') {
+      return (
+        <input
+          id={id}
+          aria-label={field.label}
+          type="checkbox"
+          className="mt-1 h-4 w-4 rounded border-border"
+          checked={Boolean(value)}
+          onChange={(event) =>
+            setFieldValues((old) => ({
+              ...old,
+              [field.name]: event.target.checked
+            }))
+          }
+        />
+      );
+    }
+    if (field.kind === 'enum') {
+      return (
+        <select
+          id={id}
+          aria-label={field.label}
+          className={className}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) =>
+            setFieldValues((old) => ({
+              ...old,
+              [field.name]: event.target.value
+            }))
+          }
+        >
+          {field.required ? null : <option value="">—</option>}
+          {(field.options ?? []).map((option) => (
+            <option key={String(option)} value={String(option)}>
+              {String(option)}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (field.kind === 'text' || field.kind === 'string_list') {
+      return (
+        <textarea
+          id={id}
+          aria-label={field.label}
+          className={`${className} h-28`}
+          placeholder={
+            field.kind === 'string_list'
+              ? 'One per line or comma separated'
+              : undefined
+          }
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) =>
+            setFieldValues((old) => ({
+              ...old,
+              [field.name]: event.target.value
+            }))
+          }
+        />
+      );
+    }
+    return (
+      <input
+        id={id}
+        aria-label={field.label}
+        type={
+          field.secret
+            ? 'password'
+            : field.kind === 'integer' || field.kind === 'number'
+              ? 'number'
+              : 'text'
+        }
+        step={
+          field.kind === 'integer'
+            ? 1
+            : field.kind === 'number'
+              ? 'any'
+              : undefined
+        }
+        className={className}
+        value={typeof value === 'string' ? value : ''}
+        onChange={(event) =>
+          setFieldValues((old) => ({
+            ...old,
+            [field.name]: event.target.value
+          }))
+        }
+      />
+    );
   };
 
   return (
@@ -172,9 +401,18 @@ export const ApprovalCard = ({ approval }: Props) => {
         </span>
       </div>
 
-      <pre className="mt-3 max-h-64 overflow-auto rounded bg-muted p-3 text-xs">
-        {JSON.stringify(approval.arguments ?? {}, null, 2)}
-      </pre>
+      {approval.content ? (
+        <div data-testid="approval-content" className="mt-3 text-sm">
+          <Markdown allowHtml={allowHtml} latex={latex}>
+            {approval.content}
+          </Markdown>
+          {approval.status === 'edited' ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Requested content; the approved changes are in the diff.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {diff.length ? (
         <div data-testid="approval-diff" className="mt-3">
@@ -187,7 +425,46 @@ export const ApprovalCard = ({ approval }: Props) => {
         </div>
       ) : null}
 
-      {editing ? (
+      {editMode === 'form' && fields ? (
+        <div className="mt-3 space-y-3">
+          {fields.map((field) => (
+            <div key={field.name}>
+              <label
+                htmlFor={`approval-${approval.id}-${field.name}`}
+                className="text-xs font-medium text-muted-foreground"
+              >
+                {field.label}
+                {field.required ? ' *' : ''}
+              </label>
+              {renderField(field)}
+              {field.description ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {field.description}
+                </p>
+              ) : null}
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={submitForm}
+            >
+              Save & approve
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setEditMode(null)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : editMode === 'json' ? (
         <div className="mt-3">
           <textarea
             aria-label="Edited arguments JSON"
@@ -200,7 +477,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               type="button"
               size="sm"
               disabled={busy}
-              onClick={submitEdit}
+              onClick={submitJson}
             >
               Save edit
             </Button>
@@ -209,14 +486,50 @@ export const ApprovalCard = ({ approval }: Props) => {
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() => setEditing(false)}
+              onClick={() => setEditMode(null)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : requestingChanges ? (
+        <div className="mt-3">
+          <label
+            htmlFor={`approval-comment-${approval.id}`}
+            className="text-xs font-medium text-muted-foreground"
+          >
+            What should change? (required)
+          </label>
+          <textarea
+            id={`approval-comment-${approval.id}`}
+            aria-label="Comment"
+            maxLength={500}
+            className="mt-1 h-24 w-full rounded border border-border bg-background p-2 text-sm"
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+          />
+          <div className="mt-2 flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || !comment.trim()}
+              onClick={submitRequestChanges}
+            >
+              Request changes
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setRequestingChanges(false)}
             >
               Cancel
             </Button>
           </div>
         </div>
       ) : isPending ? (
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
             size="sm"
@@ -225,16 +538,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           >
             Approve
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => decide('reject')}
-          >
-            Reject
-          </Button>
-          {approval.editAllowed ? (
+          {canEdit ? (
             <Button
               type="button"
               size="sm"
@@ -245,12 +549,38 @@ export const ApprovalCard = ({ approval }: Props) => {
               Edit
             </Button>
           ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => decide('reject')}
+          >
+            Reject
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={startRequestChanges}
+          >
+            Request changes
+          </Button>
         </div>
       ) : (
         <div className="mt-3 text-xs text-muted-foreground">
           {approval.decidedBy ? `By ${approval.decidedBy}` : null}
           {approval.decidedBy && approval.decidedAt ? ' · ' : null}
           {approval.decidedAt ?? approval.terminalReason ?? null}
+          {approval.reason ? (
+            <div
+              data-testid="approval-comment"
+              className="mt-1 whitespace-pre-wrap text-xs"
+            >
+              {approval.reason}
+            </div>
+          ) : null}
         </div>
       )}
     </section>

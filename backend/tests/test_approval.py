@@ -266,6 +266,35 @@ async def test_decision_write_failure_keeps_pending_and_retry_succeeds(
     assert layer.steps[step.id]["metadata"]["approval"]["status"] == "approved"
 
 
+async def test_approval_content_is_persisted_and_sent(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    content = "| change | risk |\n| --- | --- |\n| approvals | low |"
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task = asyncio.create_task(
+            Approval(
+                step=step,
+                arguments={"rows": 1},
+                content=content,
+                timeout=30,
+            ).ask()
+        )
+        entry = await _entry_for(step)
+        payload = ctx.emitter.send_approval.await_args.args[0]
+        assert payload["content"] == content
+        assert payload["arguments"] == {"rows": 1}
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+    assert layer.steps[step.id]["metadata"]["approval"]["content"] == content
+
+
 async def test_timeout_uses_the_same_transition_and_executes_nothing(
     layer, mock_chainlit_context, mock_session
 ):
@@ -590,6 +619,80 @@ async def test_no_data_layer_works_in_process(
     assert decision.approved is True
 
 
+async def test_request_changes_requires_a_comment_and_returns_it(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task = asyncio.create_task(
+            Approval(step=step, arguments={"rows": 1}, timeout=30).ask()
+        )
+        entry = await _entry_for(step)
+
+        with pytest.raises(ApprovalInvalidArguments) as missing:
+            await _decide(mock_session, entry, "changes_requested")
+        assert missing.value.field == "reason"
+        assert missing.value.error_type == "missing"
+
+        with pytest.raises(ApprovalInvalidArguments) as too_long:
+            await _decide(mock_session, entry, "changes_requested", reason="x" * 501)
+        assert too_long.value.error_type == "too_long"
+
+        record = await _decide(
+            mock_session,
+            entry,
+            "changes_requested",
+            reason="  split the changes  ",
+        )
+        decision = await task
+
+    assert record["status"] == "changes_requested"
+    assert record["decision"] == "request_changes"
+    assert record["reason"] == "split the changes"
+    assert decision.decision == "request_changes"
+    assert decision.approved is False
+    assert decision.comment == "split the changes"
+    assert layer.steps[step.id]["metadata"]["approval"]["reason"] == "split the changes"
+
+
+async def test_payload_describes_editable_fields_without_values(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task = asyncio.create_task(
+            Approval(
+                step=step,
+                arguments={"amount": 1, "apiKey": "sk-secret"},
+                arguments_schema=_EditArgs,
+                timeout=30,
+            ).ask()
+        )
+        entry = await _entry_for(step)
+        payload = ctx.emitter.send_approval.await_args.args[0]
+        fields = {field["name"]: field for field in payload["editFields"]}
+
+        assert fields["amount"]["kind"] == "integer"
+        assert fields["amount"]["required"] is True
+        assert fields["note"]["kind"] == "string"
+        assert fields["apiKey"]["secret"] is True
+        assert "sk-secret" not in json.dumps(payload["editFields"])
+        assert all("value" not in field for field in payload["editFields"])
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
 async def test_pending_record_has_every_field_and_redacts_secrets(
     layer, mock_chainlit_context, mock_session
 ):
@@ -805,6 +908,57 @@ async def test_route_approves_pending_approval(
     assert body["decision"] == "approve"
     assert "arguments" not in body
     assert decision.approved is True
+
+
+async def test_route_request_changes_requires_and_returns_the_comment(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+
+        payload = {
+            "sessionId": mock_session.id,
+            "approvalId": entry.approval_id,
+            "decision": "request_changes",
+            "decisionRequestId": "request-1",
+        }
+        response = await _route(
+            monkeypatch,
+            payload,
+            mock_session.user,
+            mock_session,
+            {"Origin": "http://testserver"},
+        )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail["field"] == "reason"
+        assert detail["type"] == "missing"
+        assert not task.done()
+
+        response = await _route(
+            monkeypatch,
+            {**payload, "reason": "split the ticket into two"},
+            mock_session.user,
+            mock_session,
+            {"Origin": "http://testserver"},
+        )
+        decision = await task
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "changes_requested"
+    assert body["decision"] == "request_changes"
+    assert body["reason"] == "split the ticket into two"
+    assert decision.decision == "request_changes"
+    assert decision.approved is False
+    assert decision.comment == "split the ticket into two"
 
 
 async def test_route_rejects_wrong_user(
@@ -1749,6 +1903,31 @@ async def _next_entry():
     raise AssertionError("approval entry was not registered")
 
 
+async def test_decorator_forwards_approval_content(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    content = "| change | risk |\n| --- | --- |\n| deploy | low |"
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+
+        @step_decorator(type="tool", requires_approval=True, approval_content=content)
+        async def deploy(amount: int):
+            return "deployed"
+
+        task = asyncio.create_task(deploy(amount=1))
+        entry = await _next_entry()
+        payload = ctx.emitter.send_approval.await_args.args[0]
+
+        assert payload["content"] == content
+        assert layer.steps[entry.step_id]["metadata"]["approval"]["content"] == content
+
+        await _decide(mock_session, entry)
+        await task
+
+
 async def test_decorator_persists_only_redacted_preview_and_runs_on_approve(
     layer, mock_chainlit_context, mock_session
 ):
@@ -1813,7 +1992,7 @@ async def test_decorator_returns_none_without_running_on_reject(
     assert result is None
     assert calls == []
     assert entry.step.is_error is True
-    assert entry.step.output == "Approval rejected"
+    assert entry.step.output == "Approval rejected: not now"
     assert layer.steps[entry.step_id]["metadata"]["approval"]["status"] == "rejected"
 
 

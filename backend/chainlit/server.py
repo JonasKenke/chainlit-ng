@@ -2804,6 +2804,7 @@ _APPROVAL_STATUS_BY_DECISION: Dict[str, ApprovalStatus] = {
     "approve": "approved",
     "reject": "rejected",
     "edit": "edited",
+    "request_changes": "changes_requested",
 }
 
 
@@ -2815,6 +2816,7 @@ def _approval_response(record: dict, *, error: Optional[str] = None) -> dict:
         decidedBy=record.get("decidedBy"),
         decidedAt=record.get("decidedAt") or record.get("terminalAt"),
         terminalReason=record.get("terminalReason"),
+        reason=record.get("reason"),
         revision=int(record.get("revision", 1)),
         error=error,
     ).model_dump()

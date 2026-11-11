@@ -833,7 +833,10 @@ class TestApprovalEntryGuard:
         assert mock_session.current_task is None
         on_message.assert_not_awaited()
         context.emitter.process_message.assert_not_awaited()
-        context.emitter.send_toast.assert_awaited_once()
+        context.emitter.send_toast.assert_awaited_once_with(
+            "Resolve the pending approval or question before starting another run.",
+            "warning",
+        )
 
     async def test_edit_message_is_refused_before_chat_context_changes(self):
         on_message = AsyncMock()

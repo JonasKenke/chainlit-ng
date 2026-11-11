@@ -14,12 +14,14 @@ from chainlit.approval import (
     ApprovalNotFound,
     ApprovalNotPending,
     ApprovalNotReady,
+    ApprovalPending,
     ApprovalPersistenceError,
     ApprovalUnsupported,
     QuestionAlreadyAsked,
     QuestionInvalid,
     QuestionOption,
     ask,
+    guard_pending_approval,
     is_thread_deleted,
     mark_thread_deleted,
     supersede_thread_approvals,
@@ -77,6 +79,27 @@ async def _pending_question(step: Step, **kwargs):
             raise AssertionError(f"ask failed early: {task.exception()!r}")
         await asyncio.sleep(0.01)
     raise AssertionError("question entry was not registered")
+
+
+async def test_pending_question_blocks_a_new_run(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context:
+        step = Step(name="question-step", type="tool")
+        await step.send()
+        task, entry = await _pending_question(step)
+
+        with pytest.raises(ApprovalPending):
+            guard_pending_approval(step.thread_id)
+        assert guard_pending_approval("another-thread") is None
+
+        await _answer(mock_session, entry, text="staging")
+        await task
+
+    guard_pending_approval(step.thread_id)
 
 
 async def _answer(session, entry, *, option_id=None, text=None):

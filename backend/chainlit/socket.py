@@ -504,7 +504,8 @@ async def _refuse_if_approval_pending(session: WebsocketSession, context) -> boo
         guard_pending_approval(session.thread_id)
     except ApprovalPending:
         await context.emitter.send_toast(
-            "Resolve the pending approval before starting another run.", "warning"
+            "Resolve the pending approval or question before starting another run.",
+            "warning",
         )
         return True
     return False
