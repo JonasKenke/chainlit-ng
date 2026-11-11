@@ -11,6 +11,7 @@ import {
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 
 import { Messages } from '..';
+import { StepInteractions } from '../StepInteractions';
 import { AskActionButtons } from './AskActionButtons';
 import { AskFileButton } from './AskFileButton';
 import { MessageAvatar } from './Avatar';
@@ -46,6 +47,9 @@ const Message = memo(
       useContext(MessageContext);
     const layoutMaxWidth = useLayoutMaxWidth();
     const contentRef = useRef<HTMLDivElement>(null);
+    const interactions = (
+      <StepInteractions stepId={message.id} threadId={message.threadId} />
+    );
     const isUserMessage = message.type === 'user_message';
     const isStep = !message.type.includes('message');
     // Only keep tool calls if Chain of Thought is tool_call
@@ -73,17 +77,20 @@ const Message = memo(
 
     if (skip) {
       if (!message.steps) {
-        return null;
+        return interactions;
       }
       return (
-        <Messages
-          messages={message.steps}
-          elements={elements}
-          actions={actions}
-          indent={indent}
-          isRunning={isRunning}
-          scorableRun={scorableRun}
-        />
+        <>
+          {interactions}
+          <Messages
+            messages={message.steps}
+            elements={elements}
+            actions={actions}
+            indent={indent}
+            isRunning={isRunning}
+            scorableRun={scorableRun}
+          />
+        </>
       );
     }
 
@@ -198,6 +205,7 @@ const Message = memo(
             </div>
           </div>
         </div>
+        {interactions}
         {/* Make sure the child assistant messages of a step are displayed at the root level. */}
         {message.steps && isStep ? (
           <Messages

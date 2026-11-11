@@ -1,5 +1,5 @@
 import { MessageContext } from '@/contexts/MessageContext';
-import { useCallback, useContext, useMemo } from 'react';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -16,9 +16,7 @@ import {
   useSetChainlitState
 } from '@chainlit/react-client';
 
-import { ApprovalCard } from '@/components/chat/Approvals/ApprovalCard';
 import { Messages } from '@/components/chat/Messages';
-import { QuestionCard } from '@/components/chat/Questions/QuestionCard';
 import { useTranslation } from 'components/i18n/Translator';
 
 import { useSideElements } from './useSideElements';
@@ -103,6 +101,27 @@ const MessagesContainer = ({ navigate }: Props) => {
     (question) => question.live || question.threadId === threadId
   );
 
+  // Interactions render inline at their step. Scroll a newly pending card into
+  // view in case the chat is scrolled elsewhere.
+  const pendingApprovalId = approvals.find(
+    (approval) => approval.status === 'pending'
+  )?.id;
+  const pendingQuestionId = visibleQuestions.find(
+    (question) => question.status === 'pending'
+  )?.id;
+  useEffect(() => {
+    if (!pendingApprovalId && !pendingQuestionId) return;
+    const selector = pendingApprovalId
+      ? `[data-testid="approval-card"][data-approval-id="${pendingApprovalId}"]`
+      : `[data-testid="question-card"][data-question-id="${pendingQuestionId}"]`;
+    const frame = requestAnimationFrame(() => {
+      document
+        .querySelector(selector)
+        ?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingApprovalId, pendingQuestionId]);
+
   const onElementRefClick = useCallback(
     (element: IMessageElement) => {
       if (
@@ -164,13 +183,6 @@ const MessagesContainer = ({ navigate }: Props) => {
 
   return (
     <MessageContext.Provider value={memoizedContext}>
-      {approvals.length ? (
-        <div className="flex flex-col gap-2 py-2">
-          {approvals.map((approval) => (
-            <ApprovalCard key={approval.id} approval={approval} />
-          ))}
-        </div>
-      ) : null}
       <Messages
         indent={0}
         isRunning={loading}
@@ -178,13 +190,6 @@ const MessagesContainer = ({ navigate }: Props) => {
         elements={elements}
         actions={actions}
       />
-      {visibleQuestions.length ? (
-        <div className="flex flex-col gap-2 py-2">
-          {visibleQuestions.map((question) => (
-            <QuestionCard key={question.id} question={question} />
-          ))}
-        </div>
-      ) : null}
     </MessageContext.Provider>
   );
 };

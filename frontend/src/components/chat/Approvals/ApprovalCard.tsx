@@ -154,6 +154,7 @@ export const ApprovalCard = ({ approval }: Props) => {
   return (
     <section
       data-testid="approval-card"
+      data-approval-id={approval.id}
       aria-label={`Approval for ${approval.tool}`}
       className="rounded-lg border border-border bg-card p-4 text-card-foreground"
     >

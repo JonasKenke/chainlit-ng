@@ -80,6 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Warn when `LITERAL_API_KEY` is set, since the LiteralAI data layer was removed.
 - Raise `AttributeError` for unknown lazy `chainlit` attributes so `hasattr` works.
 - Serialize generation objects with `to_dict()` when persisting steps, preserving compatibility with legacy generation models.
+- Render pending approval and question cards inline at the step that created them, between the user's input and the assistant's follow-up, and scroll a newly pending card into view. Approvals previously rendered above the whole conversation and questions after every message, so the active controls could be misplaced or off-screen.
 
 ### Security
 

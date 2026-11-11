@@ -11,6 +11,7 @@ import BlinkingCursor from '@/components/BlinkingCursor';
 
 import { CompactSteps } from './CompactSteps';
 import { Message } from './Message';
+import { StepInteractions } from './StepInteractions';
 import { collectMessages, countVisibleSteps } from './compactSteps';
 
 interface Props {
@@ -88,6 +89,7 @@ const Messages = memo(
 
             return (
               <React.Fragment key={m.id}>
+                <StepInteractions stepId={m.id} threadId={m.threadId} />
                 {m.steps?.length ? (
                   showCompact ? (
                     <>

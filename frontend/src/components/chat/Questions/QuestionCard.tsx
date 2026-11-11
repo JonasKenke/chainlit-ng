@@ -82,6 +82,7 @@ export const QuestionCard = ({ question }: Props) => {
   return (
     <section
       data-testid="question-card"
+      data-question-id={question.id}
       aria-label={t('chat.question.ariaLabel')}
       aria-live="polite"
       className="rounded-lg border border-border bg-card p-4 text-card-foreground"
