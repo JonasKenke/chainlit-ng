@@ -825,7 +825,7 @@ class TestApprovalEntryGuard:
         ):
             yield context
 
-    async def test_client_message_is_refused(self, context, mock_session):
+    async def test_client_message_is_refused(self, context, mock_session, caplog):
         on_message = AsyncMock()
         with patch.object(config.code, "on_message", on_message):
             await message("sid", {"message": {"output": "hi"}})
@@ -833,10 +833,8 @@ class TestApprovalEntryGuard:
         assert mock_session.current_task is None
         on_message.assert_not_awaited()
         context.emitter.process_message.assert_not_awaited()
-        context.emitter.send_toast.assert_awaited_once_with(
-            "Resolve the pending approval or question before starting another run.",
-            "warning",
-        )
+        context.emitter.send_toast.assert_not_awaited()
+        assert "Refused a new run" in caplog.text
 
     async def test_edit_message_is_refused_before_chat_context_changes(self):
         on_message = AsyncMock()

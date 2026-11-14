@@ -503,9 +503,12 @@ async def _refuse_if_approval_pending(session: WebsocketSession, context) -> boo
     try:
         guard_pending_approval(session.thread_id)
     except ApprovalPending:
-        await context.emitter.send_toast(
-            "Resolve the pending approval or question before starting another run.",
-            "warning",
+        # The pending card is already visible in the client. Refusing a new run
+        # is a no-op for the user; do not add a toast that can repeat on every
+        # queued message.
+        logger.warning(
+            "Refused a new run for thread %s while an approval or question is pending.",
+            session.thread_id,
         )
         return True
     return False
