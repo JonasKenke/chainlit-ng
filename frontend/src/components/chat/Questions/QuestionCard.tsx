@@ -89,18 +89,20 @@ export const QuestionCard = ({ question }: Props) => {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="text-sm font-semibold">{t('chat.question.title')}</div>
-        <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          {t(statusKey[question.status])}
-        </span>
+        {question.status !== 'pending' ? (
+          <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t(statusKey[question.status])}
+          </span>
+        ) : null}
       </div>
 
-      <div className="mt-3 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2.5 text-sm leading-6">
+      <div className="mt-3 max-h-28 overflow-y-auto custom-scrollbar whitespace-pre-wrap rounded-md bg-muted/40 p-2.5 text-sm leading-6">
         <bdi dir="auto">{question.prompt}</bdi>
       </div>
 
       {canAnswer ? (
         <>
-          <div className="mt-3 max-h-[40vh] overflow-y-auto pr-1">
+          <div className="mt-3 max-h-[40vh] overflow-y-auto custom-scrollbar pr-1">
             {question.options.length ? (
               <fieldset className="mt-3">
                 <legend className="text-xs font-medium text-muted-foreground">

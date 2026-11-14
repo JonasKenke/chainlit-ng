@@ -458,7 +458,7 @@ export const ApprovalCard = ({ approval }: Props) => {
       {approval.content ? (
         <div
           data-testid="approval-content"
-          className="mt-3 max-h-64 overflow-y-auto pr-1 text-sm [&_td]:py-2 [&_th]:py-2 [&_th]:h-10"
+          className="mt-3 max-h-64 overflow-y-auto custom-scrollbar pr-1 text-sm [&_td]:py-2 [&_th]:py-2 [&_th]:h-10"
         >
           <Markdown allowHtml={allowHtml} latex={latex}>
             {approval.content}
@@ -491,7 +491,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Edit fields
           </div>
-          <div className="mt-3 max-h-[40vh] space-y-3 overflow-y-auto pr-1">
+          <div className="mt-3 max-h-[40vh] space-y-3 overflow-y-auto custom-scrollbar pr-1">
             {fields.map((field) => (
               <div key={field.name}>
                 <label

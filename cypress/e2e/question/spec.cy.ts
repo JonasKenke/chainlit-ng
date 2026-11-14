@@ -22,10 +22,6 @@ describe('Question card', () => {
       'contain',
       'Which environment should I deploy to?'
     );
-    cy.get('[data-testid="question-card"]').should(
-      'contain',
-      'Waiting for your answer'
-    );
     // The step that binds the ask is hidden by [UI] cot="hidden".
     cy.get('#question-step').should('not.exist');
 

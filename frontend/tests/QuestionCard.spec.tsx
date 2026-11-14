@@ -83,6 +83,7 @@ describe('QuestionCard', () => {
 
     expect(screen.getByTestId('question-card')).toBeInTheDocument();
     expect(screen.getByText('Question')).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for your answer')).toBeNull();
     expect(screen.getByText('Which environment?')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Staging/ })).toBeInTheDocument();
     expect(screen.getByLabelText('Other answer')).toBeInTheDocument();
