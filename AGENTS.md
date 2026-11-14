@@ -14,7 +14,7 @@ This repository is hosted on **OneDev**: for PR, issue, review, and merge operat
 
 ## Overview
 
-Chainlit is a Python framework for building production-ready conversational AI applications. It consists of a Python/FastAPI backend and a React frontend, with a pnpm monorepo for the JS packages.
+Chainlit NG is a maintained fork of Chainlit: a Python framework for building production-ready conversational AI applications. It consists of a Python/FastAPI backend and a React frontend, with a pnpm monorepo for the JS packages.
 
 ## Prerequisites
 
@@ -34,11 +34,11 @@ Chainlit is a Python framework for building production-ready conversational AI a
 
 ### Build
 
-|                   | Command                                      | Directory  | What it does                                                                              |
-| ----------------- | -------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------- |
-| All JS packages   | `pnpm build`                                 | repo root  | Build all workspace packages (frontend, react-client, copilot) via `pnpm run --recursive` |
-| Backend (PyPI)    | `uv build`                                   | `backend/` | Build Python package — builds JS assets first, then bundles into the Python distribution  |
-| Single JS package | `pnpm --filter @chainlit/react-client build` | repo root  | Build one package (useful for publishing)                                                 |
+|                   | Command                                         | Directory  | What it does                                                                              |
+| ----------------- | ----------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------- |
+| All JS packages   | `pnpm build`                                    | repo root  | Build all workspace packages (frontend, react-client, copilot) via `pnpm run --recursive` |
+| Backend (PyPI)    | `uv build`                                      | `backend/` | Build Python package — builds JS assets first, then bundles into the Python distribution  |
+| Single JS package | `pnpm --filter @chainlit-ng/react-client build` | repo root  | Build one package (useful for publishing)                                                 |
 
 ### Dev servers
 
@@ -120,7 +120,7 @@ Examples:
 backend/          # Python package (published to PyPI as "chainlit")
 frontend/         # React app (built output served by backend)
 libs/
-  react-client/   # @chainlit/react-client — published npm package with React hooks
+  react-client/   # @chainlit-ng/react-client — published npm package with React hooks
   copilot/        # Copilot widget (embedded chat bubble)
 cypress/          # E2E tests
 ```
@@ -155,12 +155,12 @@ React 19 + TypeScript 7 + Vite 8, styled with Tailwind CSS 4 and Radix UI primit
 - `main.tsx` — React root, wraps app state and the `ChainlitContext.Provider`
 - `App.tsx` — Handles auth readiness, chat profile selection, and WebSocket connection lifecycle
 - `router.tsx` — Client-side routes: `/` (Home), `/thread/:id`, `/element/:id`, `/login`, `/login/callback`, `/share/:id`, `/env`
-- `state/` — Zustand store for app-local composer, chat-settings, and user-environment state; `@chainlit/react-client` owns chat-session state
+- `state/` — Zustand store for app-local composer, chat-settings, and user-environment state; `@chainlit-ng/react-client` owns chat-session state
 - `components/chat/` — Core chat UI (message list, input bar, elements, audio)
 - `components/header/` — Top navigation bar
 - `components/LeftSidebar/` — Thread history sidebar
 
-### `@chainlit/react-client` (`libs/react-client/src/`)
+### `@chainlit-ng/react-client` (`libs/react-client/src/`)
 
 Publishable npm package — the bridge between the React UI and the backend WebSocket.
 

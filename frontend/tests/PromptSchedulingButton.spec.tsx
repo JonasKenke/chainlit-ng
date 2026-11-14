@@ -1,7 +1,6 @@
+import { IPrompt, IScheduledTask, useConfig } from '@chainlit-ng/react-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { IPrompt, IScheduledTask, useConfig } from '@chainlit/react-client';
 
 import { PromptSchedulingButton } from '@/components/chat/MessageComposer/PromptSchedulingButton';
 
@@ -22,7 +21,7 @@ vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({ t: (key: string) => key })
 }));
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useConfig: vi.fn(),
   usePromptGallery: () => ({ fetchPrompts }),
   useScheduledTasks: () => ({

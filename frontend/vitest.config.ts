@@ -10,7 +10,7 @@ export default mergeConfig(
   defineConfig({
     resolve: {
       alias: {
-        '@chainlit/react-client': path.resolve(
+        '@chainlit-ng/react-client': path.resolve(
           import.meta.dirname,
           '../libs/react-client/src/index.ts'
         ),

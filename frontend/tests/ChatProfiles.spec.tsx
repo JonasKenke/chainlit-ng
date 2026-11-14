@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn()
 }));
 
-vi.mock('@chainlit/react-client', async () => {
+vi.mock('@chainlit-ng/react-client', async () => {
   const { createContext } = await import('react');
 
   return {

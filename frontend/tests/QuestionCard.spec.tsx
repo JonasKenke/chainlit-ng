@@ -1,9 +1,8 @@
+import { ChainlitContext, type IQuestion } from '@chainlit-ng/react-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MessageContext } from 'contexts/MessageContext';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { ChainlitContext, type IQuestion } from '@chainlit/react-client';
 
 import { QuestionCard } from '@/components/chat/Questions/QuestionCard';
 
@@ -38,7 +37,7 @@ vi.mock('@/components/i18n/Translator', () => ({
   })
 }));
 
-vi.mock('@chainlit/react-client', async () => {
+vi.mock('@chainlit-ng/react-client', async () => {
   const ReactModule = await import('react');
   return {
     ChainlitContext: ReactModule.createContext({}),

@@ -10,7 +10,7 @@ require an authenticated websocket session, so the demo uses password auth.
 
 Click a starter or open the readme button (``chainlit.md``) for the command
 table, then send a command. ``help`` re-sends the table once the chat has
-started. ``changes`` shows the whole ``Unreleased`` changelog section in a side
+started. ``changes`` shows the whole ``3.0.0`` changelog section in a side
 panel; the other commands exercise the features that need a live session.
 """
 
@@ -82,7 +82,7 @@ DOCUMENT = """\
 """
 
 HELP = """\
-### Chainlit after 2.12.0
+### Chainlit NG 3.0 demo
 
 | command | shows |
 | --- | --- |
@@ -95,7 +95,7 @@ HELP = """\
 | `ask` | `cl.ask(...)` with options + free text and `as_tool_result()` provenance |
 | `media` | binary image element + `elements_position` |
 | `latex` | LaTeX rendering when `[features] latex = true`: inline `\\(...\\)` and the 254-character closer bound |
-| `changes` | the `Unreleased` changelog section in a side panel |
+| `changes` | the `3.0.0` changelog section in a side panel |
 | `config` | upload-directory, telemetry, and MCP configuration changes |
 | `request` | `cl.request()` connection context |
 
@@ -129,14 +129,19 @@ def _built_ui_has_cards() -> bool:
         return True
 
 
-def _unreleased_notes() -> str:
+def _release_notes() -> str:
     """Read the repository changelog at runtime so the demo stays current."""
     try:
         text = CHANGELOG.read_text(encoding="utf-8")
-        _, _, tail = text.partition("## [Unreleased]")
-        notes, separator, _ = tail.partition("\n## [2.12.0]")
+        _, separator, tail = text.partition("## [3.0.0]")
         if not separator:
             raise ValueError("release section not found")
+        heading = tail.find("###")
+        if heading == -1:
+            raise ValueError("release notes not found")
+        notes, separator, _ = tail[heading:].partition("\n## [2.12.0]")
+        if not separator:
+            raise ValueError("next release section not found")
         return notes.strip()
     except (OSError, ValueError):
         return "CHANGELOG.md is not reachable from this demo."
@@ -398,14 +403,14 @@ async def demo_help() -> None:
 
 async def demo_changes() -> None:
     details = cl.Text(
-        name="Unreleased changes",
-        content=_unreleased_notes(),
+        name="3.0.0 changes",
+        content=_release_notes(),
         display="side",
         auto_expand=False,
     )
     await cl.Message(
         content=(
-            "The `Unreleased` changelog is sent with `auto_expand=False`, then "
+            "The `3.0.0` changelog is sent with `auto_expand=False`, then "
             "opened explicitly by element id with `cl.open_side_view()`."
         ),
         elements=[details],
@@ -501,7 +506,7 @@ async def on_chat_start() -> None:
             "approvals and questions UI, so those cards cannot render and the "
             "backend step waits forever. From the repository root run:\n\n"
             "```bash\n"
-            "pnpm --filter @chainlit/react-client build\n"
+            "pnpm --filter @chainlit-ng/react-client build\n"
             "pnpm --filter @chainlit/app build\n"
             "```\n\n"
             "Then reload this page. If a step is already waiting, press "

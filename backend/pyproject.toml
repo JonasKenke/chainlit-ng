@@ -1,5 +1,5 @@
 [project]
-name = "chainlit"
+name = "chainlit-ng"
 dynamic = ["version"]
 keywords = [
     "LLM",
@@ -13,7 +13,7 @@ keywords = [
     "langchain",
     "conversational ai",
 ]
-description = "Build Conversational AI."
+description = "Chainlit NG: an actively maintained fork of Chainlit for production conversational AI apps."
 authors = [
     { name = "Willy Douhard" },
     { name = "Dan Andre Constantini" }
@@ -66,11 +66,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://chainlit.io/"
-Documentation = "https://docs.chainlit.io/"
-Repository = "https://github.com/Chainlit/chainlit"
+Homepage = "https://YOUR_GIT_HOST/Kreativhub/chainlit"
+Repository = "https://YOUR_GIT_HOST/Kreativhub/chainlit"
 
 [project.scripts]
+chainlit-ng = "chainlit.cli:cli"
 chainlit = "chainlit.cli:cli"
 
 [project.optional-dependencies]

@@ -1,3 +1,12 @@
+import {
+  ChainlitContext,
+  IAction,
+  ICustomElement,
+  IElement,
+  useAuth,
+  useChainlitStore,
+  useChatInteract
+} from '@chainlit-ng/react-client';
 import { MessageContext } from 'contexts/MessageContext';
 import {
   memo,
@@ -9,16 +18,6 @@ import {
 } from 'react';
 import { Runner } from 'react-runner';
 import { v4 as uuidv4 } from 'uuid';
-
-import {
-  ChainlitContext,
-  IAction,
-  ICustomElement,
-  IElement,
-  useAuth,
-  useChainlitStore,
-  useChatInteract
-} from '@chainlit/react-client';
 
 import Alert from '@/components/Alert';
 

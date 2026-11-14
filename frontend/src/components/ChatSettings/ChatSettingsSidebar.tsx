@@ -1,15 +1,14 @@
-import cloneDeep from 'lodash/cloneDeep';
-import mapValues from 'lodash/mapValues';
-import { ArrowLeft } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
-
 import {
   useChatData,
   useChatInteract,
   useConfig,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import cloneDeep from 'lodash/cloneDeep';
+import mapValues from 'lodash/mapValues';
+import { ArrowLeft } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';

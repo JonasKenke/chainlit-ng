@@ -1,6 +1,5 @@
+import type { IMessageElement } from '@chainlit-ng/react-client';
 import { ArrowLeft } from 'lucide-react';
-
-import type { IMessageElement } from '@chainlit/react-client';
 
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 

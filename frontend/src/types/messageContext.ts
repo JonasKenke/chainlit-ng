@@ -4,7 +4,7 @@ import type {
   IFileRef,
   IMessageElement,
   IStep
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
 
 interface IMessageContext {
   uploadFile?: (

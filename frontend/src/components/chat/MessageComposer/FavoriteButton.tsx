@@ -1,17 +1,16 @@
 import { cn } from '@/lib/utils';
 import {
+  useChainlitStore,
+  useChatInteract,
+  useConfig
+} from '@chainlit-ng/react-client';
+import {
   Popover,
   PopoverContent,
   PopoverTrigger
 } from '@radix-ui/react-popover';
 import { Star, Trash } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-
-import {
-  useChainlitStore,
-  useChatInteract,
-  useConfig
-} from '@chainlit/react-client';
 
 import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';

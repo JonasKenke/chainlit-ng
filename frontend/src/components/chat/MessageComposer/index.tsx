@@ -1,5 +1,16 @@
 import { MESSAGE_TOO_LARGE, isMessageTooLarge } from '@/lib/utils';
 import {
+  FileSpec,
+  IStep,
+  useAuth,
+  useChainlitState,
+  useChainlitStore,
+  useChatData,
+  useChatInteract,
+  useConfig
+} from '@chainlit-ng/react-client';
+import type { IMode, IModeOption } from '@chainlit-ng/react-client';
+import {
   MutableRefObject,
   useCallback,
   useEffect,
@@ -9,18 +20,6 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
-
-import {
-  FileSpec,
-  IStep,
-  useAuth,
-  useChainlitState,
-  useChainlitStore,
-  useChatData,
-  useChatInteract,
-  useConfig
-} from '@chainlit/react-client';
-import type { IMode, IModeOption } from '@chainlit/react-client';
 
 import { Settings } from '@/components/icons/Settings';
 import { Button } from '@/components/ui/button';

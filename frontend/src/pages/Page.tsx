@@ -1,6 +1,9 @@
+import {
+  useAuth,
+  useChainlitStore,
+  useConfig
+} from '@chainlit-ng/react-client';
 import { Navigate } from 'react-router-dom';
-
-import { useAuth, useChainlitStore, useConfig } from '@chainlit/react-client';
 
 import ChatSettingsSidebar from '@/components/ChatSettings/ChatSettingsSidebar';
 import ElementSideView from '@/components/ElementSideView';

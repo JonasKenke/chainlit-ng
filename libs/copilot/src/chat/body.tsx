@@ -1,3 +1,8 @@
+import {
+  useChatData,
+  useChatInteract,
+  useConfig
+} from '@chainlit-ng/react-client';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -14,11 +19,6 @@ import { useLayoutMaxWidth } from '@chainlit/app/src/hooks/useLayoutMaxWidth';
 import { useUpload } from '@chainlit/app/src/hooks/useUpload';
 import { IAttachment } from '@chainlit/app/src/state/chat';
 import { useAppStore } from '@chainlit/app/src/state/store';
-import {
-  useChatData,
-  useChatInteract,
-  useConfig
-} from '@chainlit/react-client';
 
 import WelcomeScreen from '@/components/WelcomeScreen';
 import ElementSideView from 'components/ElementSideView';

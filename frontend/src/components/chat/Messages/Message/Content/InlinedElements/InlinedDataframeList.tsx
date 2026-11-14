@@ -1,4 +1,4 @@
-import type { IDataframeElement } from '@chainlit/react-client';
+import type { IDataframeElement } from '@chainlit-ng/react-client';
 
 import { LazyDataframe } from '@/components/Elements/LazyDataframe';
 

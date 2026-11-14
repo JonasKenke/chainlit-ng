@@ -1,9 +1,3 @@
-import capitalize from 'lodash/capitalize';
-import { LogOut, Trash2 } from 'lucide-react';
-import { useContext, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-
 import {
   ChainlitContext,
   ClientError,
@@ -13,7 +7,12 @@ import {
   useChatSession,
   useConfig,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import capitalize from 'lodash/capitalize';
+import { LogOut, Trash2 } from 'lucide-react';
+import { useContext, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 
 import {
   AlertDialog,

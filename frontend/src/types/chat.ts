@@ -1,4 +1,4 @@
-import { Socket } from '@chainlit/react-client';
+import { Socket } from '@chainlit-ng/react-client';
 
 export interface IToken {
   id: number | string;

@@ -1,12 +1,11 @@
-import { MessageContext } from 'contexts/MessageContext';
-import { useCallback, useContext, useMemo, useState } from 'react';
-import { toast } from 'sonner';
-
 import {
   ChainlitContext,
   type IAction,
   useChainlitStore
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { MessageContext } from 'contexts/MessageContext';
+import { useCallback, useContext, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 import Icon from '@/components/Icon';
 import { Loader } from '@/components/Loader';

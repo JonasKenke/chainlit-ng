@@ -1,8 +1,7 @@
+import { useChainlitStore, useChatInteract } from '@chainlit-ng/react-client';
 import { useEffect } from 'react';
 
 import Page from 'pages/Page';
-
-import { useChainlitStore, useChatInteract } from '@chainlit/react-client';
 
 import Chat from '@/components/chat';
 

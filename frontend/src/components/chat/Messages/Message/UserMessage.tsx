@@ -1,16 +1,15 @@
 import { MESSAGE_TOO_LARGE, cn, isMessageTooLarge } from '@/lib/utils';
-import { MessageContext } from 'contexts/MessageContext';
-import { Star } from 'lucide-react';
-import { memo, useContext, useMemo, useState } from 'react';
-import { toast } from 'sonner';
-
 import {
   IMessageElement,
   IStep,
   useChatInteract,
   useConfig,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { MessageContext } from 'contexts/MessageContext';
+import { Star } from 'lucide-react';
+import { memo, useContext, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 import AutoResizeTextarea from '@/components/AutoResizeTextarea';
 import { BookmarkButton } from '@/components/chat/Messages/Message/Buttons/BookmarkButton';

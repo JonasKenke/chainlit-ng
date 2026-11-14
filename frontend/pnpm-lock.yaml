@@ -29,7 +29,7 @@ importers:
 
   .:
     dependencies:
-      '@chainlit/react-client':
+      '@chainlit-ng/react-client':
         specifier: workspace:^
         version: link:../libs/react-client
       '@hookform/resolvers':

@@ -1,8 +1,7 @@
+import { IStep, useConfig, usePromptGallery } from '@chainlit-ng/react-client';
 import { Bookmark } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-
-import { IStep, useConfig, usePromptGallery } from '@chainlit/react-client';
 
 import { PromptSaveDialog } from '@/components/PromptSaveDialog';
 import { useTranslation } from '@/components/i18n/Translator';

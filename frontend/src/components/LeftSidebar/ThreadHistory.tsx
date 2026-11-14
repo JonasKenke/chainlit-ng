@@ -1,12 +1,11 @@
-import { uniqBy } from 'lodash';
-import { useContext, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-
 import {
   ChainlitContext,
   useChainlitState,
   useChatMessages
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { uniqBy } from 'lodash';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import {
   SidebarContent,

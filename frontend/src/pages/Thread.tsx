@@ -1,15 +1,14 @@
-import { useEffect } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
-
-import Page from 'pages/Page';
-
 import {
   useChainlitStore,
   useChatInteract,
   useChatMessages,
   useConfig,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useEffect } from 'react';
+import { useLocation, useParams } from 'react-router-dom';
+
+import Page from 'pages/Page';
 
 import AutoResumeThread from '@/components/AutoResumeThread';
 import { Loader } from '@/components/Loader';

@@ -5,11 +5,10 @@ import {
   formatSkillTimestamp,
   skillErrorDetail
 } from '@/lib/skills';
+import { ISkill, useSkills } from '@chainlit-ng/react-client';
 import { Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-
-import { ISkill, useSkills } from '@chainlit/react-client';
 
 import { SkillEditorDialog } from '@/components/SkillEditorDialog';
 import { useTranslation } from '@/components/i18n/Translator';

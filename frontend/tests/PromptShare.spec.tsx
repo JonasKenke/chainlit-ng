@@ -1,3 +1,5 @@
+// ── imports after mocks ────────────────────────────────────────────────────
+import { ChainlitContext } from '@chainlit-ng/react-client';
 import {
   act,
   fireEvent,
@@ -8,9 +10,6 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import PromptSharePage from '@/pages/PromptShare';
-
-// ── imports after mocks ────────────────────────────────────────────────────
-import { ChainlitContext } from '@chainlit/react-client';
 
 // ── hoisted mocks (must be defined before vi.mock factories run) ────────────
 const navigateMock = vi.hoisted(() => vi.fn());
@@ -39,7 +38,7 @@ vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({ t: (k: string) => k })
 }));
 
-vi.mock('@chainlit/react-client', async () => {
+vi.mock('@chainlit-ng/react-client', async () => {
   const { createContext } = await import('react');
   return {
     ChainlitContext: createContext<any>(undefined),

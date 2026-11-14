@@ -1,8 +1,7 @@
+import { type ChainlitAPI, getChainlitStore } from '@chainlit-ng/react-client';
 import { act, renderHook } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-
-import { type ChainlitAPI, getChainlitStore } from '@chainlit/react-client';
 
 import {
   AppStateProvider,

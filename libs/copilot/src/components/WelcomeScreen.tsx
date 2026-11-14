@@ -1,8 +1,8 @@
+import { useChatMessages } from '@chainlit-ng/react-client';
 import { useEffect, useState } from 'react';
 
 import Starters from '@chainlit/app/src/components/chat/Starters';
 import { cn, hasMessage } from '@chainlit/app/src/lib/utils';
-import { useChatMessages } from '@chainlit/react-client';
 
 export default function WelcomeScreen() {
   const { messages } = useChatMessages();

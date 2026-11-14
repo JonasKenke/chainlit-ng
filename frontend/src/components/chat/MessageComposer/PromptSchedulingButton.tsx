@@ -1,5 +1,15 @@
 import { cn } from '@/lib/utils';
 import {
+  ChatProfile,
+  IPrompt,
+  IScheduledTask,
+  IScheduledTaskPayload,
+  useChainlitStore,
+  useConfig,
+  usePromptGallery,
+  useScheduledTasks
+} from '@chainlit-ng/react-client';
+import {
   Clock,
   ExternalLink,
   Pause,
@@ -10,17 +20,6 @@ import {
   Trash2
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-
-import {
-  ChatProfile,
-  IPrompt,
-  IScheduledTask,
-  IScheduledTaskPayload,
-  useChainlitStore,
-  useConfig,
-  usePromptGallery,
-  useScheduledTasks
-} from '@chainlit/react-client';
 
 import Translator, { useTranslation } from '@/components/i18n/Translator';
 import {

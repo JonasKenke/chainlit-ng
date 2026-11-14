@@ -1,13 +1,12 @@
-import cloneDeep from 'lodash/cloneDeep';
-import mapValues from 'lodash/mapValues';
-import { useCallback, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
-
 import {
   useChatData,
   useChatInteract,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import cloneDeep from 'lodash/cloneDeep';
+import mapValues from 'lodash/mapValues';
+import { useCallback, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
 
 import { Button } from '@/components/ui/button';
 import {

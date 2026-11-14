@@ -1,10 +1,9 @@
-import { useEffect, useRef } from 'react';
-
 import {
   useChatInteract,
   useChatSession,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useEffect, useRef } from 'react';
 
 import { useCopilotStore } from '../state';
 import ChatBody from './body';

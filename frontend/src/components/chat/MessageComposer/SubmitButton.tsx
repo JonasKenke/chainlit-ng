@@ -2,7 +2,7 @@ import {
   useChatData,
   useChatInteract,
   useChatMessages
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
 
 import { Send } from '@/components/icons/Send';
 import { Stop } from '@/components/icons/Stop';

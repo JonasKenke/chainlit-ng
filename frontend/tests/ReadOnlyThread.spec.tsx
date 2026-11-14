@@ -32,9 +32,9 @@ const thread = {
   elements: []
 };
 
-vi.mock('@chainlit/react-client', async (importOriginal) => {
+vi.mock('@chainlit-ng/react-client', async (importOriginal) => {
   const original =
-    await importOriginal<typeof import('@chainlit/react-client')>();
+    await importOriginal<typeof import('@chainlit-ng/react-client')>();
   return {
     ...original,
     useApi: () => ({ data: thread, error: null, isLoading: false }),

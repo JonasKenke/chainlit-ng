@@ -1,11 +1,10 @@
-import { MessageContext } from 'contexts/MessageContext';
-import React, { memo, useContext, useMemo } from 'react';
-
 import {
   type IAction,
   type IMessageElement,
   type IStep
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { MessageContext } from 'contexts/MessageContext';
+import React, { memo, useContext, useMemo } from 'react';
 
 import BlinkingCursor from '@/components/BlinkingCursor';
 

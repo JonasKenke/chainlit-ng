@@ -43,7 +43,7 @@ packageConfigs:
       'cross-spawn@>=7.0.0 <7.0.5': '>=7.0.5'
       'immutable@>=3.0.0 <3.8.4': '>=3.8.4 <4.0.0'
       'immutable@>=4.0.0 <4.3.9': '>=4.3.9 <5.0.0'
-  '@chainlit/react-client':
+  '@chainlit-ng/react-client':
     overrides:
       'vite@>=4.4.0 <4.4.12': '>=4.4.12'
       '@adobe/css-tools@<4.3.2': '>=4.3.2'

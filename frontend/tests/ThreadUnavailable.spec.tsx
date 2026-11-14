@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
   clear: vi.fn()
 }));
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useChainlitStore: (selector: (state: any) => unknown) =>
     selector({ unavailableThreadId: state.unavailableThreadId }),
   useChatInteract: () => ({ clear: state.clear }),

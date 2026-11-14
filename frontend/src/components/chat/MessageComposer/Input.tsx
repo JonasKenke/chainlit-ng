@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { ICommand, useChainlitStore } from '@chainlit-ng/react-client';
 import React, {
   forwardRef,
   useEffect,
@@ -6,8 +7,6 @@ import React, {
   useRef,
   useState
 } from 'react';
-
-import { ICommand, useChainlitStore } from '@chainlit/react-client';
 
 import AutoResizeTextarea from '@/components/AutoResizeTextarea';
 import Icon from '@/components/Icon';

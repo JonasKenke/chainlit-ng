@@ -1,6 +1,5 @@
+import { ChainlitAPI, ClientError } from '@chainlit-ng/react-client';
 import { toast } from 'sonner';
-
-import { ChainlitAPI, ClientError } from '@chainlit/react-client';
 
 export function makeApiClient(
   chainlitServer: string,

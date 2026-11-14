@@ -210,13 +210,15 @@ class TestDefaultMarkdownStr:
 
     def test_default_markdown_str_contains_welcome(self):
         """Test that DEFAULT_MARKDOWN_STR contains welcome message."""
-        assert "Welcome to Chainlit" in DEFAULT_MARKDOWN_STR
+        assert "Welcome to Chainlit NG" in DEFAULT_MARKDOWN_STR
 
     def test_default_markdown_str_contains_links(self):
         """Test that DEFAULT_MARKDOWN_STR contains useful links."""
         assert "Documentation" in DEFAULT_MARKDOWN_STR
-        assert "Discord" in DEFAULT_MARKDOWN_STR
-        assert "https://docs.chainlit.io" in DEFAULT_MARKDOWN_STR
+        assert "Repository" in DEFAULT_MARKDOWN_STR
+        assert (
+            "https://YOUR_GIT_HOST/Kreativhub/chainlit" in DEFAULT_MARKDOWN_STR
+        )
 
     def test_default_markdown_str_is_valid_markdown(self):
         """Test that DEFAULT_MARKDOWN_STR contains valid markdown syntax."""

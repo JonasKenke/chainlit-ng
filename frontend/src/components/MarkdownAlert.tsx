@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { useConfig } from '@chainlit-ng/react-client';
 import {
   AlertCircle,
   AlertTriangle,
@@ -17,8 +18,6 @@ import {
 // unist-util-visit is a utility for walking AST (Abstract Syntax Tree) nodes in markdown processing,
 // used here to find and transform ::: alert syntax into Alert components
 import { visit } from 'unist-util-visit';
-
-import { useConfig } from '@chainlit/react-client';
 
 import { useTranslation } from '@/components/i18n/Translator';
 

@@ -1,8 +1,7 @@
+import { IStep } from '@chainlit-ng/react-client';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MessageContext, defaultMessageContext } from 'contexts/MessageContext';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { IStep } from '@chainlit/react-client';
 
 import UserMessage from '@/components/chat/Messages/Message/UserMessage';
 
@@ -26,7 +25,7 @@ vi.mock('@/components/chat/Messages/Message/Buttons/BookmarkButton', () => ({
   BookmarkButton: () => null
 }));
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useChatInteract: () => ({ editMessage, toggleMessageFavorite: vi.fn() }),
   useConfig: () => ({ config: { features: { favorites: false } } }),
   useSetChainlitState: () => setMessages

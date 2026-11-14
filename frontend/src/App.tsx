@@ -1,10 +1,9 @@
 import getRouterBasename from '@/lib/router';
 import { cn } from '@/lib/utils';
+import { useAuth, useChatSession, useConfig } from '@chainlit-ng/react-client';
 import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { router } from 'router';
-
-import { useAuth, useChatSession, useConfig } from '@chainlit/react-client';
 
 import ChatSettingsModal from './components/ChatSettings';
 import { ThemeProvider } from './components/ThemeProvider';

@@ -1,21 +1,20 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   ChainlitAPI,
   ChainlitContext,
   type IThread,
   type ThreadHistory,
   getChainlitStore
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter, useLocation } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThreadList } from '@/components/LeftSidebar/ThreadList';
 import { SidebarProvider } from '@/components/ui/sidebar';
 
-vi.mock('@chainlit/react-client', async () => ({
-  ...(await vi.importActual<typeof import('@chainlit/react-client')>(
-    '@chainlit/react-client'
+vi.mock('@chainlit-ng/react-client', async () => ({
+  ...(await vi.importActual<typeof import('@chainlit-ng/react-client')>(
+    '@chainlit-ng/react-client'
   )),
   useConfig: () => ({
     config: { threadResumable: true, dataPersistence: true }

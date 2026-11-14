@@ -1,12 +1,11 @@
-import { memo } from 'react';
-import { useNavigate } from 'react-router-dom';
-
 import {
   useAudio,
   useAuth,
   useChatData,
   useConfig
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { memo } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import AudioPresence from '@/components/AudioPresence';
 import ButtonLink from '@/components/ButtonLink';

@@ -1,15 +1,14 @@
-import { MessageContext } from 'contexts/MessageContext';
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
-
 import {
   ChainlitContext,
   IApproval,
   IApprovalEditField,
   useChainlitStore,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { MessageContext } from 'contexts/MessageContext';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 
 import { Markdown } from '@/components/Markdown';
 import { Button } from '@/components/ui/button';

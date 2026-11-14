@@ -1,3 +1,4 @@
+import { IDataframeElement } from '@chainlit-ng/react-client';
 import {
   createColumnHelper,
   createPaginatedRowModel,
@@ -10,8 +11,6 @@ import {
 } from '@tanstack/react-table';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
-
-import { IDataframeElement } from '@chainlit/react-client';
 
 import Alert from '@/components/Alert';
 import { Loader } from '@/components/Loader';

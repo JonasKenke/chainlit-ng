@@ -298,7 +298,7 @@ last argument. See [Per-user OAuth for MCP connections](mcp-oauth.md).
 
 ### 5. Client library changes
 
-The next `@chainlit/react-client` release ships `0.7.0` for this port (the manifest is still `0.6.0`).
+These client changes ship in `@chainlit-ng/react-client` `3.0.0`; the previous manifest was `0.6.0`.
 
 | 2.11 method                                                             | 2.12.0 replacement                                                                |
 | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- |

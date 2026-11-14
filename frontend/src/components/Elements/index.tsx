@@ -1,4 +1,4 @@
-import type { IMessageElement } from '@chainlit/react-client';
+import type { IMessageElement } from '@chainlit-ng/react-client';
 
 import { AudioElement } from './Audio';
 import { FileElement } from './File';

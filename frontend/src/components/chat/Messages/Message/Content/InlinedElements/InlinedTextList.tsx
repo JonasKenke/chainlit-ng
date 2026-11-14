@@ -1,4 +1,4 @@
-import type { ITextElement } from '@chainlit/react-client';
+import type { ITextElement } from '@chainlit-ng/react-client';
 
 import { TextElement } from '@/components/Elements/Text';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

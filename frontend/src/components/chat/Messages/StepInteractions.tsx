@@ -1,4 +1,4 @@
-import { useChainlitStore } from '@chainlit/react-client';
+import { useChainlitStore } from '@chainlit-ng/react-client';
 
 import { ApprovalCard } from '@/components/chat/Approvals/ApprovalCard';
 import { QuestionCard } from '@/components/chat/Questions/QuestionCard';

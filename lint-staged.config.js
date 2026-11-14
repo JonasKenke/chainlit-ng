@@ -8,7 +8,7 @@ module.exports = {
   'frontend/**/*.{ts,tsx}': [() => 'pnpm --filter @chainlit/app type-check'],
 
   'libs/react-client/**/*.{ts,tsx}': [
-    () => 'pnpm --filter @chainlit/react-client type-check'
+    () => 'pnpm --filter @chainlit-ng/react-client type-check'
   ],
 
   // TODO: Re-enable copilot type-check after fixing cross-project path alias mismatch.

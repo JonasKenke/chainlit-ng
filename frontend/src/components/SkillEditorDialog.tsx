@@ -5,9 +5,8 @@ import {
   skillErrorDetail,
   validateSkill
 } from '@/lib/skills';
+import { ISkill, useConfig } from '@chainlit-ng/react-client';
 import { useEffect, useState } from 'react';
-
-import { ISkill, useConfig } from '@chainlit/react-client';
 
 import { Markdown } from '@/components/Markdown';
 import { useTranslation } from '@/components/i18n/Translator';

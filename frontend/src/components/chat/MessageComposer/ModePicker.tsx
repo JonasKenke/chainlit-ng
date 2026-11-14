@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { ChainlitContext, IMode, IModeOption } from '@chainlit-ng/react-client';
 import {
   Popover,
   PopoverContent,
@@ -6,8 +7,6 @@ import {
 } from '@radix-ui/react-popover';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useContext, useRef, useState } from 'react';
-
-import { ChainlitContext, IMode, IModeOption } from '@chainlit/react-client';
 
 import Icon from '@/components/Icon';
 import { Button } from '@/components/ui/button';

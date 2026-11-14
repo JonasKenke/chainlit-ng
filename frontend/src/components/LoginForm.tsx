@@ -1,9 +1,8 @@
 import { cn } from '@/lib/utils';
+import { ClientError } from '@chainlit-ng/react-client';
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-
-import { ClientError } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

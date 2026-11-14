@@ -1,7 +1,6 @@
 import { cn } from '@/lib/utils';
+import { useChatData, useConfig } from '@chainlit-ng/react-client';
 import useSWR from 'swr';
-
-import { useChatData, useConfig } from '@chainlit/react-client';
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';

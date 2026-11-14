@@ -1,14 +1,13 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-
 import {
   useChainlitState,
   useChatInteract,
   useChatMessages,
   useChatSession,
   useConfig
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 
 interface Props {
   id: string;

@@ -1,4 +1,8 @@
 import { cn } from '@/lib/utils';
+import {
+  ChainlitContext,
+  type IMessageElement
+} from '@chainlit-ng/react-client';
 import { omit } from 'lodash';
 import { useContext, useMemo } from 'react';
 import ReactMarkdown, { type Options } from 'react-markdown';
@@ -8,8 +12,6 @@ import remarkDirective from 'remark-directive';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math-extended';
 import { visit } from 'unist-util-visit';
-
-import { ChainlitContext, type IMessageElement } from '@chainlit/react-client';
 
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Card } from '@/components/ui/card';

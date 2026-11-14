@@ -1,6 +1,6 @@
-# Chainlit after 2.12.0
+# Chainlit NG 3.0 demo
 
-This app demonstrates the user-visible changes in the `Unreleased` changelog
+This app demonstrates the user-visible changes in the `3.0.0` changelog
 section after the 2.12.0 release.
 
 Sign in with **demo / demo**, then click a starter or send a command from the
@@ -17,7 +17,7 @@ table below. Send `help` to show the table again in the chat.
 | `ask`      | `cl.ask(...)` with options + free text and `as_tool_result()` provenance                              |
 | `media`    | 96x64 PNG sent as bytes, plus `elements_position="above"`                                             |
 | `latex`    | LaTeX rendering when `[features] latex = true`; reports the current setting                           |
-| `changes`  | the `Unreleased` changelog section in a side panel                                                    |
+| `changes`  | the `3.0.0` changelog section in a side panel                                                         |
 | `config`   | upload-directory, telemetry, and MCP configuration changes                                            |
 | `request`  | `cl.request()` connection context                                                                     |
 

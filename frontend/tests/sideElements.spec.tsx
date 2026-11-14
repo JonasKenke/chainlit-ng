@@ -1,8 +1,7 @@
+import type { IMessageElement } from '@chainlit-ng/react-client';
 import { renderHook } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-
-import type { IMessageElement } from '@chainlit/react-client';
 
 import { useSideElements } from '@/components/chat/MessagesContainer/useSideElements';
 

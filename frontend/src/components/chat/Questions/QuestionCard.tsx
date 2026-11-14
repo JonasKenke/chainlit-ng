@@ -1,14 +1,13 @@
-import { useContext, useState } from 'react';
-import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
-
 import {
   ChainlitContext,
   IQuestion,
   IQuestionOption,
   useChainlitStore,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useContext, useState } from 'react';
+import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 
 import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';

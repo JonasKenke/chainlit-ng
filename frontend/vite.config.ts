@@ -20,7 +20,7 @@ export default defineConfig({
     tsconfigPaths: true,
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
-      // To prevent conflicts with packages in @chainlit/react-client, we need to specify the resolution paths for these dependencies.
+      // To prevent conflicts with packages in @chainlit-ng/react-client, we need to specify the resolution paths for these dependencies.
       react: path.resolve(import.meta.dirname, './node_modules/react'),
       'usehooks-ts': path.resolve(
         import.meta.dirname,

@@ -1,4 +1,4 @@
-# Chainlit Development Instructions
+# Chainlit NG Development Instructions
 
 Chainlit is a Python framework for building conversational AI applications with Python backend and React frontend. It uses uv for Python dependency management and pnpm for Node.js packages.
 

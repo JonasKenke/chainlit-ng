@@ -1,7 +1,6 @@
+import { useChainlitStore, useConfig } from '@chainlit-ng/react-client';
 import { Plug } from 'lucide-react';
 import { useState } from 'react';
-
-import { useChainlitStore, useConfig } from '@chainlit/react-client';
 
 import { Button } from '@/components/ui/button';
 import {

@@ -1,6 +1,5 @@
+import { ChainlitAPI } from '@chainlit-ng/react-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { ChainlitAPI } from '@chainlit/react-client';
 
 describe('respondToQuestion', () => {
   afterEach(() => {

@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { useConfig } from '@chainlit-ng/react-client';
 import { MessageCircle, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -9,7 +10,6 @@ import {
   PopoverContent,
   PopoverTrigger
 } from '@chainlit/app/src/components/ui/popover';
-import { useConfig } from '@chainlit/react-client';
 
 import Header from './components/Header';
 

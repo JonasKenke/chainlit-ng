@@ -1,14 +1,13 @@
 import { cn } from '@/lib/utils';
-import { Library } from 'lucide-react';
-import { useContext, useState } from 'react';
-import { toast } from 'sonner';
-
 import {
   ChainlitContext,
   IMcpPrompt,
   IMcpResource,
   useChainlitStore
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { Library } from 'lucide-react';
+import { useContext, useState } from 'react';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

@@ -1,4 +1,4 @@
-import type { IAudioElement } from '@chainlit/react-client';
+import type { IAudioElement } from '@chainlit-ng/react-client';
 
 import { AudioElement } from '@/components/Elements/Audio';
 

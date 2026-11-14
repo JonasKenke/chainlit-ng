@@ -1,7 +1,6 @@
+import { useChatInteract } from '@chainlit-ng/react-client';
 import { useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-
-import { useChatInteract } from '@chainlit/react-client';
 
 import { useCopilotStore } from '../state';
 

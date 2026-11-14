@@ -1,6 +1,5 @@
+import type { IPdfElement } from '@chainlit-ng/react-client';
 import { Suspense, lazy } from 'react';
-
-import type { IPdfElement } from '@chainlit/react-client';
 
 import { Skeleton } from '@/components/ui/skeleton';
 

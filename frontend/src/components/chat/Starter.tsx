@@ -1,6 +1,3 @@
-import { useCallback, useContext } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-
 import {
   ChainlitContext,
   IStarter,
@@ -9,7 +6,9 @@ import {
   useChainlitStore,
   useChatData,
   useChatInteract
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useCallback, useContext } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 
 import { Button } from '@/components/ui/button';
 

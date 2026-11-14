@@ -1,13 +1,12 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   ChainlitAPI,
   ChainlitContext,
   ClientError,
   type IMcp,
   getChainlitStore
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { McpAddForm } from '@/components/chat/MessageComposer/Mcp/AddForm';
 import { McpList } from '@/components/chat/MessageComposer/Mcp/List';

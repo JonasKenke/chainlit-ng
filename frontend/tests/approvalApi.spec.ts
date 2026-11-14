@@ -1,6 +1,5 @@
+import { ChainlitAPI, ClientError } from '@chainlit-ng/react-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { ChainlitAPI, ClientError } from '@chainlit/react-client';
 
 describe('respondToApproval', () => {
   afterEach(() => {

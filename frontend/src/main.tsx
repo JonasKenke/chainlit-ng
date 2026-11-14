@@ -1,9 +1,8 @@
+import { ChainlitContext } from '@chainlit-ng/react-client';
 import AppWrapper from 'AppWrapper';
 import { apiClient } from 'api';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-
-import { ChainlitContext } from '@chainlit/react-client';
 
 import { AppStateProvider } from './state/store';
 

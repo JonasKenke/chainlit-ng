@@ -1,7 +1,6 @@
+import { IStep, useConfig } from '@chainlit-ng/react-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-
-import { IStep, useConfig } from '@chainlit/react-client';
 
 import { BookmarkButton } from '@/components/chat/Messages/Message/Buttons/BookmarkButton';
 
@@ -20,7 +19,7 @@ vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({ t: (key: string) => key })
 }));
 
-vi.mock('@chainlit/react-client', async () => ({
+vi.mock('@chainlit-ng/react-client', async () => ({
   useConfig: vi.fn(),
   usePromptGallery: () => ({ savePrompt: savePromptMock })
 }));

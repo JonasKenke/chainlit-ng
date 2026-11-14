@@ -1,8 +1,7 @@
 import { MAX_SKILL_MARKDOWN_BYTES } from '@/lib/skills';
+import type { ISkill } from '@chainlit-ng/react-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { ISkill } from '@chainlit/react-client';
 
 import { SkillsPanel } from '@/components/chat/MessageComposer/SkillsPanel';
 
@@ -27,7 +26,7 @@ vi.mock('@/components/Markdown', () => ({
   Markdown: ({ children }: { children: string }) => <pre>{children}</pre>
 }));
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useConfig: () => ({ config: { features: { latex: false } } }),
   useSkills: () => ({
     skills: state.skills,

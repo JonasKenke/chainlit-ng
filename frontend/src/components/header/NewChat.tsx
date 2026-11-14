@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
-
 import {
   useChainlitStore,
   useChatInteract,
   useConfig
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import React, { useState } from 'react';
 
 import { Translator, useTranslation } from '@/components/i18n';
 import { Button } from '@/components/ui/button';

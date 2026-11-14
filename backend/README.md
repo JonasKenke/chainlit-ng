@@ -1,67 +1,35 @@
-<h1 align="center">Welcome to Chainlit 👋</h1>
+<h1 align="center">Chainlit NG</h1>
 
 <p align="center">
-<b>Build python production-ready conversational AI applications in minutes, not weeks ⚡️</b>
-
-</p>
-<p align="center">
-   <a href="https://discord.gg/k73SQ3FyUh" target="_blank">
-   <img src="https://img.shields.io/discord/1088038867602526210?logo=discord&labelColor=%20%235462eb&logoColor=%20%23f5f5f5&color=%20%235462eb"
-      alt="chat on Discord"></a>
-    <a href="https://twitter.com/chainlit_io" rel="nofollow"><img alt="Twitter" src="https://img.shields.io/twitter/url/https/twitter.com/chainlit_io.svg?style=social&label=Follow%20%40chainlit_io" style="max-width:100%;"></a>
-    <a href="https://pypistats.org/packages/chainlit" rel="nofollow"><img alt="Downloads" src="https://img.shields.io/pypi/dm/chainlit" style="max-width:100%;"></a>
-        <a href="https://github.com/chainlit/chainlit/graphs/contributors" rel="nofollow"><img alt="Contributors" src="https://img.shields.io/github/contributors/chainlit/chainlit" style="max-width:100%;"></a>
-    <a href="https://github.com/Chainlit/chainlit/actions/workflows/ci.yaml" rel="nofollow"><img alt="CI" src="https://github.com/Chainlit/chainlit/actions/workflows/ci.yaml/badge.svg" style="max-width:100%;"></a>
+  <b>Build production-ready conversational AI applications in Python.</b><br />
+  Tool-call approvals, agent questions, observability, and a modern React 19 frontend.
 </p>
 
-> ⚠️ **Notice:** Chainlit is now community-maintained.
->
-> As of May 1st 2025, the original Chainlit team has stepped back from active development. The project is maintained by @Chainlit/chainlit-maintainers under a formal Maintainer Agreement.
->
-> Maintainers are responsible for code review, releases, and security.  
-> Chainlit SAS provides no warranties on future updates.
->
-> Want to help maintain? [Apply here →](https://docs.google.com/forms/d/e/1FAIpQLSf6CllNWnKBnDIoj0m-DnHU6b0dj8HYFGixKy-_qNi_rD4iNA/viewform)
+> **Fork notice:** Chainlit NG is an independent fork of the original [Chainlit](https://github.com/Chainlit/chainlit) project. The upstream project is no longer actively maintained. This line continues development with security fixes and new interaction features.
 
-<p align="center">
-    <a href="https://chainlit.io"><b>Website</b></a>  •  
-    <a href="https://docs.chainlit.io"><b>Documentation</b></a>  •  
-    <a href="https://help.chainlit.io"><b>Chainlit Help</b></a>  •  
-    <a href="https://github.com/Chainlit/cookbook"><b>Cookbook</b></a>
-</p>
-
-<p align="center">
-    <a href="https://trendshift.io/repositories/6708" target="_blank"><img src="https://trendshift.io/api/badge/repositories/6708" alt="Chainlit%2Fchainlit | Trendshift" style="width: 250px; height: 45px;" width="250" height="45"/></a>
-</p>
-
-https://github.com/user-attachments/assets/b3738aba-55c0-42fa-ac00-6efd1ee0d148
-
-## Installation
-
-Open a terminal and run:
+## Install
 
 ```sh
-pip install chainlit
-chainlit hello
+pip install chainlit-ng
 ```
 
-If this opens the `hello app` in your browser, you're all set!
+Requires Python 3.10 or newer.
 
-### Development version
+The Python import is unchanged:
 
-The latest in-development version can be installed straight from GitHub with:
+```python
+import chainlit as cl
+```
+
+The CLI is `chainlit-ng`. The `chainlit` command remains as an alias, so existing scripts and deployment commands keep working.
 
 ```sh
-pip install git+https://github.com/Chainlit/chainlit.git#subdirectory=backend/
+chainlit-ng hello
 ```
 
-(Requires Node and pnpm installed on the system.)
+## Quickstart
 
-## 🚀 Quickstart
-
-### 🐍 Pure Python
-
-Create a new file `demo.py` with the following code:
+Create `demo.py`:
 
 ```python
 import chainlit as cl
@@ -69,50 +37,53 @@ import chainlit as cl
 
 @cl.step(type="tool")
 async def tool():
-    # Fake tool
     await cl.sleep(2)
     return "Response from the tool!"
 
 
-@cl.on_message  # this function will be called every time a user inputs a message in the UI
+@cl.on_message
 async def main(message: cl.Message):
-    """
-    This function is called every time a user inputs a message in the UI.
-    It sends back an intermediate response from the tool, followed by the final answer.
-
-    Args:
-        message: The user's message.
-
-    Returns:
-        None.
-    """
-
-    # Call the tool
     tool_res = await tool()
-
     await cl.Message(content=tool_res).send()
 ```
 
-Now run it!
+Run it with auto-reload:
 
 ```sh
-chainlit run demo.py -w
+chainlit-ng run demo.py -w
 ```
 
-<img src="/images/quick-start.png" alt="Quick Start"></img>
+## What's new in 3.0
 
-## 📚 More Examples - Cookbook
+- **Tool-call approvals** with schema-generated edit forms and request-changes feedback.
+- **`cl.ask` questions** with options, free text, and explicit answer provenance.
+- **Thread sharing** with opt-in, read-only grants for named users.
+- **Safer MCP**: named servers, a user-server URL allowlist, and per-user OAuth.
+- **OpenTelemetry export** with a fixed redaction allowlist.
+- **Skills, prompt gallery, and scheduled prompts.**
+- **UI improvements**: message timestamps, compact chain-of-thought, side-view by element id, and a configurable upload directory.
 
-You can find various examples of Chainlit apps [here](https://github.com/Chainlit/cookbook) that leverage tools and services such as OpenAI, Anthropiс, LangChain, LlamaIndex, ChromaDB, Pinecone and more.
+Screenshots and the full feature overview are in the [repository README](https://YOUR_GIT_HOST/Kreativhub/chainlit/-/blob/main/README.md).
 
-Tell us what you would like to see added in Chainlit using the Github issues or on [Discord](https://discord.gg/k73SQ3FyUh).
+## Security
 
-## 💁 Contributing
+Security fixes in this line include the MCP fixes for CVE-2026-45018 and CVE-2026-45019, Azure AD hybrid state and `id_token` verification with a per-login nonce, lone-surrogate request handling, element ownership checks, upload validation, markdown and media hardening, thread-grant ACLs, and OpenTelemetry redaction and export bounds. This is not a claim that every upstream bug is fixed.
 
-As an open-source initiative in a rapidly evolving domain, we welcome contributions, be it through the addition of new features or the improvement of documentation.
+See the [MCP advisory](https://YOUR_GIT_HOST/Kreativhub/chainlit/-/blob/main/docs/security-advisory-2026-mcp.md) and the [changelog](https://YOUR_GIT_HOST/Kreativhub/chainlit/-/blob/main/CHANGELOG.md).
 
-For detailed information on how to contribute, see [here](/CONTRIBUTING.md).
+## Migrating from Chainlit 2.x
 
-## 📃 License
+The [3.0 migration guide](https://YOUR_GIT_HOST/Kreativhub/chainlit/-/blob/main/docs/migration-3.0.md) covers the package and CLI rename, the npm package rename, the Recoil to Zustand state change, and breaking configuration updates.
 
-Chainlit is open-source and licensed under the [Apache 2.0](LICENSE) license.
+```sh
+pip uninstall chainlit
+pip install chainlit-ng==3.0.0
+```
+
+## Documentation
+
+Guides for approvals, questions, thread sharing, MCP OAuth, telemetry, skills, and scheduled prompts live in the [docs directory](https://YOUR_GIT_HOST/Kreativhub/chainlit/-/tree/main/docs).
+
+## License
+
+Apache License 2.0. Chainlit NG is an independent fork of [Chainlit](https://github.com/Chainlit/chainlit); the original authors and contributors retain credit for the code and documentation they wrote.

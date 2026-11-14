@@ -1,8 +1,7 @@
 import { hasMessage } from '@/lib/utils';
+import { useChatMessages, useConfig } from '@chainlit-ng/react-client';
 import { Share2 } from 'lucide-react';
 import { useState } from 'react';
-
-import { useChatMessages, useConfig } from '@chainlit/react-client';
 
 import ShareDialog from '@/components/share/ShareDialog';
 import { Button } from '@/components/ui/button';

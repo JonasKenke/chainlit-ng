@@ -1,15 +1,14 @@
 import { cn } from '@/lib/utils';
-import { Link, LogIn, RefreshCw, Trash2, Wrench } from 'lucide-react';
-import { useContext, useState } from 'react';
-import { toast } from 'sonner';
-
 import {
   ChainlitContext,
   IMcp,
   sanitizeMcpUrl,
   useChainlitState,
   useChainlitStore
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { Link, LogIn, RefreshCw, Trash2, Wrench } from 'lucide-react';
+import { useContext, useState } from 'react';
+import { toast } from 'sonner';
 
 import CopyButton from '@/components/CopyButton';
 import {

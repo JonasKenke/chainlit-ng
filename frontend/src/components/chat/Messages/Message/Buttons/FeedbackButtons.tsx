@@ -1,12 +1,11 @@
 import { MessageContext } from '@/contexts/MessageContext';
-import { MessageCircle, ThumbsDown, ThumbsUp } from 'lucide-react';
-import { useCallback, useContext, useState } from 'react';
-
 import {
   IStep,
   useChainlitStore,
   useChatSession
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { MessageCircle, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { useCallback, useContext, useState } from 'react';
 
 import { useTranslation } from '@/components/i18n/Translator';
 import Translator from '@/components/i18n/Translator';

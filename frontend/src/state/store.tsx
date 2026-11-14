@@ -1,3 +1,4 @@
+import type { ICommand } from '@chainlit-ng/react-client';
 import {
   type PropsWithChildren,
   createContext,
@@ -6,8 +7,6 @@ import {
 } from 'react';
 import { useStore } from 'zustand';
 import { type StoreApi, createStore } from 'zustand/vanilla';
-
-import type { ICommand } from '@chainlit/react-client';
 
 type Update<T> = T | ((current: T) => T);
 

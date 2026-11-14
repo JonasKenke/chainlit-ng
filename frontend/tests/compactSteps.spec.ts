@@ -1,6 +1,5 @@
+import type { IStep } from '@chainlit-ng/react-client';
 import { describe, expect, it } from 'vitest';
-
-import type { IStep } from '@chainlit/react-client';
 
 import {
   collectMessages,

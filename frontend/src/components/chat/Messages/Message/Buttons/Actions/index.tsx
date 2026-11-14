@@ -1,4 +1,4 @@
-import { IAction } from '@chainlit/react-client';
+import { IAction } from '@chainlit-ng/react-client';
 
 import { ActionButton } from './ActionButton';
 

@@ -1,11 +1,10 @@
+import * as ChainlitReactClient from '@chainlit-ng/react-client';
 import * as LucideIcons from 'lucide-react';
 import React from 'react';
 import * as ReactHookForm from 'react-hook-form';
 import * as Sonner from 'sonner';
 import * as Zod from 'zod';
 import * as Zustand from 'zustand';
-
-import * as ChainlitReactClient from '@chainlit/react-client';
 
 import * as Markdown from '@/components/Markdown';
 import * as AccordionComponents from '@/components/ui/accordion';
@@ -42,7 +41,7 @@ const Imports = {
   sonner: Sonner,
   zod: Zod,
   zustand: Zustand,
-  '@chainlit/react-client': ChainlitReactClient,
+  '@chainlit-ng/react-client': ChainlitReactClient,
   '@/components/markdown': Markdown,
   'react-hook-form': ReactHookForm,
   'lucide-react': LucideIcons,

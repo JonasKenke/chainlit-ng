@@ -45,7 +45,7 @@ jobs:
         name: Install Node, pnpm and dependencies.
 
       - name: Build react-client
-        run: pnpm --filter @chainlit/react-client build
+        run: pnpm --filter @chainlit-ng/react-client build
 
       - name: Publish packages to npm
         # --no-git-checks allows testing from non-main branches and publishing from release tags

@@ -1,4 +1,4 @@
-import type { ICustomElement } from '@chainlit/react-client';
+import type { ICustomElement } from '@chainlit-ng/react-client';
 
 import { LazyCustomElement } from '@/components/Elements/LazyCustomElement';
 

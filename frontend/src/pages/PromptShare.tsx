@@ -1,17 +1,16 @@
 import getRouterBasename from '@/lib/router';
-import { useContext, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { toast } from 'sonner';
-
-import Page from 'pages/Page';
-
 import {
   ChainlitContext,
   IPrompt,
   useAuth,
   useConfig,
   usePromptGallery
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useContext, useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { toast } from 'sonner';
+
+import Page from 'pages/Page';
 
 import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';

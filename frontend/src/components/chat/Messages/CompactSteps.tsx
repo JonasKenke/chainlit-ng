@@ -1,8 +1,11 @@
 import { cn } from '@/lib/utils';
+import type {
+  IAction,
+  IMessageElement,
+  IStep
+} from '@chainlit-ng/react-client';
 import { MessageContext } from 'contexts/MessageContext';
 import { memo, useContext, useMemo, useState } from 'react';
-
-import type { IAction, IMessageElement, IStep } from '@chainlit/react-client';
 
 import {
   Accordion,

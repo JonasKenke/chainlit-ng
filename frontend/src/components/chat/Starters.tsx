@@ -1,7 +1,6 @@
 import { cn } from '@/lib/utils';
+import { useChatSession, useConfig } from '@chainlit-ng/react-client';
 import { useMemo, useState } from 'react';
-
-import { useChatSession, useConfig } from '@chainlit/react-client';
 
 import Starter from './Starter';
 import StarterCategory from './StarterCategory';

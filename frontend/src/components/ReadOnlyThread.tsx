@@ -1,9 +1,4 @@
 import { MessageContext } from '@/contexts/MessageContext';
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-
 import {
   ChainlitContext,
   IAction,
@@ -18,7 +13,11 @@ import {
   useChainlitStore,
   useConfig,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 

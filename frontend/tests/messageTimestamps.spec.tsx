@@ -1,9 +1,8 @@
+import type { IStep } from '@chainlit-ng/react-client';
+import { useConfig } from '@chainlit-ng/react-client';
 import { render } from '@testing-library/react';
 import { MessageContext, defaultMessageContext } from 'contexts/MessageContext';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { IStep } from '@chainlit/react-client';
-import { useConfig } from '@chainlit/react-client';
 
 import { Message } from '@/components/chat/Messages/Message';
 
@@ -12,7 +11,7 @@ vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({ t: (key: string) => key })
 }));
 
-vi.mock('@chainlit/react-client', async () => {
+vi.mock('@chainlit-ng/react-client', async () => {
   const { createContext } = await import('react');
   return {
     ChainlitContext: createContext(undefined),

@@ -1,8 +1,7 @@
+import type { IApproval, IQuestion, IStep } from '@chainlit-ng/react-client';
 import { render, screen } from '@testing-library/react';
 import { MessageContext, defaultMessageContext } from 'contexts/MessageContext';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { IApproval, IQuestion, IStep } from '@chainlit/react-client';
 
 import { Message } from '@/components/chat/Messages/Message';
 
@@ -61,9 +60,9 @@ vi.mock('@/hooks/useLayoutMaxWidth', () => ({
   useLayoutMaxWidth: () => 800
 }));
 
-vi.mock('@chainlit/react-client', async (importOriginal) => {
+vi.mock('@chainlit-ng/react-client', async (importOriginal) => {
   const original =
-    await importOriginal<typeof import('@chainlit/react-client')>();
+    await importOriginal<typeof import('@chainlit-ng/react-client')>();
   return {
     ...original,
     useChainlitStore: (

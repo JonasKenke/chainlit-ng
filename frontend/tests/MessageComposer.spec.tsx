@@ -36,7 +36,7 @@ vi.mock('@/hooks/use-mobile', () => ({
   useIsMobile: () => false
 }));
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useAuth: () => ({ user: { identifier: 'alice' } }),
   useChatData: () => chatData,
   useChatInteract: () => ({

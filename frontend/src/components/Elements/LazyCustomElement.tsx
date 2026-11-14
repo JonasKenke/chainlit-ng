@@ -1,6 +1,5 @@
+import type { ICustomElement } from '@chainlit-ng/react-client';
 import { Suspense, lazy } from 'react';
-
-import type { ICustomElement } from '@chainlit/react-client';
 
 import { Skeleton } from '@/components/ui/skeleton';
 

@@ -1,6 +1,6 @@
 [dependency-groups]
 dev = ["actionlint-py>=1.7.12.24"]
-backend = ["chainlit"]
+backend = ["chainlit-ng"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -79,7 +79,7 @@ default-groups = ["backend"]
 package = false
 
 [tool.uv.sources]
-chainlit = { workspace = true }
+chainlit-ng = { workspace = true }
 
 [tool.uv.workspace]
 members = ["backend"]

@@ -1,22 +1,21 @@
 ## Overview
 
-The `@chainlit/react-client` package provides a set of React hooks as well as an API client to connect to your [Chainlit](https://github.com/Chainlit/chainlit) application from any React application. The package includes hooks for managing chat sessions, messages, data, and interactions.
+The `@chainlit-ng/react-client` package provides a set of React hooks as well as an API client to connect to your [Chainlit](https://github.com/Chainlit/chainlit) application from any React application. The package includes hooks for managing chat sessions, messages, data, and interactions.
 
 ## Installation
 
 To install the package, run the following command in your project directory:
 
 ```sh
-npm install @chainlit/react-client
+npm install @chainlit-ng/react-client
 ```
 
 The package uses a Zustand store scoped to each `ChainlitAPI` instance. No state provider is needed; wrap your app in `ChainlitContext.Provider`:
 
 ```tsx
+import { ChainlitAPI, ChainlitContext } from '@chainlit-ng/react-client';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-
-import { ChainlitAPI, ChainlitContext } from '@chainlit/react-client';
 
 const CHAINLIT_SERVER_URL = 'http://localhost:8000';
 
@@ -48,7 +47,7 @@ This hook is responsible for managing the chat session's connection to the WebSo
 #### Example
 
 ```jsx
-import { useChatSession } from '@chainlit/react-client';
+import { useChatSession } from '@chainlit-ng/react-client';
 
 const ChatComponent = () => {
   const { connect, disconnect, chatProfile, setChatProfile } = useChatSession();
@@ -80,7 +79,7 @@ This hook provides access to the chat messages and the first user message.
 #### Example
 
 ```jsx
-import { useChatMessages } from '@chainlit/react-client';
+import { useChatMessages } from '@chainlit-ng/react-client';
 
 const MessagesComponent = () => {
   const { messages, firstUserMessage } = useChatMessages();
@@ -118,7 +117,7 @@ This hook provides access to various chat-related data and states.
 #### Example
 
 ```jsx
-import { useChatData } from '@chainlit/react-client';
+import { useChatData } from '@chainlit-ng/react-client';
 
 const ChatDataComponent = () => {
   const { loading, connected, error } = useChatData();
@@ -149,7 +148,7 @@ This hook provides methods to interact with the chat, such as sending messages, 
 #### Example
 
 ```jsx
-import { useChatInteract } from '@chainlit/react-client';
+import { useChatInteract } from '@chainlit-ng/react-client';
 
 const InteractionComponent = () => {
   const { sendMessage, replyMessage } = useChatInteract();

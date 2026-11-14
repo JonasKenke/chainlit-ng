@@ -1,3 +1,5 @@
+import { useChainlitState } from '@chainlit-ng/react-client';
+
 import { Element } from '@chainlit/app/src/components/Elements';
 import {
   Dialog,
@@ -5,7 +7,6 @@ import {
   DialogHeader,
   DialogTitle
 } from '@chainlit/app/src/components/ui/dialog';
-import { useChainlitState } from '@chainlit/react-client';
 
 export default function ElementSideView() {
   const [sideView, setSideView] = useChainlitState('sideView');

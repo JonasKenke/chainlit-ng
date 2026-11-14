@@ -4,7 +4,18 @@ All notable changes to Chainlit will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [3.0.0] - 2026-11-14
+
+### Changed
+
+- Rebrand the project as **Chainlit NG**, an independent fork that continues
+  the chainlit 2.x line now that the original project is no longer actively
+  maintained upstream. The Python distribution is `chainlit-ng`; the import
+  stays `import chainlit as cl`, and the CLI adds `chainlit-ng` while keeping
+  `chainlit` as an alias. The published React client is
+  `@chainlit-ng/react-client`. Both are released as `3.0.0`.
+- See the [3.0 migration guide](docs/migration-3.0.md) for the package renames,
+  the Recoil to Zustand state change, and the breaking configuration updates.
 
 ### Added
 
@@ -68,7 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   telemetry guide now covers verify/disable, resource-attribute exclusion, and
   the failure matrix. See [the telemetry guide](docs/telemetry.md).
 - **Breaking (MCP):** Configure MCP servers by name under `[[features.mcp.servers]]`; the client no longer supplies stdio commands or named-server URLs. User-provided SSE/streamable-HTTP servers require `[features.mcp.user_servers]` with `enabled = true` and `allowed_urls`. Legacy `[features.mcp.sse|stdio|streamable-http]` keys (including `allowed_executables`) abort startup only when `features.mcp.enabled = true`; MCP remains off by default. See the [2.12.0 MCP advisory and migration guide](docs/security-advisory-2026-mcp.md#migrating-a-211-config).
-- **Breaking (`@chainlit/react-client`):** `connectMcp(sessionId, name)` replaces the removed `connectStdioMCP`, `connectSseMCP` and `connectStreamableHttpMCP`; user-provided servers use `connectUserMcp(...)`. The next release bumps the package to `0.7.0`; see the [client migration table](docs/security-advisory-2026-mcp.md#5-client-library-changes).
+- **Breaking (`@chainlit-ng/react-client`):** `connectMcp(sessionId, name)` replaces the removed `connectStdioMCP`, `connectSseMCP` and `connectStreamableHttpMCP`; user-provided servers use `connectUserMcp(...)`. The next release bumps the package to `3.0.0`; see the [client migration table](docs/security-advisory-2026-mcp.md#5-client-library-changes).
 
 ### Fixed
 

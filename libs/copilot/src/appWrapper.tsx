@@ -1,10 +1,10 @@
+import { ChainlitContext } from '@chainlit-ng/react-client';
 import { makeApiClient } from 'api';
 import { useEffect, useState } from 'react';
 import { IWidgetConfig } from 'types';
 
 import { i18nSetupLocalization } from '@chainlit/app/src/i18n';
 import { AppStateProvider } from '@chainlit/app/src/state/store';
-import { ChainlitContext } from '@chainlit/react-client';
 
 import App from './app';
 

@@ -1,6 +1,6 @@
-# Chainlit after 2.12.0 — demo
+# Chainlit NG 3.0 demo
 
-One small app for the user-visible features and fixes in the `Unreleased`
+One small app for the user-visible features and fixes in the `3.0.0`
 section of the repository changelog. The `changes` command reads that section
 at runtime and shows it in a side panel.
 
@@ -16,7 +16,7 @@ rebuild it first:
 
 ```bash
 # from the repository root
-pnpm --filter @chainlit/react-client build
+pnpm --filter @chainlit-ng/react-client build
 pnpm --filter @chainlit/app build
 ```
 
@@ -51,7 +51,7 @@ also clears pending approvals (they are in memory only).
 | `ask`      | `cl.ask` options + free text, `as_tool_result()` provenance                       |
 | `media`    | visible 96x64 PNG sent as bytes, `elements_position="above"`                      |
 | `latex`    | reports `[features] latex`; demo of inline math when enabled                      |
-| `changes`  | full `Unreleased` changelog in a side panel                                       |
+| `changes`  | full `3.0.0` changelog in a side panel                                            |
 | `config`   | upload-directory, telemetry, and MCP config changes                               |
 | `request`  | `cl.request()` connection context                                                 |
 

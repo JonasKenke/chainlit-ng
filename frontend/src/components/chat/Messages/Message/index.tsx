@@ -1,12 +1,11 @@
 import { cn } from '@/lib/utils';
-import { MessageContext } from 'contexts/MessageContext';
-import { memo, useContext, useMemo, useRef } from 'react';
-
 import {
   type IAction,
   type IMessageElement,
   type IStep
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { MessageContext } from 'contexts/MessageContext';
+import { memo, useContext, useMemo, useRef } from 'react';
 
 import { useLayoutMaxWidth } from 'hooks/useLayoutMaxWidth';
 

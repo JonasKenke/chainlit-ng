@@ -92,7 +92,7 @@ explicitly in `oauth_authorization_origins`.
    Chainlit receives `mcp_connected`.
 4. You can remove a pending entry to cancel the flow.
 
-With `@chainlit/react-client`, the same request is:
+With `@chainlit-ng/react-client`, the same request is:
 
 ```ts
 await api.connectUserMcp(

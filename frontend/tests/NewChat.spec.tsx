@@ -12,7 +12,7 @@ const { mockClear, pendingState } = vi.hoisted(() => ({
 }));
 const mockUseConfig = vi.fn();
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useChatInteract: () => ({ clear: mockClear }),
   useChainlitStore: (selector: (state: typeof pendingState) => unknown) =>
     selector(pendingState),

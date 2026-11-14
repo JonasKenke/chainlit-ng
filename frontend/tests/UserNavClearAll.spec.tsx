@@ -1,4 +1,11 @@
 import {
+  ChainlitAPI,
+  ChainlitContext,
+  type IThread,
+  type ThreadHistory,
+  getChainlitStore
+} from '@chainlit-ng/react-client';
+import {
   act,
   fireEvent,
   render,
@@ -8,23 +15,15 @@ import {
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  ChainlitAPI,
-  ChainlitContext,
-  type IThread,
-  type ThreadHistory,
-  getChainlitStore
-} from '@chainlit/react-client';
-
 import UserNav from '@/components/header/UserNav';
 
 const { mockConfig } = vi.hoisted(() => ({
   mockConfig: { threadClearAll: true } as Record<string, unknown>
 }));
 
-vi.mock('@chainlit/react-client', async () => ({
-  ...(await vi.importActual<typeof import('@chainlit/react-client')>(
-    '@chainlit/react-client'
+vi.mock('@chainlit-ng/react-client', async () => ({
+  ...(await vi.importActual<typeof import('@chainlit-ng/react-client')>(
+    '@chainlit-ng/react-client'
   )),
   useConfig: () => ({ config: mockConfig }),
   useAuth: () => ({

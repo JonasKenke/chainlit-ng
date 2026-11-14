@@ -1,8 +1,7 @@
 import { cn } from '@/lib/utils';
+import { useChainlitState } from '@chainlit-ng/react-client';
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useState } from 'react';
-
-import { useChainlitState } from '@chainlit/react-client';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { ResizableHandle, ResizablePanel } from '@/components/ui/resizable';

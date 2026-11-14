@@ -1,7 +1,6 @@
+import { type IStep } from '@chainlit-ng/react-client';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-
-import { type IStep } from '@chainlit/react-client';
 
 // @ts-expect-error inline css
 import sonnercss from './sonner.css?inline';

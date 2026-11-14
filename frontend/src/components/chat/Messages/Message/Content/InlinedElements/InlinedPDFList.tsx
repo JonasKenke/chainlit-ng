@@ -1,4 +1,4 @@
-import type { IPdfElement } from '@chainlit/react-client';
+import type { IPdfElement } from '@chainlit-ng/react-client';
 
 import { LazyPDF } from '@/components/Elements/LazyPDF';
 

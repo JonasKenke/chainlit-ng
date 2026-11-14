@@ -1,14 +1,13 @@
-import { act, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import {
   ChainlitAPI,
   ChainlitContext,
   getChainlitStore,
   useChatInteract,
   useChatSession
-} from '@chainlit/react-client';
-import type { IMessageElement } from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import type { IMessageElement } from '@chainlit-ng/react-client';
+import { act, render } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { io, sockets } from './mocks/socket.io-client';
 

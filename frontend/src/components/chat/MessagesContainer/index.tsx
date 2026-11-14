@@ -1,7 +1,4 @@
 import { MessageContext } from '@/contexts/MessageContext';
-import { useCallback, useContext, useEffect, useMemo } from 'react';
-import { toast } from 'sonner';
-
 import {
   ChainlitContext,
   IFeedback,
@@ -14,7 +11,9 @@ import {
   useChatMessages,
   useConfig,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
 
 import { Messages } from '@/components/chat/Messages';
 import { useTranslation } from 'components/i18n/Translator';

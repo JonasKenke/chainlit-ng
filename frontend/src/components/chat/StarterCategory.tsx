@@ -1,4 +1,4 @@
-import { IStarterCategory } from '@chainlit/react-client';
+import { IStarterCategory } from '@chainlit-ng/react-client';
 
 import { Button } from '@/components/ui/button';
 

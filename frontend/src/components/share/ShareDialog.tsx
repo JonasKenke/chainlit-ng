@@ -1,13 +1,12 @@
 import { getAppUrl } from '@/lib/router';
-import { useCallback, useContext, useMemo, useState } from 'react';
-import { toast } from 'sonner';
-
 import {
   ChainlitContext,
   ClientError,
   useChainlitStore,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useCallback, useContext, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import {

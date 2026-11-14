@@ -1,3 +1,4 @@
+import { IPrompt, useConfig } from '@chainlit-ng/react-client';
 import {
   act,
   fireEvent,
@@ -6,8 +7,6 @@ import {
   waitFor
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { IPrompt, useConfig } from '@chainlit/react-client';
 
 import { PromptGalleryButton } from '@/components/chat/MessageComposer/PromptGalleryButton';
 
@@ -43,7 +42,7 @@ vi.mock('@/components/i18n/Translator', () => ({
   })
 }));
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useConfig: vi.fn(),
   usePromptGallery: () => ({
     fetchPrompts: fetchPromptsMock,

@@ -1,3 +1,4 @@
+import { IChainlitConfig, useAudio } from '@chainlit-ng/react-client';
 import { ChevronsRight, Maximize, Minimize, PanelRight } from 'lucide-react';
 
 import AudioPresence from '@chainlit/app/src/components/AudioPresence';
@@ -12,7 +13,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from '@chainlit/app/src/components/ui/dropdown-menu';
-import { IChainlitConfig, useAudio } from '@chainlit/react-client';
 
 import { useCopilotInteract } from '../hooks';
 import { DisplayMode } from '../types';

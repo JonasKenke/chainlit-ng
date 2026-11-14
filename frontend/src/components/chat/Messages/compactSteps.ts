@@ -1,4 +1,4 @@
-import type { IStep } from '@chainlit/react-client';
+import type { IStep } from '@chainlit-ng/react-client';
 
 export type CotMode = 'hidden' | 'tool_call' | 'full';
 

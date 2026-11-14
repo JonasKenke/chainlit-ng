@@ -7,6 +7,7 @@ See also:
 
 ## Guides
 
+- [Migrating to Chainlit NG 3.0.0](migration-3.0.md)
 - [Request context in callbacks](request-context.md)
 - [Skills: app-directory instructions and progressive disclosure](skills.md)
 - [Per-user OAuth for MCP connections](mcp-oauth.md)

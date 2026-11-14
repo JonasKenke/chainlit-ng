@@ -1,4 +1,4 @@
-import { IAction, type IStep } from '@chainlit/react-client';
+import { IAction, type IStep } from '@chainlit-ng/react-client';
 
 import CopyButton from '@/components/CopyButton';
 

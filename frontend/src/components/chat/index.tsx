@@ -1,8 +1,3 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
-
 import {
   useAuth,
   useChatData,
@@ -10,7 +5,11 @@ import {
   useChatMessages,
   useConfig,
   useSetChainlitState
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 
 import Alert from '@/components/Alert';
 import { TaskList } from '@/components/Tasklist';

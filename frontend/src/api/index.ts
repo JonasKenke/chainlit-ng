@@ -1,7 +1,6 @@
 import getRouterBasename from '@/lib/router';
+import { ChainlitAPI, ClientError } from '@chainlit-ng/react-client';
 import { toast } from 'sonner';
-
-import { ChainlitAPI, ClientError } from '@chainlit/react-client';
 
 const devServer =
   (import.meta.env.VITE_API_URL || 'http://localhost:8000') +

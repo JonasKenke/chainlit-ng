@@ -1,6 +1,5 @@
+import type { IMessageElement } from '@chainlit-ng/react-client';
 import { useEffect, useRef } from 'react';
-
-import type { IMessageElement } from '@chainlit/react-client';
 
 type SideView = {
   title: string;

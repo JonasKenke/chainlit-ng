@@ -1,8 +1,7 @@
 import { cn } from '@/lib/utils';
+import type { IStep } from '@chainlit-ng/react-client';
+import { useConfig } from '@chainlit-ng/react-client';
 import { memo, useMemo } from 'react';
-
-import type { IStep } from '@chainlit/react-client';
-import { useConfig } from '@chainlit/react-client';
 
 interface Props {
   createdAt?: IStep['createdAt'];

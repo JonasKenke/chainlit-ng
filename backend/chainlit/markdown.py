@@ -7,16 +7,18 @@ from chainlit.logger import logger
 from ._utils import is_path_inside
 
 # Default chainlit.md file created if none exists
-DEFAULT_MARKDOWN_STR = """# Welcome to Chainlit! 🚀🤖
+DEFAULT_MARKDOWN_STR = """# Welcome to Chainlit NG! 🚀🤖
 
-Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
+Hi there, Developer! 👋 We're excited to have you on board. Chainlit NG is a
+maintained fork of Chainlit for prototyping, debugging and sharing applications
+built on top of LLMs.
 
 ## Useful Links 🔗
 
-- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
-- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
+- **Documentation:** Browse the [Chainlit NG docs](https://YOUR_GIT_HOST/Kreativhub/chainlit/-/tree/main/docs) 📚
+- **Repository:** [Kreativhub/chainlit](https://YOUR_GIT_HOST/Kreativhub/chainlit) 💬
 
-We can't wait to see what you create with Chainlit! Happy coding! 💻😊
+We can't wait to see what you create with Chainlit NG! Happy coding! 💻😊
 
 ## Welcome screen
 

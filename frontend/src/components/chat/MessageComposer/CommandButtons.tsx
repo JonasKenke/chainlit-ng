@@ -1,8 +1,7 @@
 import { cn } from '@/lib/utils';
+import { ICommand, useChainlitStore } from '@chainlit-ng/react-client';
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-
-import { ICommand, useChainlitStore } from '@chainlit/react-client';
 
 import Icon from '@/components/Icon';
 import { Button } from '@/components/ui/button';

@@ -1,7 +1,6 @@
+import { IStep, useConfig } from '@chainlit-ng/react-client';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { IStep, useConfig } from '@chainlit/react-client';
 
 import { FavoriteButton } from '@/components/chat/MessageComposer/FavoriteButton';
 
@@ -26,7 +25,7 @@ vi.mock('@/components/i18n/Translator', () => ({
   })
 }));
 
-vi.mock('@chainlit/react-client', () => ({
+vi.mock('@chainlit-ng/react-client', () => ({
   useConfig: vi.fn(),
   useChatInteract: () => ({
     toggleMessageFavorite: toggleMessageFavoriteMock

@@ -1,6 +1,5 @@
+import type { ITextElement } from '@chainlit-ng/react-client';
 import { expect, it } from 'vitest';
-
-import type { ITextElement } from '@chainlit/react-client';
 
 import { prepareContent } from '../src/lib/message';
 

@@ -34,12 +34,12 @@ importers:
 
   .:
     dependencies:
+      '@chainlit-ng/react-client':
+        specifier: workspace:^
+        version: link:../react-client
       '@chainlit/app':
         specifier: workspace:^
         version: link:../../frontend
-      '@chainlit/react-client':
-        specifier: workspace:^
-        version: link:../react-client
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

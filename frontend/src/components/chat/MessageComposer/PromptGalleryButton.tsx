@@ -1,6 +1,12 @@
 import getRouterBasename from '@/lib/router';
 import { cn } from '@/lib/utils';
 import {
+  IPrompt,
+  useChainlitStore,
+  useConfig,
+  usePromptGallery
+} from '@chainlit-ng/react-client';
+import {
   BookMarked,
   Globe,
   GlobeLock,
@@ -10,13 +16,6 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-
-import {
-  IPrompt,
-  useChainlitStore,
-  useConfig,
-  usePromptGallery
-} from '@chainlit/react-client';
 
 import { PromptSaveDialog } from '@/components/PromptSaveDialog';
 import Translator, { useTranslation } from '@/components/i18n/Translator';

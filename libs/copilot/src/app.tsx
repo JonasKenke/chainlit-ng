@@ -1,10 +1,10 @@
+import { ChainlitContext, useAuth } from '@chainlit-ng/react-client';
 import { useContext, useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
 import { IWidgetConfig } from 'types';
 import Widget from 'widget';
 
 import { useTranslation } from '@chainlit/app/src/components/i18n/Translator';
-import { ChainlitContext, useAuth } from '@chainlit/react-client';
 
 import { useCopilotInteract } from './hooks/useCopilotInteract';
 

@@ -131,11 +131,11 @@ def test_built_ui_has_cards_false_when_edit_markers_missing(
     assert demo._built_ui_has_cards() is False
 
 
-def test_unreleased_notes_extraction(demo):
-    notes = demo._unreleased_notes()
+def test_release_notes_extraction(demo):
+    notes = demo._release_notes()
 
     assert notes
-    assert notes.startswith("### Added")
+    assert notes.startswith("### Changed")
     assert "## [2.12.0]" not in notes
     assert "CHANGELOG.md is not reachable" not in notes
 

@@ -15,9 +15,9 @@ directory = ".uploads"
 enabled = false
 
 [UI]
-name = "Chainlit after 2.12.0"
+name = "Chainlit NG 3.0 demo"
 # New: local timestamps on user and assistant messages.
 show_message_timestamps = true
 
 [meta]
-generated_by = "2.12.0"
+generated_by = "3.0.0"

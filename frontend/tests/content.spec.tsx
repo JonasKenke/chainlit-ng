@@ -1,8 +1,7 @@
+// Import the toBeInTheDocument function
+import type { ITextElement } from '@chainlit-ng/react-client';
 import { render } from '@testing-library/react';
 import { expect, it } from 'vitest';
-
-// Import the toBeInTheDocument function
-import type { ITextElement } from '@chainlit/react-client';
 
 import { MessageContent } from 'components/chat/Messages/Message/Content';
 

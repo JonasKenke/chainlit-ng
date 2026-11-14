@@ -1,12 +1,11 @@
 import { cn } from '@/lib/utils';
-import { AlertCircle } from 'lucide-react';
-import { useContext, useMemo } from 'react';
-
 import {
   ChainlitContext,
   useChatSession,
   useConfig
-} from '@chainlit/react-client';
+} from '@chainlit-ng/react-client';
+import { AlertCircle } from 'lucide-react';
+import { useContext, useMemo } from 'react';
 
 import Icon from '@/components/Icon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
