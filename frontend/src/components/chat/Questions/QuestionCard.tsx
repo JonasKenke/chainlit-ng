@@ -89,14 +89,14 @@ export const QuestionCard = ({ question }: Props) => {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="text-sm font-semibold">{t('chat.question.title')}</div>
-        <span className="text-xs font-medium uppercase text-muted-foreground">
+        <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {t(statusKey[question.status])}
         </span>
       </div>
 
-      <p className="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap pr-1 text-sm">
+      <div className="mt-3 max-h-28 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2.5 text-sm leading-6">
         <bdi dir="auto">{question.prompt}</bdi>
-      </p>
+      </div>
 
       {canAnswer ? (
         <>
@@ -114,7 +114,7 @@ export const QuestionCard = ({ question }: Props) => {
                     return (
                       <label
                         key={option.id}
-                        className="flex min-h-11 cursor-pointer items-start gap-2 rounded border border-border p-2 text-sm"
+                        className="flex min-h-11 cursor-pointer items-start gap-2 rounded-md border border-border p-2.5 text-sm transition-colors hover:bg-muted/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
                       >
                         <input
                           type="radio"
@@ -126,7 +126,7 @@ export const QuestionCard = ({ question }: Props) => {
                             setSelected(option.id);
                             setText('');
                           }}
-                          className="mt-1"
+                          className="mt-0.5 accent-primary"
                         />
                         <span className="min-w-0">
                           <bdi dir="auto" className="break-words">
@@ -148,8 +148,16 @@ export const QuestionCard = ({ question }: Props) => {
               </fieldset>
             ) : null}
 
+            {question.options.length && question.allowFreeText ? (
+              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                <span>{t('chat.question.or', { defaultValue: 'or' })}</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            ) : null}
+
             {question.allowFreeText ? (
-              <div className="mt-3">
+              <div className="mt-2">
                 <label
                   htmlFor={`question-${question.id}-other`}
                   className="text-xs font-medium text-muted-foreground"
@@ -159,7 +167,10 @@ export const QuestionCard = ({ question }: Props) => {
                 <textarea
                   id={`question-${question.id}-other`}
                   aria-label={t('chat.question.otherAriaLabel')}
-                  className="mt-1 min-h-20 w-full rounded border border-border bg-background p-2 text-sm"
+                  placeholder={t('chat.question.otherPlaceholder', {
+                    defaultValue: 'Type your answer...'
+                  })}
+                  className="mt-1 min-h-16 w-full rounded-md border border-border bg-background p-2 text-sm"
                   maxLength={2000}
                   value={text}
                   onChange={(event) => {
@@ -171,10 +182,11 @@ export const QuestionCard = ({ question }: Props) => {
             ) : null}
           </div>
 
-          <div className="mt-3">
+          <div className="mt-3 flex justify-end">
             <Button
               type="button"
               size="sm"
+              className="w-full sm:w-auto"
               disabled={submitDisabled}
               onClick={submit}
             >
@@ -183,7 +195,7 @@ export const QuestionCard = ({ question }: Props) => {
           </div>
         </>
       ) : (
-        <div className="mt-3 text-sm text-muted-foreground">
+        <div className="mt-3 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
           {isPending ? (
             <span>{t('chat.question.readOnly')}</span>
           ) : question.status === 'answered' ? (

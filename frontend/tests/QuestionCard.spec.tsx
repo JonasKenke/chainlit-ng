@@ -15,7 +15,7 @@ vi.mock('sonner', () => ({ toast: { error: toastError } }));
 
 vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({
-    t: (key: string) =>
+    t: (key: string, options?: { defaultValue?: string }) =>
       ({
         'chat.question.title': 'Question',
         'chat.question.ariaLabel': 'Question from the assistant',
@@ -32,7 +32,9 @@ vi.mock('@/components/i18n/Translator', () => ({
         'chat.question.status.orphaned': 'Unavailable',
         'chat.question.errors.answer': 'Unable to answer question',
         'common.actions.submit': 'Submit'
-      })[key] ?? key
+      })[key] ??
+      options?.defaultValue ??
+      key
   })
 }));
 
@@ -147,6 +149,16 @@ describe('QuestionCard', () => {
       expect.objectContaining({ text: 'blue' })
     );
     expect(respondToQuestion.mock.calls[0][0]).not.toHaveProperty('optionId');
+  });
+
+  it('shows the free-text placeholder and the option/answer separator', () => {
+    renderCard();
+
+    expect(screen.getByLabelText('Other answer')).toHaveAttribute(
+      'placeholder',
+      'Type your answer...'
+    );
+    expect(screen.getByText('or')).toBeInTheDocument();
   });
 
   it('hides the free-text field when the question is closed', () => {
