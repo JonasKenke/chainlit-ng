@@ -252,6 +252,10 @@ export default function MessageComposer({
   );
 
   const submit = useCallback(() => {
+    if (value.trim() === '' && attachments.length === 0 && !selectedCommand) {
+      return;
+    }
+
     if (hasPendingInteraction) {
       toast.warning(
         t('chat.input.errors.pendingInteraction', {
@@ -262,10 +266,6 @@ export default function MessageComposer({
     }
 
     if (disabled) {
-      return;
-    }
-
-    if (value.trim() === '' && attachments.length === 0 && !selectedCommand) {
       return;
     }
 

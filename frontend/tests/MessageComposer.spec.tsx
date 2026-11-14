@@ -142,6 +142,17 @@ describe('MessageComposer pending interaction', () => {
     expect(screen.getByRole('textbox')).toHaveValue('hello');
   });
 
+  it('does not warn on an empty submit while an interaction is pending', () => {
+    chatData.disabled = true;
+    chainlitStore.approvals = [{ id: 'a1', status: 'pending', live: true }];
+    renderComposer();
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('blocks sending while an approval is pending even when loading ended', () => {
     chainlitStore.approvals = [{ id: 'a1', status: 'pending' }];
     renderComposer();
