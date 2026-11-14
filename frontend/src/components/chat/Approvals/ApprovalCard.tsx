@@ -15,7 +15,7 @@ import { Markdown } from '@/components/Markdown';
 import { Button } from '@/components/ui/button';
 
 const statusLabel: Record<IApproval['status'], string> = {
-  pending: 'Pending approval',
+  pending: 'Awaiting decision',
   approved: 'Approved',
   rejected: 'Rejected',
   edited: 'Edited',
@@ -417,7 +417,7 @@ export const ApprovalCard = ({ approval }: Props) => {
       data-testid="approval-card"
       data-approval-id={approval.id}
       aria-label={`Approval for ${approval.tool}`}
-      className="rounded-lg border border-border bg-card p-4 text-card-foreground"
+      className="scroll-mt-4 rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -434,7 +434,10 @@ export const ApprovalCard = ({ approval }: Props) => {
       </div>
 
       {approval.content ? (
-        <div data-testid="approval-content" className="mt-3 text-sm">
+        <div
+          data-testid="approval-content"
+          className="mt-3 max-h-64 overflow-y-auto pr-1 text-sm [&_td]:py-2 [&_th]:py-2 [&_th]:h-10"
+        >
           <Markdown allowHtml={allowHtml} latex={latex}>
             {approval.content}
           </Markdown>
@@ -465,7 +468,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Edit fields
           </div>
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 max-h-[50vh] space-y-3 overflow-y-auto pr-1">
             {fields.map((field) => (
               <div key={field.name}>
                 <label

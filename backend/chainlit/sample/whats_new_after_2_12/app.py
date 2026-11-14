@@ -49,6 +49,17 @@ PNG_BYTES = base64.b64decode(
     "SUVORK5CYII="
 )
 
+EMAIL_PREVIEW = """\
+| field | value |
+| --- | --- |
+| To | `person@example.com` |
+| Subject | Quarterly report |
+| Body | See attached. |
+| API key | `[redacted]` |
+
+The server holds the real arguments; this table is display-only.
+"""
+
 TABLE = """\
 | change | risk | owner |
 | --- | --- | --- |
@@ -76,7 +87,7 @@ HELP = """\
 | command | shows |
 | --- | --- |
 | `help` | this table |
-| `approval` | `@cl.step(requires_approval=True)`: approve / reject / edit, redacted persistence |
+| `approval` | `@cl.step(requires_approval=True)`: email review table, approve / reject / edit, redacted persistence |
 | `explicit` | `cl.Approval` with a title, custom redaction, and no schema |
 | `ticket` | typed ticket draft + generated edit form + request changes |
 | `markdown` | markdown document + a plain Approve / Reject gate, no JSON |
@@ -142,7 +153,12 @@ class EmailArgs(BaseModel):
     api_key: str
 
 
-@cl.step(type="tool", requires_approval=True, approval_schema=EmailArgs)
+@cl.step(
+    type="tool",
+    requires_approval=True,
+    approval_schema=EmailArgs,
+    approval_content=EMAIL_PREVIEW,
+)
 async def send_email(to: str, subject: str, body: str, api_key: str) -> str:
     # A real tool must re-authorize the final (possibly edited) arguments here.
     return f"sent '{subject}' to {to}"
@@ -152,9 +168,10 @@ async def demo_approval() -> None:
     await cl.Message(
         content=(
             "Calling a `@cl.step(requires_approval=True)` tool with an "
-            "`approval_schema`. Approve runs it with the server-held "
-            "arguments, Reject returns `None`, and Edit validates new JSON. "
-            "The persisted step input is a preview, so `api_key` is redacted."
+            "`approval_schema` and an `approval_content` review table. "
+            "Approve runs it with the server-held arguments, Reject returns "
+            "`None`, and Edit validates new JSON. The persisted step input is "
+            "a preview, so `api_key` is redacted."
         )
     ).send()
     result = await send_email(

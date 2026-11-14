@@ -117,7 +117,7 @@ const MessagesContainer = ({ navigate }: Props) => {
     const frame = requestAnimationFrame(() => {
       document
         .querySelector(selector)
-        ?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+        ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     });
     return () => cancelAnimationFrame(frame);
   }, [pendingApprovalId, pendingQuestionId]);

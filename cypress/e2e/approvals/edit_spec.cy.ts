@@ -28,7 +28,7 @@ describe('Approval edit and reject', () => {
     cy.get('[data-testid="approval-card"]').should('have.length', 1);
     cy.get('[data-testid="approval-card"]').should(
       'contain',
-      'Pending approval'
+      'Awaiting decision'
     );
     cy.get('[data-testid="approval-card"]')
       .contains('button', 'Approve')
@@ -87,7 +87,7 @@ describe('Approval edit and reject', () => {
     cy.contains('editedArguments.unknownField (extra_forbidden)');
     cy.get('[data-testid="approval-card"]').should(
       'contain',
-      'Pending approval'
+      'Awaiting decision'
     );
     cy.get('[data-testid="approval-diff"]').should('not.exist');
     cy.get('[data-testid="approval-card"]')

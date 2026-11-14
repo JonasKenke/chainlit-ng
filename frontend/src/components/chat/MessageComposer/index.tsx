@@ -60,7 +60,7 @@ interface Props {
 }
 
 const PENDING_INTERACTION_MESSAGE =
-  'Resolve the pending approval or question before sending another message.';
+  'Resolve the approval or question in the conversation before sending another message.';
 
 export default function MessageComposer({
   fileSpec,

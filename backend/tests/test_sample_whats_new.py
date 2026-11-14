@@ -189,6 +189,14 @@ async def test_latex_reports_the_configured_value(
     assert "disabled" not in recording_messages[-1].content
 
 
+def test_email_preview_is_a_markdown_table_with_redacted_key(demo):
+    preview = demo.EMAIL_PREVIEW
+
+    assert "| field | value |" in preview
+    assert "| API key | `[redacted]` |" in preview
+    assert "sk-demo" not in preview
+
+
 async def test_help_command_sends_the_table(demo, recording_messages):
     assert "help" in demo.COMMANDS
 

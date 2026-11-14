@@ -40,20 +40,20 @@ also clears pending approvals (they are in memory only).
 
 ## Commands
 
-| command    | feature                                                       |
-| ---------- | ------------------------------------------------------------- |
-| `help`     | re-send the command table in the chat                         |
-| `approval` | decorator-gated tool: approve / reject / edit, redacted trace |
-| `explicit` | `cl.Approval` with title and custom redaction                 |
-| `ticket`   | typed ticket draft + generated form + request changes         |
-| `markdown` | markdown message + title-only approval, no JSON block         |
-| `table`    | markdown table inside the approval card, no JSON block        |
-| `ask`      | `cl.ask` options + free text, `as_tool_result()` provenance   |
-| `media`    | visible 96x64 PNG sent as bytes, `elements_position="above"`  |
-| `latex`    | reports `[features] latex`; demo of inline math when enabled  |
-| `changes`  | full `Unreleased` changelog in a side panel                   |
-| `config`   | upload-directory, telemetry, and MCP config changes           |
-| `request`  | `cl.request()` connection context                             |
+| command    | feature                                                                           |
+| ---------- | --------------------------------------------------------------------------------- |
+| `help`     | re-send the command table in the chat                                             |
+| `approval` | decorator-gated tool: email review table, approve / reject / edit, redacted trace |
+| `explicit` | `cl.Approval` with title and custom redaction                                     |
+| `ticket`   | typed ticket draft + generated form + request changes                             |
+| `markdown` | markdown message + title-only approval, no JSON block                             |
+| `table`    | markdown table inside the approval card, no JSON block                            |
+| `ask`      | `cl.ask` options + free text, `as_tool_result()` provenance                       |
+| `media`    | visible 96x64 PNG sent as bytes, `elements_position="above"`                      |
+| `latex`    | reports `[features] latex`; demo of inline math when enabled                      |
+| `changes`  | full `Unreleased` changelog in a side panel                                       |
+| `config`   | upload-directory, telemetry, and MCP config changes                               |
+| `request`  | `cl.request()` connection context                                                 |
 
 `latex` is enabled in this sample's `.chainlit/config.toml`
 (`latex = true`). With `latex = false` the command says rendering is disabled
