@@ -59,9 +59,6 @@ interface Props {
   autoScrollRef: MutableRefObject<boolean>;
 }
 
-const PENDING_INTERACTION_MESSAGE =
-  'Resolve the approval or question in the conversation before sending another message.';
-
 export default function MessageComposer({
   fileSpec,
   onFileUpload,
@@ -77,16 +74,17 @@ export default function MessageComposer({
   const questions = useChainlitStore((state) => state.questions);
   const setChatSettingsOpen = useAppStore((state) => state.setChatSettingsOpen);
 
-  const hasPendingInteraction = useMemo(
-    () =>
-      approvals.some(
-        (approval) => approval.status === 'pending' && approval.live !== false
-      ) ||
-      questions.some(
-        (question) => question.status === 'pending' && question.live === true
-      ),
-    [approvals, questions]
-  );
+  const pendingInteraction = useMemo(() => {
+    const approval = approvals.find(
+      (item) => item.status === 'pending' && item.live !== false
+    );
+    if (approval) return { kind: 'approval' as const, id: approval.id };
+    const question = questions.find(
+      (item) => item.status === 'pending' && item.live === true
+    );
+    if (question) return { kind: 'question' as const, id: question.id };
+    return null;
+  }, [approvals, questions]);
 
   // Pre-select the command marked as selected by the backend
   useEffect(() => {
@@ -256,12 +254,15 @@ export default function MessageComposer({
       return;
     }
 
-    if (hasPendingInteraction) {
-      toast.warning(
-        t('chat.input.errors.pendingInteraction', {
-          defaultValue: PENDING_INTERACTION_MESSAGE
-        })
-      );
+    if (pendingInteraction) {
+      const selector =
+        pendingInteraction.kind === 'approval'
+          ? `[data-testid="approval-card"][data-approval-id="${pendingInteraction.id}"]`
+          : `[data-testid="question-card"][data-question-id="${pendingInteraction.id}"]`;
+      document.querySelector(selector)?.scrollIntoView?.({
+        behavior: 'smooth',
+        block: 'start'
+      });
       return;
     }
 
@@ -282,7 +283,7 @@ export default function MessageComposer({
   }, [
     value,
     disabled,
-    hasPendingInteraction,
+    pendingInteraction,
     askUser,
     attachments,
     selectedCommand,

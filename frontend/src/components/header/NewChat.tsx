@@ -1,8 +1,12 @@
 import React, { useState } from 'react';
 
-import { useChatInteract, useConfig } from '@chainlit/react-client';
+import {
+  useChainlitStore,
+  useChatInteract,
+  useConfig
+} from '@chainlit/react-client';
 
-import { Translator } from '@/components/i18n';
+import { Translator, useTranslation } from '@/components/i18n';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -74,10 +78,25 @@ interface Props extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
   const [open, setOpen] = useState(false);
+  const [pendingWarningOpen, setPendingWarningOpen] = useState(false);
   const { clear } = useChatInteract();
   const { config } = useConfig();
+  const { t } = useTranslation();
+  const hasPendingInteraction = useChainlitStore(
+    (state) =>
+      (state.approvals ?? []).some(
+        (approval) => approval.status === 'pending' && approval.live !== false
+      ) ||
+      (state.questions ?? []).some(
+        (question) => question.status === 'pending' && question.live === true
+      )
+  );
 
   const handleClickOpen = () => {
+    if (hasPendingInteraction) {
+      setPendingWarningOpen(true);
+      return;
+    }
     if (config?.ui?.confirm_new_chat === false) {
       handleConfirm();
     } else {
@@ -96,11 +115,46 @@ const NewChatButton = ({ navigate, onConfirm, ...buttonProps }: Props) => {
       clear();
       navigate?.('/');
     }
+    setPendingWarningOpen(false);
     handleClose();
   };
 
   return (
     <div>
+      <Dialog open={pendingWarningOpen} onOpenChange={setPendingWarningOpen}>
+        <DialogContent id="pending-new-chat-dialog" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {t('navigation.newChat.pending.title', {
+                defaultValue: 'Pending approval or question'
+              })}
+            </DialogTitle>
+            <DialogDescription>
+              {t('navigation.newChat.pending.description', {
+                defaultValue:
+                  'This chat still has an approval or question waiting. Starting a new chat will discard it.'
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setPendingWarningOpen(false)}
+            >
+              {t('common.actions.cancel', { defaultValue: 'Cancel' })}
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleConfirm}
+              id="confirm-pending-new-chat"
+            >
+              {t('navigation.newChat.pending.confirm', {
+                defaultValue: 'Start new chat'
+              })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>

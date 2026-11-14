@@ -5,25 +5,23 @@ import MessageComposer from '@/components/chat/MessageComposer';
 
 import { AppStateProvider, createAppStateStore } from '@/state/store';
 
-const { sendMessage, toastError, toastWarning, chainlitStore, chatData } =
-  vi.hoisted(() => ({
-    sendMessage: vi.fn(),
-    toastError: vi.fn(),
-    toastWarning: vi.fn(),
-    chatData: {
-      askUser: undefined,
-      chatSettingsInputs: [],
-      disabled: false
-    },
-    chainlitStore: {
-      commands: [] as unknown[],
-      approvals: [] as unknown[],
-      questions: [] as unknown[]
-    }
-  }));
+const { sendMessage, toastError, chainlitStore, chatData } = vi.hoisted(() => ({
+  sendMessage: vi.fn(),
+  toastError: vi.fn(),
+  chatData: {
+    askUser: undefined,
+    chatSettingsInputs: [],
+    disabled: false
+  },
+  chainlitStore: {
+    commands: [] as unknown[],
+    approvals: [] as unknown[],
+    questions: [] as unknown[]
+  }
+}));
 
 vi.mock('sonner', () => ({
-  toast: { error: toastError, warning: toastWarning }
+  toast: { error: toastError }
 }));
 
 vi.mock('@/components/i18n/Translator', () => ({
@@ -127,7 +125,7 @@ const resetMocks = () => {
 describe('MessageComposer pending interaction', () => {
   beforeEach(resetMocks);
 
-  it('does not send a pending live approval and warns with the draft kept', () => {
+  it('blocks a pending live approval and keeps the draft', () => {
     chatData.disabled = true;
     chainlitStore.approvals = [{ id: 'a1', status: 'pending', live: true }];
     renderComposer();
@@ -136,21 +134,21 @@ describe('MessageComposer pending interaction', () => {
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(toastWarning).toHaveBeenCalledWith(
-      'chat.input.errors.pendingInteraction'
-    );
     expect(screen.getByRole('textbox')).toHaveValue('hello');
   });
 
-  it('does not warn on an empty submit while an interaction is pending', () => {
-    chatData.disabled = true;
+  it('does not scroll to a card on an empty submit', () => {
     chainlitStore.approvals = [{ id: 'a1', status: 'pending', live: true }];
     renderComposer();
+    const querySpy = vi.spyOn(document, 'querySelector');
 
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
-    expect(toastWarning).not.toHaveBeenCalled();
+    expect(querySpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('approval-card')
+    );
     expect(sendMessage).not.toHaveBeenCalled();
+    querySpy.mockRestore();
   });
 
   it('blocks sending while an approval is pending even when loading ended', () => {
@@ -161,13 +159,10 @@ describe('MessageComposer pending interaction', () => {
     fireEvent.click(screen.getByRole('button'));
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(toastWarning).toHaveBeenCalledWith(
-      'chat.input.errors.pendingInteraction'
-    );
     expect(screen.getByRole('textbox')).toHaveValue('hello');
   });
 
-  it('blocks sending for a pending live question and warns', () => {
+  it('blocks sending for a pending live question', () => {
     chainlitStore.questions = [{ id: 'q1', status: 'pending', live: true }];
     renderComposer();
 
@@ -175,10 +170,28 @@ describe('MessageComposer pending interaction', () => {
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(toastWarning).toHaveBeenCalledWith(
-      'chat.input.errors.pendingInteraction'
-    );
     expect(screen.getByRole('textbox')).toHaveValue('hello');
+  });
+
+  it('scrolls to the pending card on a blocked send', () => {
+    const card = document.createElement('div');
+    const scrollIntoView = vi.fn();
+    card.scrollIntoView = scrollIntoView;
+    chainlitStore.approvals = [{ id: 'a1', status: 'pending', live: true }];
+    renderComposer();
+    const querySpy = vi.spyOn(document, 'querySelector').mockReturnValue(card);
+
+    setDraft('hello');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    expect(querySpy).toHaveBeenCalledWith(
+      '[data-testid="approval-card"][data-approval-id="a1"]'
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'start'
+    });
+    querySpy.mockRestore();
   });
 
   it('does not block for a hydrated question', () => {
@@ -192,10 +205,9 @@ describe('MessageComposer pending interaction', () => {
       expect.objectContaining({ output: 'hello' }),
       []
     );
-    expect(toastWarning).not.toHaveBeenCalled();
   });
 
-  it('sends without warning when no interaction is pending', () => {
+  it('sends when no interaction is pending', () => {
     chainlitStore.approvals = [{ id: 'a1', status: 'rejected', live: true }];
     renderComposer();
 
@@ -206,7 +218,6 @@ describe('MessageComposer pending interaction', () => {
       expect.objectContaining({ output: 'hello' }),
       []
     );
-    expect(toastWarning).not.toHaveBeenCalled();
     expect(screen.getByRole('textbox')).toHaveValue('');
   });
 });

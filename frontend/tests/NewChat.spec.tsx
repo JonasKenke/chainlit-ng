@@ -3,21 +3,35 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import NewChatButton from '@/components/header/NewChat';
 
-const mockClear = vi.fn();
+const { mockClear, pendingState } = vi.hoisted(() => ({
+  mockClear: vi.fn(),
+  pendingState: {
+    approvals: [] as { status: string; live?: boolean }[],
+    questions: [] as { status: string; live?: boolean }[]
+  }
+}));
 const mockUseConfig = vi.fn();
 
 vi.mock('@chainlit/react-client', () => ({
   useChatInteract: () => ({ clear: mockClear }),
+  useChainlitStore: (selector: (state: typeof pendingState) => unknown) =>
+    selector(pendingState),
   useConfig: () => mockUseConfig()
 }));
 
 vi.mock('@/components/i18n', () => ({
-  Translator: ({ path }: { path: string }) => <span>{path}</span>
+  Translator: ({ path }: { path: string }) => <span>{path}</span>,
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) =>
+      options?.defaultValue ?? key
+  })
 }));
 
 describe('NewChatButton', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pendingState.approvals = [];
+    pendingState.questions = [];
     mockUseConfig.mockReturnValue({ config: {} });
   });
 
@@ -63,6 +77,56 @@ describe('NewChatButton', () => {
 
     expect(mockClear).toHaveBeenCalledTimes(1);
     expect(mockNavigate).toHaveBeenCalledWith('/');
+  });
+
+  it('warns instead of clearing when an approval is pending', () => {
+    mockUseConfig.mockReturnValue({
+      config: { ui: { confirm_new_chat: false } }
+    });
+    pendingState.approvals = [{ status: 'pending', live: true }];
+
+    render(<NewChatButton />);
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(
+      screen.getByText('Pending approval or question')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'This chat still has an approval or question waiting. Starting a new chat will discard it.'
+      )
+    ).toBeInTheDocument();
+    expect(mockClear).not.toHaveBeenCalled();
+  });
+
+  it('clears after confirming the pending warning', () => {
+    mockUseConfig.mockReturnValue({
+      config: { ui: { confirm_new_chat: false } }
+    });
+    pendingState.questions = [{ status: 'pending', live: true }];
+    const mockNavigate = vi.fn();
+
+    render(<NewChatButton navigate={mockNavigate} />);
+    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByText('Start new chat'));
+
+    expect(mockClear).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('/');
+  });
+
+  it('does not warn for a hydrated read-only question', () => {
+    mockUseConfig.mockReturnValue({
+      config: { ui: { confirm_new_chat: false } }
+    });
+    pendingState.questions = [{ status: 'pending', live: false }];
+
+    render(<NewChatButton />);
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(
+      screen.queryByText('Pending approval or question')
+    ).not.toBeInTheDocument();
+    expect(mockClear).toHaveBeenCalledTimes(1);
   });
 
   it('skips dialog and activates immediately when confirm_new_chat is false', () => {
