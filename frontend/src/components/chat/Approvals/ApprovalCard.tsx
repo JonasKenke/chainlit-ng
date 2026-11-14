@@ -458,7 +458,7 @@ export const ApprovalCard = ({ approval }: Props) => {
       {approval.content ? (
         <div
           data-testid="approval-content"
-          className="mt-3 max-h-64 overflow-y-auto custom-scrollbar pr-1 text-sm [&_td]:py-2 [&_th]:py-2 [&_th]:h-10"
+          className="mt-3 max-h-[80vh] overflow-y-auto custom-scrollbar pr-1 text-sm [&_td]:py-2 [&_th]:py-2 [&_th]:h-10"
         >
           <Markdown allowHtml={allowHtml} latex={latex}>
             {approval.content}
@@ -476,7 +476,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           <div className="text-xs font-medium text-muted-foreground">
             Original → edited
           </div>
-          <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted p-3 text-xs">
+          <pre className="mt-1 max-h-[80vh] overflow-auto custom-scrollbar rounded bg-muted p-3 text-xs">
             {diff.join('\n')}
           </pre>
         </div>
@@ -491,7 +491,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Edit fields
           </div>
-          <div className="mt-3 max-h-[40vh] space-y-3 overflow-y-auto custom-scrollbar pr-1">
+          <div className="mt-3 max-h-[80vh] space-y-3 overflow-y-auto custom-scrollbar pr-1">
             {fields.map((field) => (
               <div key={field.name}>
                 <label

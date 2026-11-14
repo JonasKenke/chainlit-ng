@@ -96,7 +96,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Do not render raw approval arguments in the card. A title-only approval shows only the title and Approve/Reject buttons, and markdown `content` is the review surface.
 - Name both pending interactions in the run guard: a pending question now refuses a new run with "Resolve the pending approval or question", matching the shared registry. Server-side refusals are logged rather than toasted, so queued messages cannot spam the UI. A blocked send scrolls the pending card into view instead of showing a toast, and starting a new chat asks for confirmation before discarding a live approval or question. Pending approval and question cards no longer show a redundant status label.
 - Title-case approval tool names (`send_email` → `Send Email`) instead of showing the raw identifier.
-- Give the generated approval edit form a separated "Edit fields" section with bottom spacing, and render embedded newlines in approval diffs as layout instead of JSON escapes. Long review bodies, question controls and edit fields scroll inside a bounded card so the action row stays above the composer, and the scroll-to-bottom control no longer covers card actions.
+- Give the generated approval edit form a separated "Edit fields" section with bottom spacing, and render embedded newlines in approval diffs as layout instead of JSON escapes. Long review bodies, question controls and edit fields only scroll once they exceed 80% of the viewport height, and the scroll-to-bottom control no longer covers card actions.
 
 ### Security
 
