@@ -94,9 +94,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Serialize generation objects with `to_dict()` when persisting steps, preserving compatibility with legacy generation models.
 - Render pending approval and question cards inline at the step that created them, between the user's input and the assistant's follow-up, and scroll a newly pending card into view. Approvals previously rendered above the whole conversation and questions after every message, so the active controls could be misplaced or off-screen.
 - Do not render raw approval arguments in the card. A title-only approval shows only the title and Approve/Reject buttons, and markdown `content` is the review surface.
-- Name both pending interactions in the run guard: a pending question now refuses a new run with "Resolve the pending approval or question", matching the shared registry and the toast. The pending card is labelled "Awaiting decision", and the composer shows that hint inline and surfaces the same warning when Enter is pressed, instead of silently dropping the message.
+- Name both pending interactions in the run guard: a pending question now refuses a new run with "Resolve the pending approval or question", matching the shared registry and the toast. The pending card is labelled "Awaiting decision", and the composer warns when Enter is pressed instead of silently dropping the message.
 - Title-case approval tool names (`send_email` → `Send Email`) instead of showing the raw identifier.
-- Give the generated approval edit form a separated "Edit fields" section with bottom spacing, and render embedded newlines in approval diffs as layout instead of JSON escapes. Long review bodies and edit fields scroll inside a bounded card so the action row stays above the composer.
+- Give the generated approval edit form a separated "Edit fields" section with bottom spacing, and render embedded newlines in approval diffs as layout instead of JSON escapes. Long review bodies, question controls and edit fields scroll inside a bounded card so the action row stays above the composer, and the scroll-to-bottom control no longer covers card actions.
 
 ### Security
 

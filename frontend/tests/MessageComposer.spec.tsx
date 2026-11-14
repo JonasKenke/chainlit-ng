@@ -132,10 +132,6 @@ describe('MessageComposer pending interaction', () => {
     chainlitStore.approvals = [{ id: 'a1', status: 'pending', live: true }];
     renderComposer();
 
-    expect(screen.getByTestId('pending-interaction-hint')).toHaveTextContent(
-      'chat.input.errors.pendingInteraction'
-    );
-
     setDraft('hello');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
@@ -160,28 +156,32 @@ describe('MessageComposer pending interaction', () => {
     expect(screen.getByRole('textbox')).toHaveValue('hello');
   });
 
-  it('shows the hint for a pending live question', () => {
+  it('blocks sending for a pending live question and warns', () => {
     chainlitStore.questions = [{ id: 'q1', status: 'pending', live: true }];
     renderComposer();
 
-    expect(screen.getByTestId('pending-interaction-hint')).toBeInTheDocument();
+    setDraft('hello');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(toastWarning).toHaveBeenCalledWith(
+      'chat.input.errors.pendingInteraction'
+    );
+    expect(screen.getByRole('textbox')).toHaveValue('hello');
   });
 
-  it('does not show the hint for a hydrated question', () => {
+  it('does not block for a hydrated question', () => {
     chainlitStore.questions = [{ id: 'q1', status: 'pending', live: false }];
     renderComposer();
 
-    expect(screen.queryByTestId('pending-interaction-hint')).toBeNull();
-  });
+    setDraft('hello');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
-  it('does not show the hint for terminal approvals', () => {
-    chainlitStore.approvals = [
-      { id: 'a1', status: 'approved', live: true },
-      { id: 'a2', status: 'expired', live: true }
-    ];
-    renderComposer();
-
-    expect(screen.queryByTestId('pending-interaction-hint')).toBeNull();
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ output: 'hello' }),
+      []
+    );
+    expect(toastWarning).not.toHaveBeenCalled();
   });
 
   it('sends without warning when no interaction is pending', () => {

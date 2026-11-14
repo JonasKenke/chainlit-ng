@@ -316,17 +316,6 @@ export default function MessageComposer({
           <Attachments />
         </div>
       ) : null}
-      {hasPendingInteraction ? (
-        <p
-          role="status"
-          data-testid="pending-interaction-hint"
-          className="mb-1 px-1 text-xs text-muted-foreground"
-        >
-          {t('chat.input.errors.pendingInteraction', {
-            defaultValue: PENDING_INTERACTION_MESSAGE
-          })}
-        </p>
-      ) : null}
       <Input
         ref={inputRef}
         id="chat-input"

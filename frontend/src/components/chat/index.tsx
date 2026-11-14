@@ -220,7 +220,7 @@ const Chat = () => {
           autoScrollRef={autoScrollRef}
         >
           <div
-            className="flex flex-col mx-auto w-full flex-grow p-4"
+            className="flex flex-col mx-auto w-full flex-grow p-4 pb-10"
             style={{
               maxWidth: layoutMaxWidth
             }}

@@ -1,5 +1,5 @@
 import { MessageContext } from 'contexts/MessageContext';
-import { useContext, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -218,6 +218,16 @@ export const ApprovalCard = ({ approval }: Props) => {
   const [fieldValues, setFieldValues] = useState<FieldValues>({});
   const [requestingChanges, setRequestingChanges] = useState(false);
   const [comment, setComment] = useState('');
+  const editAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (editMode) {
+      editAreaRef.current?.scrollIntoView?.({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
+  }, [editMode]);
 
   const fields = Array.isArray(approval.editFields)
     ? approval.editFields
@@ -472,13 +482,14 @@ export const ApprovalCard = ({ approval }: Props) => {
 
       {editMode === 'form' && fields ? (
         <div
+          ref={editAreaRef}
           data-testid="approval-edit-form"
-          className="mt-4 border-t border-border pt-3"
+          className="mt-4 scroll-mt-4 border-t border-border pt-3"
         >
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Edit fields
           </div>
-          <div className="mt-3 max-h-[50vh] space-y-3 overflow-y-auto pr-1">
+          <div className="mt-3 max-h-[40vh] space-y-3 overflow-y-auto pr-1">
             {fields.map((field) => (
               <div key={field.name}>
                 <label
@@ -518,7 +529,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           </div>
         </div>
       ) : editMode === 'json' ? (
-        <div className="mt-3">
+        <div ref={editAreaRef} className="mt-3 scroll-mt-4">
           <textarea
             aria-label="Edited arguments JSON"
             className="h-40 w-full rounded border border-border bg-background p-2 font-mono text-xs"

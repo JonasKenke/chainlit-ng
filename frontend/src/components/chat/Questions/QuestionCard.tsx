@@ -85,7 +85,7 @@ export const QuestionCard = ({ question }: Props) => {
       data-question-id={question.id}
       aria-label={t('chat.question.ariaLabel')}
       aria-live="polite"
-      className="rounded-lg border border-border bg-card p-4 text-card-foreground"
+      className="scroll-mt-4 rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="text-sm font-semibold">{t('chat.question.title')}</div>
@@ -94,80 +94,82 @@ export const QuestionCard = ({ question }: Props) => {
         </span>
       </div>
 
-      <p className="mt-2 whitespace-pre-wrap text-sm">
+      <p className="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap pr-1 text-sm">
         <bdi dir="auto">{question.prompt}</bdi>
       </p>
 
       {canAnswer ? (
         <>
-          {question.options.length ? (
-            <fieldset className="mt-3">
-              <legend className="text-xs font-medium text-muted-foreground">
-                {t('chat.question.options')}
-              </legend>
-              <div className="mt-1 flex flex-col gap-2">
-                {question.options.map((option: IQuestionOption) => {
-                  const descriptionId = option.description
-                    ? `question-${question.id}-${option.id}-description`
-                    : undefined;
-                  return (
-                    <label
-                      key={option.id}
-                      className="flex min-h-11 cursor-pointer items-start gap-2 rounded border border-border p-2 text-sm"
-                    >
-                      <input
-                        type="radio"
-                        name={`question-${question.id}`}
-                        value={option.id}
-                        checked={selected === option.id}
-                        aria-describedby={descriptionId}
-                        onChange={() => {
-                          setSelected(option.id);
-                          setText('');
-                        }}
-                        className="mt-1"
-                      />
-                      <span className="min-w-0">
-                        <bdi dir="auto" className="break-words">
-                          {option.label}
-                        </bdi>
-                        {option.description ? (
-                          <span
-                            id={descriptionId}
-                            className="block text-xs text-muted-foreground"
-                          >
-                            <bdi dir="auto">{option.description}</bdi>
-                          </span>
-                        ) : null}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            </fieldset>
-          ) : null}
+          <div className="mt-3 max-h-[40vh] overflow-y-auto pr-1">
+            {question.options.length ? (
+              <fieldset className="mt-3">
+                <legend className="text-xs font-medium text-muted-foreground">
+                  {t('chat.question.options')}
+                </legend>
+                <div className="mt-1 flex flex-col gap-2">
+                  {question.options.map((option: IQuestionOption) => {
+                    const descriptionId = option.description
+                      ? `question-${question.id}-${option.id}-description`
+                      : undefined;
+                    return (
+                      <label
+                        key={option.id}
+                        className="flex min-h-11 cursor-pointer items-start gap-2 rounded border border-border p-2 text-sm"
+                      >
+                        <input
+                          type="radio"
+                          name={`question-${question.id}`}
+                          value={option.id}
+                          checked={selected === option.id}
+                          aria-describedby={descriptionId}
+                          onChange={() => {
+                            setSelected(option.id);
+                            setText('');
+                          }}
+                          className="mt-1"
+                        />
+                        <span className="min-w-0">
+                          <bdi dir="auto" className="break-words">
+                            {option.label}
+                          </bdi>
+                          {option.description ? (
+                            <span
+                              id={descriptionId}
+                              className="block text-xs text-muted-foreground"
+                            >
+                              <bdi dir="auto">{option.description}</bdi>
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            ) : null}
 
-          {question.allowFreeText ? (
-            <div className="mt-3">
-              <label
-                htmlFor={`question-${question.id}-other`}
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {t('chat.question.other')}
-              </label>
-              <textarea
-                id={`question-${question.id}-other`}
-                aria-label={t('chat.question.otherAriaLabel')}
-                className="mt-1 min-h-20 w-full rounded border border-border bg-background p-2 text-sm"
-                maxLength={2000}
-                value={text}
-                onChange={(event) => {
-                  setText(event.target.value);
-                  if (event.target.value) setSelected(undefined);
-                }}
-              />
-            </div>
-          ) : null}
+            {question.allowFreeText ? (
+              <div className="mt-3">
+                <label
+                  htmlFor={`question-${question.id}-other`}
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  {t('chat.question.other')}
+                </label>
+                <textarea
+                  id={`question-${question.id}-other`}
+                  aria-label={t('chat.question.otherAriaLabel')}
+                  className="mt-1 min-h-20 w-full rounded border border-border bg-background p-2 text-sm"
+                  maxLength={2000}
+                  value={text}
+                  onChange={(event) => {
+                    setText(event.target.value);
+                    if (event.target.value) setSelected(undefined);
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
 
           <div className="mt-3">
             <Button

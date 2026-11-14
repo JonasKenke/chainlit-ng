@@ -207,11 +207,11 @@ export default function ScrollContainer({
       </div>
 
       {showScrollButton ? (
-        <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+        <div className="pointer-events-none absolute bottom-4 left-0 right-0 flex justify-end pr-4">
           <Button
             size="icon"
             variant="outline"
-            className="rounded-full"
+            className="pointer-events-auto rounded-full"
             onClick={scrollToBottom}
           >
             <ArrowDown className="size-4" />
