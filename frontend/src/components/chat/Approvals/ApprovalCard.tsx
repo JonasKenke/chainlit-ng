@@ -25,6 +25,14 @@ const statusLabel: Record<IApproval['status'], string> = {
   orphaned: 'Orphaned'
 };
 
+const displayToolName = (tool: string): string =>
+  tool
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+
 type Preview = Record<string, unknown> | null | undefined;
 
 // JSON leaves stay quoted so string/number/boolean/null stay distinguishable,
@@ -421,7 +429,9 @@ export const ApprovalCard = ({ approval }: Props) => {
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-sm font-semibold">{approval.tool}</div>
+          <div data-testid="approval-tool" className="text-sm font-semibold">
+            {displayToolName(approval.tool)}
+          </div>
           {approval.title ? (
             <div className="text-sm text-muted-foreground">
               {approval.title}

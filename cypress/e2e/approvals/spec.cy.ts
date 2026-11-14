@@ -63,7 +63,7 @@ describe('Approvals', () => {
 
     submitMessage('ask');
     cy.get('[data-testid="approval-card"]').should('have.length', 1);
-    cy.get('[data-testid="approval-card"]').should('contain', 'send_email');
+    cy.get('[data-testid="approval-card"]').should('contain', 'Send Email');
     cy.then(() => expect(sockets.length).to.be.greaterThan(0));
 
     // Close the transport from the page: socket.io reconnects and the server
