@@ -5,12 +5,26 @@ import MessageComposer from '@/components/chat/MessageComposer';
 
 import { AppStateProvider, createAppStateStore } from '@/state/store';
 
-const { sendMessage, toastError } = vi.hoisted(() => ({
-  sendMessage: vi.fn(),
-  toastError: vi.fn()
-}));
+const { sendMessage, toastError, toastWarning, chainlitStore, chatData } =
+  vi.hoisted(() => ({
+    sendMessage: vi.fn(),
+    toastError: vi.fn(),
+    toastWarning: vi.fn(),
+    chatData: {
+      askUser: undefined,
+      chatSettingsInputs: [],
+      disabled: false
+    },
+    chainlitStore: {
+      commands: [] as unknown[],
+      approvals: [] as unknown[],
+      questions: [] as unknown[]
+    }
+  }));
 
-vi.mock('sonner', () => ({ toast: { error: toastError } }));
+vi.mock('sonner', () => ({
+  toast: { error: toastError, warning: toastWarning }
+}));
 
 vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({ t: (key: string) => key })
@@ -26,11 +40,7 @@ vi.mock('@/hooks/use-mobile', () => ({
 
 vi.mock('@chainlit/react-client', () => ({
   useAuth: () => ({ user: { identifier: 'alice' } }),
-  useChatData: () => ({
-    askUser: undefined,
-    chatSettingsInputs: [],
-    disabled: false
-  }),
+  useChatData: () => chatData,
   useChatInteract: () => ({
     sendMessage,
     replyMessage: vi.fn(),
@@ -39,8 +49,13 @@ vi.mock('@chainlit/react-client', () => ({
   useChatMessages: () => ({ firstInteraction: false }),
   useConfig: () => ({ config: { ui: {} } }),
   useChainlitState: () => [[], vi.fn()],
-  useChainlitStore: (selector: (state: { commands: [] }) => unknown) =>
-    selector({ commands: [] })
+  useChainlitStore: (
+    selector: (state: {
+      commands: unknown[];
+      approvals: unknown[];
+      questions: unknown[];
+    }) => unknown
+  ) => selector(chainlitStore)
 }));
 
 vi.mock('@/components/chat/MessageComposer/Attachments', () => ({
@@ -101,10 +116,92 @@ const renderComposer = () =>
 const setDraft = (value: string) =>
   fireEvent.change(screen.getByRole('textbox'), { target: { value } });
 
-describe('MessageComposer frame limit', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+const resetMocks = () => {
+  vi.clearAllMocks();
+  chatData.disabled = false;
+  chainlitStore.commands = [];
+  chainlitStore.approvals = [];
+  chainlitStore.questions = [];
+};
+
+describe('MessageComposer pending interaction', () => {
+  beforeEach(resetMocks);
+
+  it('does not send a pending live approval and warns with the draft kept', () => {
+    chatData.disabled = true;
+    chainlitStore.approvals = [{ id: 'a1', status: 'pending', live: true }];
+    renderComposer();
+
+    expect(screen.getByTestId('pending-interaction-hint')).toHaveTextContent(
+      'chat.input.errors.pendingInteraction'
+    );
+
+    setDraft('hello');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(toastWarning).toHaveBeenCalledWith(
+      'chat.input.errors.pendingInteraction'
+    );
+    expect(screen.getByRole('textbox')).toHaveValue('hello');
   });
+
+  it('blocks sending while an approval is pending even when loading ended', () => {
+    chainlitStore.approvals = [{ id: 'a1', status: 'pending' }];
+    renderComposer();
+
+    setDraft('hello');
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(toastWarning).toHaveBeenCalledWith(
+      'chat.input.errors.pendingInteraction'
+    );
+    expect(screen.getByRole('textbox')).toHaveValue('hello');
+  });
+
+  it('shows the hint for a pending live question', () => {
+    chainlitStore.questions = [{ id: 'q1', status: 'pending', live: true }];
+    renderComposer();
+
+    expect(screen.getByTestId('pending-interaction-hint')).toBeInTheDocument();
+  });
+
+  it('does not show the hint for a hydrated question', () => {
+    chainlitStore.questions = [{ id: 'q1', status: 'pending', live: false }];
+    renderComposer();
+
+    expect(screen.queryByTestId('pending-interaction-hint')).toBeNull();
+  });
+
+  it('does not show the hint for terminal approvals', () => {
+    chainlitStore.approvals = [
+      { id: 'a1', status: 'approved', live: true },
+      { id: 'a2', status: 'expired', live: true }
+    ];
+    renderComposer();
+
+    expect(screen.queryByTestId('pending-interaction-hint')).toBeNull();
+  });
+
+  it('sends without warning when no interaction is pending', () => {
+    chainlitStore.approvals = [{ id: 'a1', status: 'rejected', live: true }];
+    renderComposer();
+
+    setDraft('hello');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ output: 'hello' }),
+      []
+    );
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox')).toHaveValue('');
+  });
+});
+
+describe('MessageComposer frame limit', () => {
+  beforeEach(resetMocks);
 
   it('sends a message below the Engine.IO 1 MB frame limit', () => {
     renderComposer();

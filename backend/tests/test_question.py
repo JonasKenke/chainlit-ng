@@ -92,8 +92,11 @@ async def test_pending_question_blocks_a_new_run(
         await step.send()
         task, entry = await _pending_question(step)
 
-        with pytest.raises(ApprovalPending):
+        with pytest.raises(ApprovalPending) as pending:
             guard_pending_approval(step.thread_id)
+        assert str(pending.value) == (
+            "Resolve the pending approval or question before starting a run"
+        )
         assert guard_pending_approval("another-thread") is None
 
         await _answer(mock_session, entry, text="staging")
@@ -187,6 +190,37 @@ async def test_free_text_answer_is_normalized_and_persisted(
     assert answer.option_id is None
     assert layer.steps[step.id]["metadata"]["approval"]["answer"] == {
         "text": "blue\ngreen"
+    }
+
+
+async def test_answer_payload_is_untrusted_and_not_durable_without_a_data_layer(
+    monkeypatch, mock_chainlit_context, mock_session
+):
+    monkeypatch.setattr("chainlit.approval.get_data_layer", lambda: None)
+    step_module = importlib.import_module("chainlit.step")
+    monkeypatch.setattr(step_module, "get_data_layer", lambda: None)
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="deploy", type="tool")
+        await step.send()
+        task, entry = await _pending_question(
+            step, options=[QuestionOption("staging", "Staging")]
+        )
+        await _answer(mock_session, entry, option_id="staging")
+        answer = await task
+
+    assert answer.durable is False
+    assert answer.as_tool_result() == {
+        "provenance": "chainlit.question_answer",
+        "trust": "untrusted_user_input",
+        "questionId": entry.approval_id,
+        "status": "answered",
+        "optionId": "staging",
+        "text": None,
+        "durable": False,
     }
 
 

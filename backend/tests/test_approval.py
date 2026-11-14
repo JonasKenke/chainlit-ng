@@ -4,12 +4,12 @@ import importlib
 import json
 import uuid
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 import chainlit.approval as approval_module
 from chainlit.approval import (
@@ -57,6 +57,52 @@ class _SecretArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     apiKey: SecretStr
+
+
+class _NestedArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount: int
+
+
+class _ListDictArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[dict]
+
+
+class _DictArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict
+
+
+class _NestedModelArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nested: _NestedArgs
+
+
+class _FieldKindsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    choice: Literal["fast", "safe"]
+    count: int
+    ratio: float
+    body: str
+    message: str = ""
+    description: str = ""
+    text: str = ""
+    instructions: str = Field(default="", json_schema_extra={"format": "multiline"})
+    tags: list[str]
+    mode: Optional[str] = None
+    apiKey: str = ""
+    api_key: str = ""
+    password: str = ""
+    secret: str = ""
+    token: str = ""
+    authorization: str = ""
+    note: str = ""
 
 
 class FakeDataLayer:
@@ -293,6 +339,31 @@ async def test_approval_content_is_persisted_and_sent(
         await task
 
     assert layer.steps[step.id]["metadata"]["approval"]["content"] == content
+
+
+async def test_approval_content_is_capped_and_blank_becomes_none(
+    layer, mock_chainlit_context
+):
+    async with mock_chainlit_context:
+        step = Step(name="tool", type="tool")
+
+        accepted = "x" * (16 * 1024)
+        assert (
+            Approval(step=step, arguments={"rows": 1}, content=accepted).content
+            == accepted
+        )
+        assert (
+            Approval(step=step, arguments={"rows": 1}, content="  \n\t ").content
+            is None
+        )
+        assert Approval(step=step, arguments={"rows": 1}).content is None
+
+        with pytest.raises(ValueError, match="16384"):
+            Approval(
+                step=step,
+                arguments={"rows": 1},
+                content="x" * (16 * 1024 + 1),
+            )
 
 
 async def test_timeout_uses_the_same_transition_and_executes_nothing(
@@ -629,15 +700,28 @@ async def test_request_changes_requires_a_comment_and_returns_it(
         ctx.emitter.send_approval = AsyncMock()
         step = Step(name="tool", type="tool")
         await step.send()
-        task = asyncio.create_task(
-            Approval(step=step, arguments={"rows": 1}, timeout=30).ask()
-        )
+        executed = []
+
+        async def run_tool():
+            decision = await Approval(
+                step=step, arguments={"rows": 1}, timeout=30
+            ).ask()
+            if decision.approved:
+                executed.append(True)
+            return decision
+
+        task = asyncio.create_task(run_tool())
         entry = await _entry_for(step)
 
         with pytest.raises(ApprovalInvalidArguments) as missing:
             await _decide(mock_session, entry, "changes_requested")
         assert missing.value.field == "reason"
         assert missing.value.error_type == "missing"
+
+        with pytest.raises(ApprovalInvalidArguments) as blank:
+            await _decide(mock_session, entry, "changes_requested", reason=" \n\t ")
+        assert blank.value.field == "reason"
+        assert blank.value.error_type == "missing"
 
         with pytest.raises(ApprovalInvalidArguments) as too_long:
             await _decide(mock_session, entry, "changes_requested", reason="x" * 501)
@@ -657,6 +741,7 @@ async def test_request_changes_requires_a_comment_and_returns_it(
     assert decision.decision == "request_changes"
     assert decision.approved is False
     assert decision.comment == "split the changes"
+    assert executed == []
     assert layer.steps[step.id]["metadata"]["approval"]["reason"] == "split the changes"
 
 
@@ -688,6 +773,74 @@ async def test_payload_describes_editable_fields_without_values(
         assert fields["apiKey"]["secret"] is True
         assert "sk-secret" not in json.dumps(payload["editFields"])
         assert all("value" not in field for field in payload["editFields"])
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
+def test_edit_fields_describe_supported_kinds_and_secrets():
+    fields = approval_module._edit_fields(_FieldKindsArgs)
+    by_name = {field["name"]: field for field in fields}
+
+    assert by_name["choice"]["kind"] == "enum"
+    assert by_name["choice"]["options"] == ["fast", "safe"]
+    assert by_name["choice"]["required"] is True
+    assert by_name["count"]["kind"] == "integer"
+    assert by_name["count"]["required"] is True
+    assert by_name["ratio"]["kind"] == "number"
+    assert by_name["ratio"]["required"] is True
+    for name in ("body", "message", "description", "text", "instructions"):
+        assert by_name[name]["kind"] == "text"
+    assert by_name["tags"]["kind"] == "string_list"
+    assert by_name["tags"]["required"] is True
+    assert by_name["mode"]["kind"] == "string"
+    assert by_name["mode"]["nullable"] is True
+    assert by_name["mode"]["required"] is False
+    assert by_name["note"]["nullable"] is False
+    assert by_name["note"]["required"] is False
+    for name in ("apiKey", "api_key", "password", "secret", "token", "authorization"):
+        assert by_name[name]["secret"] is True
+        assert by_name[name]["kind"] == "string"
+    assert by_name["note"]["secret"] is False
+    assert by_name["body"]["secret"] is False
+    assert all("value" not in field for field in fields)
+    assert len(fields) == len(by_name)
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [_ListDictArgs, _DictArgs, _NestedModelArgs],
+    ids=["list_dict", "dict", "nested_model"],
+)
+def test_complex_schema_fields_fall_back_to_the_json_edit_path(schema):
+    assert approval_module._edit_fields(schema) is None
+
+
+async def test_json_edit_fallback_payload_never_persists_argument_values(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step,
+            {"rows": [{"token": "sk-live-value"}]},
+            arguments_schema=_ListDictArgs,
+        )
+        payload = ctx.emitter.send_approval.await_args.args[0]
+
+        # No field form can represent the shape; the client edits raw JSON.
+        assert payload["editAllowed"] is True
+        assert payload["editFields"] is None
+
+        record = layer.steps[step.id]["metadata"]["approval"]
+        assert record["argumentsPreview"] == {"rows": [{"token": "[redacted]"}]}
+        assert "sk-live-value" not in json.dumps(record)
+        assert "sk-live-value" not in json.dumps(payload["editFields"])
 
         await _decide(mock_session, entry, "rejected")
         await task
@@ -1242,6 +1395,53 @@ async def test_resume_orphans_a_persisted_pending_record(layer):
         layer.steps[step.id]["metadata"]["approval"]["terminalReason"]
         == "server_restart"
     )
+
+
+async def test_resumed_pending_approval_is_non_live_and_edit_is_refused(
+    layer, mock_chainlit_context, mock_session
+):
+    """A reload only has the redacted preview; edit must not accept it."""
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step,
+            {"apiKey": "sk-resume-secret"},
+            arguments_schema=_SecretArgs,
+        )
+        record = layer.steps[step.id]["metadata"]["approval"]
+        assert record["argumentsPreview"] == {"apiKey": "[redacted]"}
+        assert "sk-resume-secret" not in json.dumps(record)
+
+        # A page reload or a restarted worker loads the row with no waiter.
+        approval_module._pending_by_approval.clear()
+        approval_module._pending_by_step.clear()
+        assert approval_module.has_live_interaction(entry.approval_id) is False
+
+        writes = layer.write_calls
+        with pytest.raises(ApprovalNotFound):
+            await _decide(
+                mock_session,
+                entry,
+                "edited",
+                edited_arguments={"apiKey": "sk-from-preview"},
+            )
+        with pytest.raises(ApprovalNotFound):
+            await _decide(mock_session, entry, "approved")
+        with pytest.raises(ApprovalNotFound):
+            await _decide(mock_session, entry, "rejected")
+
+        assert layer.write_calls == writes
+        assert layer.steps[step.id]["metadata"]["approval"]["status"] == "pending"
+        assert "sk-from-preview" not in json.dumps(layer.steps)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
 
 async def test_on_message_wrapper_refuses_a_pending_thread(

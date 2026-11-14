@@ -27,6 +27,38 @@ const statusLabel: Record<IApproval['status'], string> = {
 
 type Preview = Record<string, unknown> | null | undefined;
 
+// JSON leaves stay quoted so string/number/boolean/null stay distinguishable,
+// but embedded newlines and tabs are shown as real layout inside the <pre>
+// instead of two-character "\n" / "\t" escapes. Other escapes (including a
+// literal backslash) are left untouched so the value stays unambiguous.
+const formatLeaf = (value: unknown): string => {
+  const json = JSON.stringify(value);
+  if (json === undefined) return 'undefined';
+  if (typeof value !== 'string') return json;
+  let formatted = '';
+  for (let index = 0; index < json.length; index += 1) {
+    const char = json[index];
+    if (char !== '\\' || index + 1 >= json.length) {
+      formatted += char;
+      continue;
+    }
+    const next = json[index + 1];
+    if (next === 'n') {
+      formatted += '\n';
+      index += 1;
+      continue;
+    }
+    if (next === 't') {
+      formatted += '\t';
+      index += 1;
+      continue;
+    }
+    formatted += char + next;
+    index += 1;
+  }
+  return formatted;
+};
+
 const flattenPreview = (
   value: unknown,
   prefix: string,
@@ -44,7 +76,7 @@ const flattenPreview = (
     );
     return leaves;
   }
-  leaves.set(prefix, JSON.stringify(value) ?? 'undefined');
+  leaves.set(prefix, formatLeaf(value));
   return leaves;
 };
 
@@ -426,25 +458,33 @@ export const ApprovalCard = ({ approval }: Props) => {
       ) : null}
 
       {editMode === 'form' && fields ? (
-        <div className="mt-3 space-y-3">
-          {fields.map((field) => (
-            <div key={field.name}>
-              <label
-                htmlFor={`approval-${approval.id}-${field.name}`}
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {field.label}
-                {field.required ? ' *' : ''}
-              </label>
-              {renderField(field)}
-              {field.description ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {field.description}
-                </p>
-              ) : null}
-            </div>
-          ))}
-          <div className="flex gap-2">
+        <div
+          data-testid="approval-edit-form"
+          className="mt-4 border-t border-border pt-3"
+        >
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Edit fields
+          </div>
+          <div className="mt-3 space-y-3">
+            {fields.map((field) => (
+              <div key={field.name}>
+                <label
+                  htmlFor={`approval-${approval.id}-${field.name}`}
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  {field.label}
+                  {field.required ? ' *' : ''}
+                </label>
+                {renderField(field)}
+                {field.description ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {field.description}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2 pb-2">
             <Button
               type="button"
               size="sm"

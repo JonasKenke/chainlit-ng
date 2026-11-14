@@ -251,6 +251,173 @@ describe('ApprovalCard', () => {
     });
   });
 
+  it('shows the generated edit form behind a divider and heading', () => {
+    renderCard({ editAllowed: true, editFields, arguments: { to: 'a@b.c' } });
+
+    expect(screen.queryByText('Edit fields')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const form = screen.getByTestId('approval-edit-form');
+    expect(form).toHaveClass('border-t', 'pt-3');
+    expect(screen.getByText('Edit fields')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save & approve' })
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the JSON editor and no edit-fields heading without edit fields', () => {
+    renderCard({ editAllowed: true, arguments: { to: 'a@b.c' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.queryByText('Edit fields')).toBeNull();
+    expect(screen.queryByTestId('approval-edit-form')).toBeNull();
+    expect(screen.getByLabelText('Edited arguments JSON')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save edit' })
+    ).toBeInTheDocument();
+  });
+
+  it('renders embedded newlines in diff values as real line breaks', () => {
+    renderCard({
+      status: 'edited',
+      decision: 'edit',
+      argumentsPreview: { body: 'first line\nsecond line' },
+      editedArgumentsPreview: {
+        body: 'first line\nsecond line\nthird line'
+      }
+    });
+
+    const diff = screen.getByTestId('approval-diff');
+    expect(diff.querySelector('pre')).not.toBeNull();
+    const text = diff.textContent ?? '';
+    expect(text).toContain('"first line\nsecond line"');
+    expect(text).toContain('second line\nthird line"');
+    expect(text).not.toContain('\\n');
+  });
+
+  it('reports an invalid number field', () => {
+    renderCard({
+      editAllowed: true,
+      editFields: [
+        {
+          name: 'amount',
+          label: 'Amount',
+          kind: 'number',
+          required: false,
+          nullable: false,
+          secret: false
+        }
+      ],
+      arguments: { amount: 'not-a-number' }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save & approve' }));
+
+    expect(respondToApproval).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith('Amount must be a number');
+  });
+
+  it('reports an invalid integer field', () => {
+    renderCard({
+      editAllowed: true,
+      editFields: [
+        {
+          name: 'count',
+          label: 'Count',
+          kind: 'integer',
+          required: false,
+          nullable: false,
+          secret: false
+        }
+      ],
+      arguments: { count: 1 }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Count'), {
+      target: { value: '3.5' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save & approve' }));
+
+    expect(respondToApproval).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith('Count must be a whole number');
+  });
+
+  it('renders enum options and submits the selected value', async () => {
+    respondToApproval.mockResolvedValue({
+      approvalId: 'approval-1',
+      status: 'edited',
+      decision: 'edit',
+      revision: 2
+    });
+    renderCard({
+      editAllowed: true,
+      editFields: [
+        {
+          name: 'priority',
+          label: 'Priority',
+          kind: 'enum',
+          required: true,
+          nullable: false,
+          secret: false,
+          options: ['low', 'high']
+        }
+      ],
+      arguments: { priority: 'low' }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const select = screen.getByLabelText('Priority');
+    expect(select).toHaveValue('low');
+    expect(screen.getByRole('option', { name: 'low' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'high' })).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'high' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save & approve' }));
+
+    await waitFor(() => expect(respondToApproval).toHaveBeenCalledTimes(1));
+    expect(respondToApproval.mock.calls[0][0]).toMatchObject({
+      approvalId: 'approval-1',
+      decision: 'edit',
+      editedArguments: { priority: 'high' }
+    });
+  });
+
+  it('renders multiline and secret fields with their own input types', () => {
+    renderCard({
+      editAllowed: true,
+      editFields: [
+        {
+          name: 'body',
+          label: 'Body',
+          kind: 'text',
+          required: false,
+          nullable: true,
+          secret: false
+        },
+        {
+          name: 'token',
+          label: 'Token',
+          kind: 'string',
+          required: false,
+          nullable: true,
+          secret: true
+        }
+      ],
+      arguments: { body: 'hello', token: 'shh' }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const body = screen.getByLabelText('Body');
+    expect(body.tagName).toBe('TEXTAREA');
+    expect(body).toHaveValue('hello');
+    expect(screen.getByLabelText('Token')).toHaveAttribute('type', 'password');
+  });
+
   it('hides editable fields when the approval is no longer live', () => {
     renderCard({ editAllowed: true, editFields, live: false });
 

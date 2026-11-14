@@ -3,6 +3,7 @@ import {
   MutableRefObject,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from 'react';
@@ -58,6 +59,9 @@ interface Props {
   autoScrollRef: MutableRefObject<boolean>;
 }
 
+const PENDING_INTERACTION_MESSAGE =
+  'Resolve the pending approval or question before sending another message.';
+
 export default function MessageComposer({
   fileSpec,
   onFileUpload,
@@ -69,7 +73,20 @@ export default function MessageComposer({
   const selectedCommand = useAppStore((state) => state.persistentCommand);
   const setSelectedCommand = useAppStore((state) => state.setPersistentCommand);
   const commands = useChainlitStore((state) => state.commands);
+  const approvals = useChainlitStore((state) => state.approvals);
+  const questions = useChainlitStore((state) => state.questions);
   const setChatSettingsOpen = useAppStore((state) => state.setChatSettingsOpen);
+
+  const hasPendingInteraction = useMemo(
+    () =>
+      approvals.some(
+        (approval) => approval.status === 'pending' && approval.live !== false
+      ) ||
+      questions.some(
+        (question) => question.status === 'pending' && question.live === true
+      ),
+    [approvals, questions]
+  );
 
   // Pre-select the command marked as selected by the backend
   useEffect(() => {
@@ -235,10 +252,20 @@ export default function MessageComposer({
   );
 
   const submit = useCallback(() => {
-    if (
-      disabled ||
-      (value.trim() === '' && attachments.length === 0 && !selectedCommand)
-    ) {
+    if (hasPendingInteraction) {
+      toast.warning(
+        t('chat.input.errors.pendingInteraction', {
+          defaultValue: PENDING_INTERACTION_MESSAGE
+        })
+      );
+      return;
+    }
+
+    if (disabled) {
+      return;
+    }
+
+    if (value.trim() === '' && attachments.length === 0 && !selectedCommand) {
       return;
     }
 
@@ -255,12 +282,14 @@ export default function MessageComposer({
   }, [
     value,
     disabled,
+    hasPendingInteraction,
     askUser,
     attachments,
     selectedCommand,
     setAttachments,
     onSubmit,
-    onReply
+    onReply,
+    t
   ]);
 
   useEffect(() => {
@@ -286,6 +315,17 @@ export default function MessageComposer({
         <div className="mb-1">
           <Attachments />
         </div>
+      ) : null}
+      {hasPendingInteraction ? (
+        <p
+          role="status"
+          data-testid="pending-interaction-hint"
+          className="mb-1 px-1 text-xs text-muted-foreground"
+        >
+          {t('chat.input.errors.pendingInteraction', {
+            defaultValue: PENDING_INTERACTION_MESSAGE
+          })}
+        </p>
       ) : null}
       <Input
         ref={inputRef}

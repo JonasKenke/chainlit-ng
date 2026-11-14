@@ -1,0 +1,23 @@
+[project]
+allow_origins = ["*"]
+
+[features]
+# Needed for the `latex` command.
+latex = true
+
+# New: configured directories survive shutdown (the legacy `.files` does not).
+[features.spontaneous_file_upload]
+enabled = true
+directory = ".uploads"
+
+# Opt-in only; set enabled = true with the `chainlit[otel]` extra installed.
+[features.telemetry]
+enabled = false
+
+[UI]
+name = "Chainlit after 2.12.0"
+# New: local timestamps on user and assistant messages.
+show_message_timestamps = true
+
+[meta]
+generated_by = "2.12.0"
