@@ -448,9 +448,11 @@ export const ApprovalCard = ({ approval }: Props) => {
             </div>
           ) : null}
         </div>
-        <span className="text-xs font-medium uppercase text-muted-foreground">
-          {statusLabel[approval.status]}
-        </span>
+        {approval.status !== 'pending' ? (
+          <span className="text-xs font-medium uppercase text-muted-foreground">
+            {statusLabel[approval.status]}
+          </span>
+        ) : null}
       </div>
 
       {approval.content ? (

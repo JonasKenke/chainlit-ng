@@ -58,7 +58,7 @@ describe('ApprovalCard', () => {
     expect(screen.getByText('Send Email')).toBeInTheDocument();
     expect(screen.queryByText('send_email')).toBeNull();
     expect(screen.getByText('Send the draft')).toBeInTheDocument();
-    expect(screen.getByText('Awaiting decision')).toBeInTheDocument();
+    expect(screen.queryByText('Awaiting decision')).toBeNull();
     expect(screen.queryByText(/person@example.com/)).toBeNull();
     expect(screen.queryByText(/server-held-secret/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
