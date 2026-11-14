@@ -836,6 +836,16 @@ class TestApprovalEntryGuard:
         context.emitter.send_toast.assert_not_awaited()
         assert "Refused a new run" in caplog.text
 
+    async def test_repeated_messages_do_not_retoast(self, context, mock_session):
+        on_message = AsyncMock()
+        with patch.object(config.code, "on_message", on_message):
+            for _ in range(3):
+                await message("sid", {"message": {"output": "hi"}})
+
+        on_message.assert_not_awaited()
+        context.emitter.process_message.assert_not_awaited()
+        context.emitter.send_toast.assert_not_awaited()
+
     async def test_edit_message_is_refused_before_chat_context_changes(self):
         on_message = AsyncMock()
         with (
