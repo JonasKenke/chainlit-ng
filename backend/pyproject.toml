@@ -65,10 +65,6 @@ dev = [
     "ruff>=0.13.3,<1.0.0",
 ]
 
-[project.urls]
-Homepage = "https://YOUR_GIT_HOST/Kreativhub/chainlit"
-Repository = "https://YOUR_GIT_HOST/Kreativhub/chainlit"
-
 [project.scripts]
 chainlit-ng = "chainlit.cli:cli"
 chainlit = "chainlit.cli:cli"

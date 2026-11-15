@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `@chainlit-ng/react-client`. Both are released as `3.0.0`.
 - See the [3.0 migration guide](docs/migration-3.0.md) for the package renames,
   the Recoil to Zustand state change, and the breaking configuration updates.
+- Remove the former private Git host from the documentation, generated welcome
+  text, and package metadata. The next public repository URL can be added in
+  those locations without carrying the old host forward.
 
 ### Inherited from 2.12
 

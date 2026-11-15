@@ -13,11 +13,6 @@ Hi there, Developer! 👋 We're excited to have you on board. Chainlit NG is a
 maintained fork of Chainlit for prototyping, debugging and sharing applications
 built on top of LLMs.
 
-## Useful Links 🔗
-
-- **Documentation:** Browse the [Chainlit NG docs](https://YOUR_GIT_HOST/Kreativhub/chainlit/-/tree/main/docs) 📚
-- **Repository:** [Kreativhub/chainlit](https://YOUR_GIT_HOST/Kreativhub/chainlit) 💬
-
 We can't wait to see what you create with Chainlit NG! Happy coding! 💻😊
 
 ## Welcome screen

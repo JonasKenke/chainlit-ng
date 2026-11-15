@@ -212,20 +212,15 @@ class TestDefaultMarkdownStr:
         """Test that DEFAULT_MARKDOWN_STR contains welcome message."""
         assert "Welcome to Chainlit NG" in DEFAULT_MARKDOWN_STR
 
-    def test_default_markdown_str_contains_links(self):
-        """Test that DEFAULT_MARKDOWN_STR contains useful links."""
-        assert "Documentation" in DEFAULT_MARKDOWN_STR
-        assert "Repository" in DEFAULT_MARKDOWN_STR
-        assert (
-            "https://YOUR_GIT_HOST/Kreativhub/chainlit" in DEFAULT_MARKDOWN_STR
-        )
+    def test_default_markdown_str_has_no_repository_url(self):
+        """The generated welcome text must not embed a specific Git host."""
+        assert "https://" not in DEFAULT_MARKDOWN_STR
+        assert "http://" not in DEFAULT_MARKDOWN_STR
 
     def test_default_markdown_str_is_valid_markdown(self):
         """Test that DEFAULT_MARKDOWN_STR contains valid markdown syntax."""
         assert "#" in DEFAULT_MARKDOWN_STR  # Headers
-        assert "**" in DEFAULT_MARKDOWN_STR  # Bold
-        assert "[" in DEFAULT_MARKDOWN_STR  # Links
-        assert "](" in DEFAULT_MARKDOWN_STR  # Link syntax
+        assert "Welcome to Chainlit NG" in DEFAULT_MARKDOWN_STR
 
 
 class TestMarkdownEdgeCases:

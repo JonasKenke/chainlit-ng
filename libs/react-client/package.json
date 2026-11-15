@@ -8,11 +8,6 @@
     "type-check": "tsc --noemit",
     "test": "vitest run"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://YOUR_GIT_HOST/Kreativhub/chainlit.git",
-    "directory": "libs/react-client"
-  },
   "private": false,
   "keywords": [
     "llm",
