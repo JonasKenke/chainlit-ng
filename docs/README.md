@@ -10,6 +10,7 @@ See also:
 - [Migrating to Chainlit NG 3.0.0](migration-3.0.md)
 - [Request context in callbacks](request-context.md)
 - [Skills: app-directory instructions and progressive disclosure](skills.md)
+- [Prompt versioning and pinned sharing](prompt-versioning.md)
 - [Per-user OAuth for MCP connections](mcp-oauth.md)
 - [Scheduled prompts integration](scheduled-prompts.md)
 - [Embedding Chainlit Copilot: supported authentication model](copilot-embedding.md)

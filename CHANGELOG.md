@@ -4,7 +4,7 @@ All notable changes to Chainlit will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [3.0.0] - 2026-11-14
+## [3.0.0] - 2026-11-15
 
 ### Changed
 
@@ -17,8 +17,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - See the [3.0 migration guide](docs/migration-3.0.md) for the package renames,
   the Recoil to Zustand state change, and the breaking configuration updates.
 
+### Inherited from 2.12
+
+- Carry forward the prompt gallery: save composer text as a prompt, search and
+  insert saved prompts, edit or delete them, and share them by link.
+- Carry forward scheduled prompts: recurrence presets, browser timezone, an
+  independent model dropdown from `set_scheduled_task_models`, optional chat
+  profiles, and optional `after_scheduled_task` hooks. Scheduling still requires
+  authentication, a data layer with scheduled-task support, and `on_message`.
+
 ### Added
 
+- Add the unified Library dialog for prompts and skills: one composer icon,
+  Prompts and Skills tabs, search, active and needs-review filters, update
+  markers, and version history. It replaces separate entry points when both
+  features are enabled.
+- Add immutable prompt and skill versions with pinned share-link copies,
+  source-to-local diffs, explicit update or downgrade, detach, grouped update
+  notices, and per-version acknowledgement. Shared versions written before the
+  link stay private.
+- Add per-user skills: Markdown authoring, import and export, enable toggles,
+  sharing, pinned updates, and a review gate. Imported and shared copies start
+  disabled; enabling them requires reviewing the current content. Local
+  self-authored edits stay enabled, while imported or pinned edits disable for
+  review. See [the skills guide](docs/skills.md).
 - Add opt-in read-only thread sharing with named users (`feat(data)`):
   `[features] thread_grants = true` plus a data layer that implements the grant
   contract. `SQLAlchemyDataLayer` stores grants in a lazily created

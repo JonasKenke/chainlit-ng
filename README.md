@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Build production-ready conversational AI applications in Python.</b><br />
-  Tool-call approvals, agent questions, observability, and a modern React 19 frontend — in minutes, not weeks.
+  Tool-call approvals, agent questions, a versioned prompt and skill library, observability, and a modern React 19 frontend — in minutes, not weeks.
 </p>
 
 <p align="center">
@@ -58,15 +58,82 @@ Run it with auto-reload:
 chainlit-ng run demo.py -w
 ```
 
-## What's new in 3.0
+## What's in 3.0
 
 - **Tool-call approvals.** Pause a tool with `@cl.step(requires_approval=True)` or the explicit `cl.Approval` API. The server keeps the real arguments; the card shows a redacted preview. Users can approve, reject, edit generated form fields, or request changes with a comment. See [docs/approvals.md](docs/approvals.md).
 - **Agent questions.** `cl.ask` pauses the step for an authored question with options, free text, or both. Answers carry explicit provenance and are marked as untrusted user input. See [docs/questions.md](docs/questions.md).
 - **Thread sharing and grants.** Opt-in read-only sharing with named users, scoped by the data layer. See [docs/thread-sharing.md](docs/thread-sharing.md).
 - **Safer MCP.** Servers are declared by name in server-side config, user-provided servers require an explicit URL allowlist, and per-user OAuth is supported for streamable HTTP. See [docs/mcp-oauth.md](docs/mcp-oauth.md).
 - **OpenTelemetry traces.** Opt-in OTLP/HTTP export from the step tree, with a fixed redaction allowlist and bounded span attributes. See [docs/telemetry.md](docs/telemetry.md).
-- **Skills and prompts.** App and per-user skills, a prompt gallery, and scheduled prompts with model selection. See [docs/skills.md](docs/skills.md) and [docs/scheduled-prompts.md](docs/scheduled-prompts.md).
+- **Library, prompts, and skills.** One Library dialog with Prompts and Skills tabs. Save, search, insert, edit, share, and version prompts; create, import, review, enable, share, and update skills. See [Prompt and skill Library](#prompt-and-skill-library).
+- **Scheduled prompts.** Carried forward from 2.12: recurring prompt runs with model selection, optional chat profiles, and optional after-hooks. See [Scheduled prompts](#scheduled-prompts).
 - **UI improvements.** Optional message timestamps, compact chain-of-thought display, side-view opening by element id, and a configurable upload directory outside `APP_ROOT`.
+
+## Prompt and skill Library
+
+With both features enabled, the composer Library is the entry point. It uses one
+icon and one dialog with two tabs instead of separate composer buttons.
+
+```toml
+[features]
+prompt_gallery = true
+skills = true
+```
+
+Prompt gallery entries and per-user skill rows live in the data layer. Sharing links require
+authentication; a no-auth app hides the share controls and rejects share and
+link-add requests.
+
+### Prompts
+
+- Save composer text as a prompt, create one from the Library, search, insert,
+  edit, and delete.
+- Share a prompt by link. Every content change appends an immutable version.
+- Open a shared link to add a pinned copy. The copy keeps the source version it
+  was added from and never updates silently.
+- When the source moves ahead, the Library shows a grouped notice, an update
+  chip, and a diff against the source version. Update, downgrade to an older
+  version, or detach explicitly. A downgrade refreshes the notice without
+  re-alerting for a version that was already acknowledged.
+- Versions written before the share link are private. Public routes expose only
+  the share baseline and later versions.
+
+### Skills
+
+- Author a skill in Markdown, import one, export it, or add a shared copy.
+- The Library filters skills by All, Active, Needs review, and Updates.
+- Imports and shared copies start disabled. Use the enable toggle to open the
+  review dialog, inspect the instructions, and enable the reviewed version.
+- Local self-authored edits keep the skill enabled. Edits to an imported or
+  pinned skill disable it until the changed body is reviewed again.
+- Skills use the same version and pinned-copy contract as prompts. Applying a
+  source version stores the copy disabled, so it must pass review before use.
+
+See [docs/skills.md](docs/skills.md) and
+[docs/prompt-versioning.md](docs/prompt-versioning.md) for the full model and
+API contract.
+
+## Scheduled prompts
+
+Scheduled prompts reuse the app's message path: the scheduler prepares the saved
+model and chat profile, then calls `on_message` on the selected recurrence.
+
+```toml
+[features]
+prompt_scheduling = true
+prompt_gallery = true # optional: reuse saved prompts in the picker
+```
+
+Scheduling requires authentication and a data layer with scheduled-task support.
+Register `set_scheduled_task_models` to show a model dropdown; with one model the
+dropdown is hidden and that model is used automatically. When the app exposes
+more than one chat profile, the form also shows a profile selector. Optional
+after-hooks are registered with `after_scheduled_task`.
+Recurrence presets cover daily, weekdays, weekly, monthly, and a custom
+every-N-hours schedule. The browser timezone is used automatically.
+
+See [docs/scheduled-prompts.md](docs/scheduled-prompts.md) for the callback
+contract, model application, after-hooks, and recurrence details.
 
 ## Screenshots
 
