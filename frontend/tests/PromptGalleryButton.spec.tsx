@@ -42,28 +42,9 @@ const fetchPromptVersionsMock = vi.fn().mockResolvedValue([
     createdAt: '2024-02-01T00:00:00Z'
   }
 ]);
-const fetchPromptDiffMock = vi.fn().mockResolvedValue({
-  promptId: 'p1',
-  from: 'pinned',
-  to: 'v2',
-  fromVersionId: 'v1',
-  toVersionId: 'v2',
-  fromVersion: 1,
-  toVersion: 2,
-  fromContentHash: 'sha256:old',
-  toContentHash: 'sha256:new',
-  rows: [
-    {
-      op: 'replace',
-      oldLine: 1,
-      newLine: 1,
-      oldText: 'old line',
-      newText: 'new line'
-    }
-  ],
-  truncated: false,
-  maxRows: 2000,
-  maxBytes: 262144
+const fetchPromptVersionMock = vi.fn().mockResolvedValue({
+  id: 'v2',
+  content: 'new line'
 });
 const toastMock = vi.hoisted(() => vi.fn());
 const editPromptMock = vi.fn().mockResolvedValue({
@@ -120,7 +101,7 @@ vi.mock('@chainlit-ng/react-client', () => ({
     fetchPromptUpdates: fetchPromptUpdatesMock,
     ackPromptUpdate: ackPromptUpdateMock,
     fetchPromptVersions: fetchPromptVersionsMock,
-    fetchPromptDiff: fetchPromptDiffMock
+    fetchPromptVersion: fetchPromptVersionMock
   }),
   useSkills: () => ({
     skills: [],
@@ -450,6 +431,26 @@ describe('PromptGalleryButton', () => {
       await act(() => Promise.resolve());
       expect(fetchPromptUpdatesMock).not.toHaveBeenCalled();
       expect(toastMock).not.toHaveBeenCalled();
+    });
+
+    it('opens version history from the row badge without an update', async () => {
+      (useConfig as any).mockReturnValue(versioningConfig);
+      renderComponent(samplePrompts);
+      fireEvent.click(getGalleryBtn());
+
+      const badge = await screen.findByTestId('prompt-versions-p1');
+      expect(badge).toHaveTextContent('v1');
+      fireEvent.click(badge);
+
+      expect(
+        await screen.findByText('chat.promptGallery.diff.historyTitle')
+      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(fetchPromptVersionMock).toHaveBeenCalledWith('p1', 'v2', {
+          shared: false
+        })
+      );
+      expect(screen.queryByTestId('prompt-diff-update')).toBeNull();
     });
 
     it('shows a per-row chip and opens the version diff', async () => {

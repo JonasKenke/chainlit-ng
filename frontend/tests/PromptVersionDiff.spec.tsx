@@ -7,7 +7,7 @@ import { PromptVersionDiff } from '@/components/PromptVersionDiff';
 
 const mocks = vi.hoisted(() => ({
   fetchPromptVersions: vi.fn(),
-  fetchPromptDiff: vi.fn(),
+  fetchPromptVersion: vi.fn(),
   syncPrompt: vi.fn(),
   detachPrompt: vi.fn(),
   toast: Object.assign(vi.fn(), {
@@ -25,7 +25,7 @@ vi.mock('@/components/i18n/Translator', () => ({
 vi.mock('@chainlit-ng/react-client', () => ({
   usePromptGallery: () => ({
     fetchPromptVersions: mocks.fetchPromptVersions,
-    fetchPromptDiff: mocks.fetchPromptDiff,
+    fetchPromptVersion: mocks.fetchPromptVersion,
     syncPrompt: mocks.syncPrompt,
     detachPrompt: mocks.detachPrompt
   }),
@@ -88,38 +88,8 @@ const versions = [
   }
 ];
 
-const buildDiff = (
-  rows = [
-    {
-      op: 'equal' as const,
-      oldLine: 1,
-      newLine: 1,
-      oldText: 'hello',
-      newText: 'hello'
-    },
-    {
-      op: 'replace' as const,
-      oldLine: 2,
-      newLine: 2,
-      oldText: 'old line',
-      newText: 'new line'
-    }
-  ]
-) => ({
-  promptId: 'p1',
-  from: 'pinned' as const,
-  to: 'v3',
-  fromVersionId: 'v1',
-  toVersionId: 'v3',
-  fromVersion: 1,
-  toVersion: 3,
-  fromContentHash: 'sha256:pinned',
-  toContentHash: 'sha256:source-new-head',
-  rows,
-  truncated: false,
-  maxRows: 2000,
-  maxBytes: 262144
-});
+const versionContent = (id: string) =>
+  id === 'v3' ? 'hello\nnew line' : id === 'v2' ? 'hello\nv2 line' : 'hello';
 
 const renderDialog = (
   overrides: Partial<ComponentProps<typeof PromptVersionDiff>> = {}
@@ -142,7 +112,12 @@ describe('PromptVersionDiff', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.fetchPromptVersions.mockResolvedValue(versions);
-    mocks.fetchPromptDiff.mockResolvedValue(buildDiff());
+    mocks.fetchPromptVersion.mockImplementation(
+      async (_id: string, versionId: string) => ({
+        id: versionId,
+        content: versionContent(versionId)
+      })
+    );
     mocks.syncPrompt.mockResolvedValue({
       ...prompt,
       content: 'hello\nnew line'
@@ -155,7 +130,12 @@ describe('PromptVersionDiff', () => {
 
     expect(await screen.findByText('new line')).toBeInTheDocument();
     expect(screen.getByText('old line')).toBeInTheDocument();
-    expect(mocks.fetchPromptDiff).toHaveBeenCalledWith('p1', 'v3', 'pinned');
+    expect(mocks.fetchPromptVersion).toHaveBeenCalledWith('source-1', 'v3', {
+      shared: true
+    });
+    expect(mocks.fetchPromptVersions).toHaveBeenCalledWith('source-1', {
+      shared: true
+    });
 
     const metadata = screen.getByTestId('prompt-diff-metadata');
     expect(metadata).toHaveTextContent('v3');
@@ -191,10 +171,10 @@ describe('PromptVersionDiff', () => {
     });
 
     await waitFor(() =>
-      expect(mocks.fetchPromptDiff).toHaveBeenLastCalledWith(
-        'p1',
+      expect(mocks.fetchPromptVersion).toHaveBeenLastCalledWith(
+        'source-1',
         'v2',
-        'pinned'
+        { shared: true }
       )
     );
   });
@@ -240,17 +220,19 @@ describe('PromptVersionDiff', () => {
 
     renderDialog();
     await screen.findByText('new line');
-    expect(mocks.fetchPromptDiff).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchPromptVersion).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId('prompt-diff-update'));
 
     expect(await screen.findByTestId('prompt-diff-stale')).toBeInTheDocument();
-    await waitFor(() => expect(mocks.fetchPromptDiff).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(mocks.fetchPromptVersion).toHaveBeenCalledTimes(2)
+    );
     expect(mocks.fetchPromptVersions).toHaveBeenCalledTimes(2);
   });
 
   it('offers detach when the shared source is unavailable', async () => {
-    mocks.fetchPromptDiff.mockRejectedValue({
+    mocks.fetchPromptVersion.mockRejectedValue({
       status: 409,
       detail: { code: 'pinned_unavailable', message: 'gone' }
     });
@@ -281,19 +263,49 @@ describe('PromptVersionDiff', () => {
     expect(screen.getByTestId('prompt-diff-update')).toBeDisabled();
   });
 
+  it('opens local version history without an update action', async () => {
+    const localPrompt: IPrompt = {
+      ...prompt,
+      id: 'local-1',
+      sourcePromptId: null,
+      pinnedVersionId: null,
+      pinnedContentHash: null,
+      pinnedAt: null
+    };
+    const localVersions = [
+      { ...versions[0], id: 'lv3', promptId: 'local-1', version: 3 },
+      { ...versions[1], id: 'lv2', promptId: 'local-1', version: 2 },
+      { ...versions[1], id: 'lv1', promptId: 'local-1', version: 1 }
+    ];
+    mocks.fetchPromptVersions.mockResolvedValue(localVersions);
+    mocks.fetchPromptVersion.mockResolvedValue({
+      id: 'lv2',
+      content: 'hello\nolder line'
+    });
+
+    renderDialog({ prompt: localPrompt });
+
+    expect(
+      await screen.findByText('chat.promptGallery.diff.historyTitle')
+    ).toBeInTheDocument();
+    expect(mocks.fetchPromptVersions).toHaveBeenCalledWith('local-1', {
+      shared: false
+    });
+    await waitFor(() =>
+      expect(mocks.fetchPromptVersion).toHaveBeenCalledWith('local-1', 'lv2', {
+        shared: false
+      })
+    );
+    expect(screen.getByTestId('prompt-diff-version')).toHaveValue('lv2');
+    expect(screen.queryByTestId('prompt-diff-update')).toBeNull();
+  });
+
   it('renders untrusted diff text as text, never as HTML', async () => {
     const payload = '<script>alert("x")</script>';
-    mocks.fetchPromptDiff.mockResolvedValue(
-      buildDiff([
-        {
-          op: 'insert',
-          oldLine: null,
-          newLine: 1,
-          oldText: null,
-          newText: payload
-        }
-      ])
-    );
+    mocks.fetchPromptVersion.mockResolvedValue({
+      id: 'v3',
+      content: payload
+    });
 
     renderDialog();
 

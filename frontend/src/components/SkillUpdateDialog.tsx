@@ -1,4 +1,4 @@
-import { computeSkillDiff } from '@/lib/skillDiff';
+import { computeTextDiff } from '@/lib/skillDiff';
 import {
   ISkill,
   ISkillVersion,
@@ -150,7 +150,7 @@ export function SkillUpdateDialog({
   const diff = useMemo(
     () =>
       skill && target
-        ? computeSkillDiff(skill.content, target.content)
+        ? computeTextDiff(skill.content, target.content)
         : { rows: [], truncated: false },
     [skill, target]
   );

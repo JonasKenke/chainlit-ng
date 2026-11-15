@@ -1,6 +1,7 @@
+import { computeTextDiff } from '@/lib/skillDiff';
 import {
   IPrompt,
-  IPromptDiff,
+  IPromptDiffRow,
   IPromptVersionSummary,
   promptErrorCode,
   usePromptGallery
@@ -55,12 +56,15 @@ export function PromptVersionDiff({
   onUpdated
 }: PromptVersionDiffProps) {
   const { t } = useTranslation();
-  const { fetchPromptVersions, fetchPromptDiff, syncPrompt, detachPrompt } =
+  const { fetchPromptVersions, fetchPromptVersion, syncPrompt, detachPrompt } =
     usePromptGallery();
 
   const [versions, setVersions] = useState<IPromptVersionSummary[]>([]);
   const [targetId, setTargetId] = useState<string | null>(null);
-  const [diff, setDiff] = useState<IPromptDiff | null>(null);
+  const [diff, setDiff] = useState<{
+    rows: IPromptDiffRow[];
+    truncated: boolean;
+  } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -75,20 +79,31 @@ export function PromptVersionDiff({
   const [detaching, setDetaching] = useState(false);
 
   const promptId = prompt?.id;
+  const isPinned = Boolean(prompt?.sourcePromptId);
+  const versionSourceId = isPinned
+    ? (prompt?.sourcePromptId ?? null)
+    : promptId;
 
   const loadDiff = useCallback(async () => {
-    if (!promptId || !targetId) {
+    if (!versionSourceId || !targetId) {
       setDiff(null);
       return;
     }
     setLoadingDiff(true);
     setDiffError(false);
     try {
-      const result = await fetchPromptDiff(promptId, targetId, 'pinned');
-      setDiff(result);
+      const target = await fetchPromptVersion(versionSourceId, targetId, {
+        shared: isPinned
+      });
+      setDiff(computeTextDiff(prompt?.content ?? '', target.content));
     } catch (error) {
       const code = promptErrorCode(error);
-      if (code === 'pinned_unavailable' || code === 'not_pinned') {
+      if (
+        isPinned &&
+        (code === 'pinned_unavailable' ||
+          code === 'not_pinned' ||
+          code === 'source_unavailable')
+      ) {
         setSourceUnavailable(true);
         setDiff(null);
       } else {
@@ -97,29 +112,48 @@ export function PromptVersionDiff({
     } finally {
       setLoadingDiff(false);
     }
-  }, [promptId, targetId, fetchPromptDiff]);
+  }, [
+    versionSourceId,
+    targetId,
+    prompt?.content,
+    isPinned,
+    fetchPromptVersion
+  ]);
 
   const loadVersions = useCallback(async () => {
-    if (!promptId) return;
+    if (!versionSourceId) return;
     setLoadingVersions(true);
     setVersionsError(false);
     try {
-      const list = await fetchPromptVersions(promptId);
+      const list = await fetchPromptVersions(versionSourceId, {
+        shared: isPinned
+      });
       const sorted = [...list].sort((a, b) => b.version - a.version);
       setVersions(sorted);
       const preferred = sorted.some(
         (version) => version.id === initialVersionId
       )
         ? initialVersionId
-        : sorted[0]?.id;
+        : isPinned
+          ? sorted[0]?.id
+          : (sorted[1]?.id ?? sorted[0]?.id);
       setTargetId(preferred ?? null);
-    } catch {
+    } catch (error) {
+      const code = promptErrorCode(error);
+      if (
+        isPinned &&
+        (code === 'pinned_unavailable' ||
+          code === 'not_pinned' ||
+          code === 'source_unavailable')
+      ) {
+        setSourceUnavailable(true);
+      }
       setVersions([]);
       setVersionsError(true);
     } finally {
       setLoadingVersions(false);
     }
-  }, [promptId, fetchPromptVersions, initialVersionId]);
+  }, [versionSourceId, isPinned, fetchPromptVersions, initialVersionId]);
 
   useEffect(() => {
     if (!open || !promptId) return;
@@ -129,7 +163,7 @@ export function PromptVersionDiff({
     setAlreadyCurrent(false);
     setActionError(null);
     void loadVersions();
-  }, [open, promptId, initialVersionId, loadVersions]);
+  }, [open, versionSourceId, initialVersionId, loadVersions]);
 
   useEffect(() => {
     if (!open || !targetId) return;
@@ -206,14 +240,43 @@ export function PromptVersionDiff({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <GitCompare className="h-4 w-4" />
-            {t('chat.promptGallery.diff.title')}
+            {t(
+              isPinned
+                ? 'chat.promptGallery.diff.title'
+                : 'chat.promptGallery.diff.historyTitle'
+            )}
           </DialogTitle>
           <DialogDescription>
-            {t('chat.promptGallery.diff.description')}
+            {t(
+              isPinned
+                ? 'chat.promptGallery.diff.description'
+                : 'chat.promptGallery.diff.historyDescription'
+            )}
           </DialogDescription>
         </DialogHeader>
 
-        {loadingVersions ? (
+        {sourceUnavailable ? (
+          <div className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+            <p className="flex items-center gap-2 text-destructive">
+              <ShieldAlert className="h-4 w-4" />
+              {t('chat.promptGallery.diff.sourceUnavailable')}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t('chat.promptGallery.diff.sourceUnavailableHint')}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="self-start"
+              onClick={handleDetach}
+              disabled={detaching}
+              data-testid="prompt-diff-detach"
+            >
+              {t('chat.promptGallery.diff.detach')}
+            </Button>
+          </div>
+        ) : loadingVersions ? (
           <p className="text-sm text-muted-foreground">
             {t('common.status.loading')}
           </p>
@@ -305,29 +368,6 @@ export function PromptVersionDiff({
               </dl>
             ) : null}
 
-            {sourceUnavailable ? (
-              <div className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
-                <p className="flex items-center gap-2 text-destructive">
-                  <ShieldAlert className="h-4 w-4" />
-                  {t('chat.promptGallery.diff.sourceUnavailable')}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {t('chat.promptGallery.diff.sourceUnavailableHint')}
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="self-start"
-                  onClick={handleDetach}
-                  disabled={detaching}
-                  data-testid="prompt-diff-detach"
-                >
-                  {t('chat.promptGallery.diff.detach')}
-                </Button>
-              </div>
-            ) : null}
-
             {stale ? (
               <p
                 className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400"
@@ -416,24 +456,26 @@ export function PromptVersionDiff({
               >
                 {t('common.actions.close')}
               </Button>
-              <Button
-                type="button"
-                onClick={() => handleUpdate(false)}
-                disabled={
-                  !targetId ||
-                  syncing ||
-                  alreadyCurrent ||
-                  sourceUnavailable ||
-                  confirmLocal
-                }
-                data-testid="prompt-diff-update"
-              >
-                {targetVersion
-                  ? t('chat.promptGallery.diff.update', {
-                      version: targetVersion.version
-                    })
-                  : t('chat.promptGallery.diff.updateFallback')}
-              </Button>
+              {isPinned ? (
+                <Button
+                  type="button"
+                  onClick={() => handleUpdate(false)}
+                  disabled={
+                    !targetId ||
+                    syncing ||
+                    alreadyCurrent ||
+                    sourceUnavailable ||
+                    confirmLocal
+                  }
+                  data-testid="prompt-diff-update"
+                >
+                  {targetVersion
+                    ? t('chat.promptGallery.diff.update', {
+                        version: targetVersion.version
+                      })
+                    : t('chat.promptGallery.diff.updateFallback')}
+                </Button>
+              ) : null}
             </div>
           </>
         )}

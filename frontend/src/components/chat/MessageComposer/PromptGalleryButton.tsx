@@ -372,9 +372,33 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                           >
                             <div className="flex items-start justify-between gap-2 w-full overflow-hidden">
                               <div className="flex flex-col gap-1 overflow-hidden">
-                                <span className="text-sm font-medium">
-                                  {prompt.title}
-                                </span>
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <span className="truncate text-sm font-medium">
+                                    {prompt.title}
+                                  </span>
+                                  {versioningEnabled ? (
+                                    <button
+                                      type="button"
+                                      data-testid={`prompt-versions-${prompt.id}`}
+                                      className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-primary/50 hover:text-primary"
+                                      aria-label={t(
+                                        'chat.promptGallery.versions',
+                                        { version: prompt.version ?? 1 }
+                                      )}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDiffTarget({
+                                          prompt,
+                                          versionId: null
+                                        });
+                                        setOpen(false);
+                                      }}
+                                    >
+                                      v{prompt.version ?? 1}
+                                    </button>
+                                  ) : null}
+                                </div>
                                 {updatesByPrompt.get(prompt.id) ? (
                                   <button
                                     type="button"

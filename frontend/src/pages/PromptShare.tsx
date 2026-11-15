@@ -157,7 +157,7 @@ export default function PromptSharePage() {
 
   return (
     <Page>
-      <div className="flex flex-col items-center justify-center flex-1 p-6 gap-6 max-w-xl mx-auto w-full">
+      <div className="flex flex-col items-center justify-center flex-1 p-6 gap-6 max-w-2xl mx-auto w-full">
         {loading ? (
           <p className="text-muted-foreground text-sm">
             {t('common.status.loading')}

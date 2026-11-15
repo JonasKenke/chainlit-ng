@@ -2,6 +2,7 @@
   "common": {
     "actions": {
       "cancel": "Cancel",
+      "close": "Close",
       "confirm": "Confirm",
       "continue": "Continue",
       "goBack": "Go Back",
@@ -246,11 +247,14 @@
       "saved": "Prompt saved!",
       "tab": "Prompts",
       "updateAvailable": "Update available v{{version}}",
+      "versions": "Version history (v{{version}})",
       "updatesToast": "{{count}} saved prompt has a newer shared version",
       "updatesToastAction": "Review",
       "diff": {
         "title": "Compare versions",
+        "historyTitle": "Version history",
         "description": "Review a shared version before replacing this prompt's content.",
+        "historyDescription": "Review saved versions of this prompt. Pick one to compare it with the current content.",
         "version": "Compare with",
         "unified": "Unified",
         "split": "Side by side",

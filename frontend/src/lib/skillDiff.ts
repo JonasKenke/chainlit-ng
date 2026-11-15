@@ -168,11 +168,11 @@ function pairChanges(rows: RawRow[]): ISkillDiffRow[] {
 }
 
 /**
- * Build bounded, presentation-only diff rows for two skill bodies. The backend
- * has no skill diff route, so the update dialog derives them here; text is
- * never HTML and the output never reaches the model.
+ * Build bounded, presentation-only diff rows for two text bodies. The backend
+ * has no skill diff route, so the skill and prompt dialogs derive them here;
+ * text is never HTML and the output never reaches the model.
  */
-export function computeSkillDiff(
+export function computeTextDiff(
   oldContent: string,
   newContent: string
 ): ISkillDiff {
