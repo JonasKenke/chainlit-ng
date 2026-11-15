@@ -266,8 +266,7 @@ Some fields are **server-held** and can never be edited from the card:
   `token`, `authorization`, `credential`, and other case-insensitive matches),
 - JSON-schema `format: "password"` or `writeOnly: true` fields (pydantic
   `SecretStr`),
-- fields marked with `json_schema_extra={"readOnly": True}` or the convenience
-  alias `json_schema_extra={"editable": False}`.
+- fields marked with `json_schema_extra={"readOnly": True}`.
 
 The live payload omits their values. The form renders a disabled `Server-held`
 control instead of the value, and the field is excluded from the edit payload.

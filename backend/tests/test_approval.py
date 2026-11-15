@@ -111,7 +111,6 @@ class _NonEditableArgs(BaseModel):
 
     amount: int
     tenant: str = Field(json_schema_extra={"readOnly": True})
-    region: str = Field(json_schema_extra={"editable": False})
 
 
 class FakeDataLayer:
@@ -907,7 +906,7 @@ def test_edit_fields_describe_supported_kinds_and_secrets():
     assert len(fields) == len(by_name)
 
 
-def test_read_only_and_editable_false_fields_are_server_held():
+def test_read_only_fields_are_server_held():
     fields = {
         field["name"]: field
         for field in approval_module._edit_fields(_NonEditableArgs) or []
@@ -916,8 +915,6 @@ def test_read_only_and_editable_false_fields_are_server_held():
     assert fields["amount"]["serverHeld"] is False
     assert fields["tenant"]["serverHeld"] is True
     assert fields["tenant"]["secret"] is False
-    assert fields["region"]["serverHeld"] is True
-    assert fields["region"]["secret"] is False
     assert all("value" not in field for field in fields.values())
 
 
@@ -2071,7 +2068,7 @@ async def test_secretstr_edit_ignores_client_value_and_keeps_the_original(
     assert "sk-original" not in json.dumps(stored)
 
 
-async def test_read_only_and_editable_false_fields_keep_original_values(
+async def test_read_only_fields_keep_original_values(
     layer, mock_chainlit_context, mock_session
 ):
     mock_session.generation = "gen-1"
@@ -2087,7 +2084,6 @@ async def test_read_only_and_editable_false_fields_keep_original_values(
             {
                 "amount": 1,
                 "tenant": "tenant-original",
-                "region": "region-original",
             },
             arguments_schema=_NonEditableArgs,
         )
@@ -2095,13 +2091,10 @@ async def test_read_only_and_editable_false_fields_keep_original_values(
         live = sent[0]
         assert live["arguments"] == {"amount": 1}
         assert "tenant-original" not in json.dumps(live["arguments"])
-        assert "region-original" not in json.dumps(live["arguments"])
         fields = {field["name"]: field for field in live["editFields"]}
         assert fields["amount"]["serverHeld"] is False
         assert fields["tenant"]["serverHeld"] is True
         assert fields["tenant"]["secret"] is False
-        assert fields["region"]["serverHeld"] is True
-        assert fields["region"]["secret"] is False
 
         stored = await _decide(
             mock_session,
@@ -2110,7 +2103,6 @@ async def test_read_only_and_editable_false_fields_keep_original_values(
             edited_arguments={
                 "amount": 5,
                 "tenant": "tenant-evil",
-                "region": "region-evil",
             },
         )
         decision = await task
@@ -2118,23 +2110,19 @@ async def test_read_only_and_editable_false_fields_keep_original_values(
     assert decision.arguments == {
         "amount": 5,
         "tenant": "tenant-original",
-        "region": "region-original",
     }
     assert stored["editedArgumentsPreview"] == {
         "amount": 5,
         "tenant": "tenant-original",
-        "region": "region-original",
     }
     assert stored["editedArgumentsDigest"] == approval_module._arguments_digest(
         {
             "amount": 5,
             "tenant": "tenant-original",
-            "region": "region-original",
         },
         stored["digestSalt"],
     )
     assert "tenant-evil" not in json.dumps(stored)
-    assert "region-evil" not in json.dumps(stored)
 
 
 async def test_invalid_non_secret_edit_still_fails_closed(
@@ -2152,7 +2140,6 @@ async def test_invalid_non_secret_edit_still_fails_closed(
             {
                 "amount": 1,
                 "tenant": "tenant-original",
-                "region": "region-original",
             },
             arguments_schema=_NonEditableArgs,
         )
@@ -2166,7 +2153,6 @@ async def test_invalid_non_secret_edit_still_fails_closed(
                 edited_arguments={
                     "amount": "not-an-int",
                     "tenant": "tenant-evil",
-                    "region": "region-evil",
                 },
             )
 

@@ -688,7 +688,7 @@ def _is_secret_field(name: str, prop: Mapping[str, Any]) -> bool:
 
 def _is_non_editable_field(prop: Mapping[str, Any]) -> bool:
     """Read-only fields keep the original value; the form cannot change them."""
-    return prop.get("readOnly") is True or prop.get("editable") is False
+    return prop.get("readOnly") is True
 
 
 def _unwrap_optional_schema(
