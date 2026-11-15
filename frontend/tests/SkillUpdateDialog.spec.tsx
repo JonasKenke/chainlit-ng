@@ -237,6 +237,18 @@ describe('SkillUpdateDialog', () => {
     expect(screen.queryByTestId('skill-update-submit')).toBeNull();
   });
 
+  it('defaults a current pinned skill to its current version', async () => {
+    renderDialog({ skill: { ...skill, contentHash: 'sha256:new' } });
+
+    expect(await screen.findByTestId('skill-update-version')).toHaveTextContent(
+      'v2'
+    );
+    expect(
+      await screen.findByTestId('skill-update-already-current')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('skill-update-submit')).toBeNull();
+  });
+
   it('shows local skill history without an update action', async () => {
     const localSkill: ISkill = {
       ...skill,

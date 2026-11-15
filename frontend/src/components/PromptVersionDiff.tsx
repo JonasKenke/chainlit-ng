@@ -120,12 +120,21 @@ export function PromptVersionDiff({
       });
       const sorted = [...list].sort((a, b) => b.version - a.version);
       setVersions(sorted);
+      const current = sorted.find(
+        (version) => version.contentHash === prompt?.contentHash
+      );
+      const latest = sorted[0];
+      const fallback = isPinned
+        ? latest?.contentHash !== prompt?.contentHash
+          ? latest?.id
+          : current?.id
+        : sorted.find((version) => version.contentHash !== prompt?.contentHash)
+            ?.id;
       const preferred = sorted.some(
         (version) => version.id === initialVersionId
       )
         ? initialVersionId
-        : (sorted.find((version) => version.contentHash !== prompt?.contentHash)
-            ?.id ?? sorted[0]?.id);
+        : (fallback ?? current?.id ?? latest?.id);
       setTargetId(preferred ?? null);
     } catch (error) {
       const code = promptErrorCode(error);

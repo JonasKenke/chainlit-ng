@@ -86,12 +86,21 @@ export function SkillUpdateDialog({
       });
       const sorted = [...list].sort((a, b) => b.version - a.version);
       setVersions(sorted);
+      const current = sorted.find(
+        (version) => version.contentHash === skill?.contentHash
+      );
+      const latest = sorted[0];
+      const fallback = isPinned
+        ? latest?.contentHash !== skill?.contentHash
+          ? latest?.id
+          : current?.id
+        : sorted.find((version) => version.contentHash !== skill?.contentHash)
+            ?.id;
       const preferred = sorted.some(
         (version) => version.id === initialVersionId
       )
         ? initialVersionId
-        : (sorted.find((version) => version.contentHash !== skill?.contentHash)
-            ?.id ?? sorted[0]?.id);
+        : (fallback ?? current?.id ?? latest?.id);
       setTargetId(preferred ?? null);
     } catch {
       setVersions([]);

@@ -257,6 +257,20 @@ describe('PromptVersionDiff', () => {
     expect(screen.getByTestId('prompt-diff-update')).toBeDisabled();
   });
 
+  it('defaults a pinned prompt that is current to its current version', async () => {
+    renderDialog({
+      prompt: { ...prompt, contentHash: 'sha256:source-new-head' }
+    });
+
+    expect(await screen.findByTestId('prompt-diff-version')).toHaveTextContent(
+      'v3'
+    );
+    expect(
+      await screen.findByText('chat.promptGallery.diff.currentVersion')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('prompt-diff-update')).toBeNull();
+  });
+
   it('opens local version history without an update action', async () => {
     const localPrompt: IPrompt = {
       ...prompt,
