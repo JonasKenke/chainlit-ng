@@ -126,7 +126,7 @@ export default function UserNav() {
           <DropdownMenuSeparator />
           {canClearAll && (
             <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
+              className="text-red-600 focus:bg-red-600/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
               onSelect={() => setIsClearAllOpen(true)}
             >
               <Translator path="navigation.user.menu.clearAll" />
