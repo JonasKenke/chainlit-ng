@@ -22,7 +22,6 @@ import {
   Plus,
   RefreshCw,
   Share2,
-  ShieldCheck,
   Trash2,
   Upload
 } from 'lucide-react';
@@ -431,28 +430,19 @@ export function SkillsPanel() {
                     <div className="flex shrink-0 items-center gap-1">
                       <Switch
                         checked={!!skill.enabled}
-                        aria-label={t('chat.skills.toggle', {
-                          name: skill.title
-                        })}
+                        aria-label={
+                          gated && !skill.enabled
+                            ? t('chat.skills.enable', {
+                                name: skill.title
+                              })
+                            : t('chat.skills.toggle', {
+                                name: skill.title
+                              })
+                        }
                         onCheckedChange={(enabled) =>
                           handleToggle(skill, enabled)
                         }
                       />
-                      {gated && !skill.enabled ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-amber-600 hover:text-amber-700"
-                          aria-label={t('chat.skills.review.open', {
-                            name: skill.title
-                          })}
-                          data-testid={`skill-review-${skill.id}`}
-                          onClick={() => setReviewing(skill)}
-                        >
-                          <ShieldCheck className="h-3.5 w-3.5" />
-                        </Button>
-                      ) : null}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button

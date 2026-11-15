@@ -419,8 +419,7 @@
         "enable": "Enable skill",
         "enabling": "Enabling...",
         "enabled": "Skill enabled",
-        "changed": "The skill changed since it was opened. Review the current version again.",
-        "open": "Review {{name}}"
+        "changed": "The skill changed since it was opened. Review the current version again."
       },
       "share": {
         "title": "Share skill",
@@ -513,7 +512,8 @@
       },
       "updatesToast_one": "{{count}} shared skill has a newer version",
       "updatesToast_other": "{{count}} shared skills have a newer version",
-      "versions": "Version history (v{{version}})"
+      "versions": "Version history (v{{version}})",
+      "enable": "Enable {{name}}"
     },
     "question": {
       "title": "Question",

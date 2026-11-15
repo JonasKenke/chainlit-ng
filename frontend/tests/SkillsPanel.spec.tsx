@@ -245,7 +245,7 @@ describe('SkillsPanel', () => {
     expect(row).not.toHaveTextContent('sha256');
 
     expect(
-      screen.getByRole('switch', { name: 'chat.skills.toggle imported-skill' })
+      screen.getByRole('switch', { name: 'chat.skills.enable imported-skill' })
     ).not.toBeChecked();
   });
 
@@ -255,7 +255,7 @@ describe('SkillsPanel', () => {
 
     fireEvent.click(
       await screen.findByRole('switch', {
-        name: 'chat.skills.toggle imported-skill'
+        name: 'chat.skills.enable imported-skill'
       })
     );
 
@@ -270,8 +270,8 @@ describe('SkillsPanel', () => {
     render(<SkillsPanel />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'chat.skills.review.open imported-skill'
+      await screen.findByRole('switch', {
+        name: 'chat.skills.enable imported-skill'
       })
     );
     const enable = await screen.findByRole('button', {
@@ -297,8 +297,8 @@ describe('SkillsPanel', () => {
     render(<SkillsPanel />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'chat.skills.review.open imported-skill'
+      await screen.findByRole('switch', {
+        name: 'chat.skills.enable imported-skill'
       })
     );
     const enable = await screen.findByRole('button', {
