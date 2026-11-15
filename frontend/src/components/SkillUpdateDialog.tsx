@@ -230,7 +230,7 @@ export function SkillUpdateDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-3xl flex flex-col max-h-[85vh] gap-4"
+        className="sm:max-w-3xl flex flex-col max-h-[85vh] gap-3"
         data-testid="skill-update-dialog"
         aria-describedby={undefined}
       >
@@ -254,28 +254,21 @@ export function SkillUpdateDialog({
           </p>
         ) : (
           <>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="flex flex-col gap-1">
-                <label
-                  htmlFor="skill-update-version"
-                  className="text-xs text-muted-foreground"
-                >
-                  {t('chat.skills.update.version')}
-                </label>
-                <select
-                  id="skill-update-version"
-                  data-testid="skill-update-version"
-                  value={targetId ?? ''}
-                  onChange={(event) => setTargetId(event.target.value)}
-                  className="h-9 min-w-40 rounded-md border bg-background px-2 text-sm"
-                >
-                  {versions.map((version) => (
-                    <option key={version.id} value={version.id}>
-                      {`v${version.version}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="flex items-center justify-between gap-2">
+              <select
+                id="skill-update-version"
+                data-testid="skill-update-version"
+                aria-label={t('chat.skills.update.version')}
+                value={targetId ?? ''}
+                onChange={(event) => setTargetId(event.target.value)}
+                className="h-8 min-w-20 rounded-md border bg-background px-2 text-xs"
+              >
+                {versions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {`v${version.version}`}
+                  </option>
+                ))}
+              </select>
               <div className="flex items-center gap-1" role="group">
                 <Button
                   type="button"
@@ -301,35 +294,21 @@ export function SkillUpdateDialog({
             </div>
 
             {targetVersion ? (
-              <dl
-                className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4"
+              <p
+                className="text-xs text-muted-foreground"
                 data-testid="skill-update-metadata"
+                title={[targetHashLabel, pinnedHashLabel]
+                  .filter(Boolean)
+                  .join(' · ')}
               >
-                <div>
-                  <dt>{t('chat.skills.update.metaVersion')}</dt>
-                  <dd className="text-foreground">v{targetVersion.version}</dd>
-                </div>
-                <div>
-                  <dt>{t('chat.skills.update.metaDate')}</dt>
-                  <dd className="text-foreground">
-                    <time dateTime={targetVersion.createdAt}>
-                      {formatDate(targetVersion.createdAt)}
-                    </time>
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t('chat.skills.update.metaHash')}</dt>
-                  <dd className="text-foreground font-mono">
-                    {targetHashLabel}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t('chat.skills.update.metaPinned')}</dt>
-                  <dd className="text-foreground font-mono">
-                    {pinnedHashLabel}
-                  </dd>
-                </div>
-              </dl>
+                <span className="text-foreground">
+                  v{targetVersion.version}
+                </span>
+                {' · '}
+                <time dateTime={targetVersion.createdAt}>
+                  {formatDate(targetVersion.createdAt)}
+                </time>
+              </p>
             ) : null}
 
             {sourceUnavailable ? (
@@ -446,14 +425,7 @@ export function SkillUpdateDialog({
               </p>
             ) : null}
 
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-              >
-                {t('common.actions.close')}
-              </Button>
+            <div className="flex items-center justify-end">
               <Button
                 type="button"
                 onClick={() => handleUpdate(false)}

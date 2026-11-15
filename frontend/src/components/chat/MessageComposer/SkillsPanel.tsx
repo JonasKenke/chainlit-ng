@@ -53,13 +53,6 @@ interface UpdateTarget {
   versionId: string | null;
 }
 
-/** Imported hashes already carry the sha256: prefix; do not double it. */
-function displayHash(value?: string | null): string {
-  if (!value) return '—';
-  const bare = value.replace(/^sha256:/, '');
-  return `${bare.slice(0, 12)}…`;
-}
-
 /** Imported and linked copies must be reviewed before reaching a model. */
 function needsReview(skill: ISkill): boolean {
   return !!skill.importedFrom || !!skill.sourcePromptId;
@@ -79,7 +72,6 @@ export function SkillsPanel() {
     importSkill,
     exportSkill,
     fetchSkillUpdates,
-    fetchSkillVersions,
     detachSkill
   } = useSkills();
   const [error, setError] = useState<string>();
@@ -91,11 +83,7 @@ export function SkillsPanel() {
   const [updateTarget, setUpdateTarget] = useState<UpdateTarget | null>(null);
   const [section, setSection] = useState<Section>('all');
   const [importing, setImporting] = useState(false);
-  const [versionNumbers, setVersionNumbers] = useState<Record<string, number>>(
-    {}
-  );
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const loadedSourcesRef = useRef<Set<string>>(new Set());
   const fallbackError = t('common.status.error.default');
 
   const sharingEnabled = config?.skillsSharing === true;
@@ -121,45 +109,6 @@ export function SkillsPanel() {
       cancelled = true;
     };
   }, [fetchSkills, fetchSkillUpdates, sharingEnabled, fallbackError]);
-
-  // "From link · pinned vN" needs the source's version number; the pin stores
-  // only an id. Cache per pin so an update to a new version id refreshes it.
-  useEffect(() => {
-    if (!sharingEnabled) return;
-    let cancelled = false;
-    const sources = new Map<
-      string,
-      { sourceId: string; pinnedVersionId: string }
-    >();
-    for (const skill of skills) {
-      if (!skill.sourcePromptId || !skill.pinnedVersionId) continue;
-      const key = `${skill.sourcePromptId}:${skill.pinnedVersionId}`;
-      if (loadedSourcesRef.current.has(key)) continue;
-      sources.set(key, {
-        sourceId: skill.sourcePromptId,
-        pinnedVersionId: skill.pinnedVersionId
-      });
-    }
-    sources.forEach(({ sourceId, pinnedVersionId }, key) => {
-      loadedSourcesRef.current.add(key);
-      fetchSkillVersions(sourceId, { shared: true })
-        .then((versions) => {
-          if (cancelled) return;
-          const version = versions.find((item) => item.id === pinnedVersionId);
-          if (!version) return;
-          setVersionNumbers((previous) => ({
-            ...previous,
-            [pinnedVersionId]: version.version
-          }));
-        })
-        .catch(() => {
-          loadedSourcesRef.current.delete(key);
-        });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [skills, sharingEnabled, fetchSkillVersions]);
 
   const handleToggle = async (skill: ISkill, enabled: boolean) => {
     setError(undefined);
@@ -400,9 +349,6 @@ export function SkillsPanel() {
             <div className="divide-y">
               {visibleSkills.map((skill) => {
                 const update = updatesById.get(skill.id);
-                const pinnedNumber = skill.pinnedVersionId
-                  ? versionNumbers[skill.pinnedVersionId]
-                  : undefined;
                 const gated = needsReview(skill);
                 return (
                   <div
@@ -432,11 +378,6 @@ export function SkillsPanel() {
                         {skill.isShared && (
                           <Badge>{t('chat.skills.sharedBadge')}</Badge>
                         )}
-                        {skill.enabled && (
-                          <Badge variant="secondary">
-                            {t('chat.skills.activeBadge')}
-                          </Badge>
-                        )}
                         {update ? (
                           <button
                             type="button"
@@ -459,29 +400,10 @@ export function SkillsPanel() {
                         {skill.description}
                       </p>
                       {skill.importedFrom && (
-                        <p
-                          className="break-words text-xs text-muted-foreground"
-                          title={
-                            skill.contentHash
-                              ? `sha256:${skill.contentHash.replace(/^sha256:/, '')}`
-                              : undefined
-                          }
-                        >
-                          {t('chat.skills.provenance', {
+                        <p className="break-words text-xs text-muted-foreground">
+                          {t('chat.skills.importedBy', {
                             source: skill.importedFrom,
-                            date: formatSkillTimestamp(skill.importedAt),
-                            hash: displayHash(skill.contentHash)
-                          })}
-                        </p>
-                      )}
-                      {skill.sourcePromptId && (
-                        <p
-                          className="break-words text-xs text-muted-foreground"
-                          data-testid={`skill-pin-${skill.id}`}
-                        >
-                          {t('chat.skills.pinnedProvenance', {
-                            version: pinnedNumber ?? '—',
-                            hash: displayHash(skill.pinnedContentHash)
+                            date: formatSkillTimestamp(skill.importedAt)
                           })}
                         </p>
                       )}

@@ -37,11 +37,6 @@ export interface PromptVersionDiffProps {
 
 type ViewMode = VersionDiffViewMode;
 
-function shortHash(hash?: string | null): string {
-  if (!hash) return '—';
-  return hash.length > 18 ? `${hash.slice(0, 18)}…` : hash;
-}
-
 function formatDate(value?: string): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -234,7 +229,7 @@ export function PromptVersionDiff({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-3xl flex flex-col max-h-[85vh] gap-4"
+        className="sm:max-w-3xl flex flex-col max-h-[85vh] gap-3"
         data-testid="prompt-diff-dialog"
       >
         <DialogHeader>
@@ -286,28 +281,21 @@ export function PromptVersionDiff({
           </p>
         ) : (
           <>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="flex flex-col gap-1">
-                <label
-                  htmlFor="prompt-diff-version"
-                  className="text-xs text-muted-foreground"
-                >
-                  {t('chat.promptGallery.diff.version')}
-                </label>
-                <select
-                  id="prompt-diff-version"
-                  data-testid="prompt-diff-version"
-                  value={targetId ?? ''}
-                  onChange={(event) => setTargetId(event.target.value)}
-                  className="h-9 min-w-40 rounded-md border bg-background px-2 text-sm"
-                >
-                  {versions.map((version) => (
-                    <option key={version.id} value={version.id}>
-                      {`v${version.version}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="flex items-center justify-between gap-2">
+              <select
+                id="prompt-diff-version"
+                data-testid="prompt-diff-version"
+                aria-label={t('chat.promptGallery.diff.version')}
+                value={targetId ?? ''}
+                onChange={(event) => setTargetId(event.target.value)}
+                className="h-8 min-w-20 rounded-md border bg-background px-2 text-xs"
+              >
+                {versions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {`v${version.version}`}
+                  </option>
+                ))}
+              </select>
               <div className="flex items-center gap-1" role="group">
                 <Button
                   type="button"
@@ -333,39 +321,21 @@ export function PromptVersionDiff({
             </div>
 
             {targetVersion ? (
-              <dl
-                className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4"
+              <p
+                className="text-xs text-muted-foreground"
                 data-testid="prompt-diff-metadata"
+                title={[targetVersion.contentHash, targetVersion.createdBy]
+                  .filter(Boolean)
+                  .join(' · ')}
               >
-                <div>
-                  <dt>{t('chat.promptGallery.diff.metaVersion')}</dt>
-                  <dd className="text-foreground">v{targetVersion.version}</dd>
-                </div>
-                <div>
-                  <dt>{t('chat.promptGallery.diff.metaDate')}</dt>
-                  <dd className="text-foreground">
-                    <time dateTime={targetVersion.createdAt}>
-                      {formatDate(targetVersion.createdAt)}
-                    </time>
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t('chat.promptGallery.diff.metaHash')}</dt>
-                  <dd className="text-foreground font-mono">
-                    {shortHash(targetVersion.contentHash)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t('chat.promptGallery.diff.metaAuthor')}</dt>
-                  <dd className="text-foreground">
-                    {targetVersion.createdBy
-                      ? t('chat.promptGallery.diff.authorLabel', {
-                          author: targetVersion.createdBy
-                        })
-                      : '—'}
-                  </dd>
-                </div>
-              </dl>
+                <span className="text-foreground">
+                  v{targetVersion.version}
+                </span>
+                {' · '}
+                <time dateTime={targetVersion.createdAt}>
+                  {formatDate(targetVersion.createdAt)}
+                </time>
+              </p>
             ) : null}
 
             {stale ? (
@@ -448,15 +418,8 @@ export function PromptVersionDiff({
               </p>
             ) : null}
 
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-              >
-                {t('common.actions.close')}
-              </Button>
-              {isPinned ? (
+            {isPinned ? (
+              <div className="flex items-center justify-end">
                 <Button
                   type="button"
                   onClick={() => handleUpdate(false)}
@@ -475,8 +438,8 @@ export function PromptVersionDiff({
                       })
                     : t('chat.promptGallery.diff.updateFallback')}
                 </Button>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </>
         )}
       </DialogContent>

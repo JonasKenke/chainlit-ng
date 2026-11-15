@@ -143,7 +143,7 @@ describe('SkillUpdateDialog', () => {
     });
     const metadata = await screen.findByTestId('skill-update-metadata');
     expect(metadata).toHaveTextContent('v2');
-    expect(metadata).toHaveTextContent('sha256:new');
+    expect(metadata).not.toHaveTextContent('sha256');
     const rows = screen.getAllByTestId('skill-update-row');
     expect(rows.some((row) => row.dataset.op === 'replace')).toBe(true);
     expect(screen.getByText('new line')).toBeInTheDocument();

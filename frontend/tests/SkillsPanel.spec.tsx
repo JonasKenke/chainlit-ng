@@ -242,9 +242,7 @@ describe('SkillsPanel', () => {
     expect(row).toHaveTextContent('chat.skills.importedBadge');
     expect(row).toHaveTextContent('review.md');
     expect(row).toHaveTextContent('chat.skills.reviewBeforeEnabling');
-    expect(row).toHaveTextContent(
-      imported.contentHash!.replace(/^sha256:/, '').slice(0, 12)
-    );
+    expect(row).not.toHaveTextContent('sha256');
 
     expect(
       screen.getByRole('switch', { name: 'chat.skills.toggle imported-skill' })
@@ -280,9 +278,6 @@ describe('SkillsPanel', () => {
       name: 'chat.skills.review.enable'
     });
     await waitFor(() => expect(enable).toBeEnabled());
-    const hash = screen.getByTestId('skill-review-hash');
-    expect(hash).toHaveTextContent('aaaaaaaaaaaaaaaaaa…');
-    expect(hash).not.toHaveTextContent('sha256:sha256');
     fireEvent.click(enable);
 
     await waitFor(() =>
@@ -351,17 +346,14 @@ describe('SkillsPanel', () => {
     );
   });
 
-  it('shows the pinned provenance and detaches a linked copy', async () => {
+  it('detaches a linked copy', async () => {
     state.skills = [pinned];
     state.config = { skillsSharing: true, features: { latex: false } };
     render(<SkillsPanel />);
 
-    const pin = await screen.findByTestId('skill-pin-s3');
-    await waitFor(() =>
-      expect(pin).toHaveTextContent('chat.skills.pinnedProvenance 1')
-    );
-    expect(pin).toHaveTextContent('cccccccccccc…');
-    expect(pin).not.toHaveTextContent('sha256:sha256');
+    await screen.findByTestId('skill-row');
+    expect(screen.queryByTestId('skill-pin-s3')).toBeNull();
+    expect(screen.queryByText(/sha256/)).toBeNull();
 
     openSkillActions('s3');
     fireEvent.click(await screen.findByTestId('skill-detach-s3'));

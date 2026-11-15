@@ -139,8 +139,7 @@ describe('PromptVersionDiff', () => {
 
     const metadata = screen.getByTestId('prompt-diff-metadata');
     expect(metadata).toHaveTextContent('v3');
-    expect(metadata).toHaveTextContent('sha256:source-new-');
-    expect(metadata).toHaveTextContent('chat.promptGallery.diff.authorLabel');
+    expect(metadata).not.toHaveTextContent('sha256');
   });
 
   it('toggles between unified and side-by-side rendering', async () => {

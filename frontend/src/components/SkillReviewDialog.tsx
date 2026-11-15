@@ -28,16 +28,10 @@ interface Props {
   onClose: () => void;
 }
 
-function shortHash(hash?: string | null): string {
-  if (!hash) return '—';
-  const bare = hash.replace(/^sha256:/, '');
-  return bare.length > 18 ? `${bare.slice(0, 18)}…` : bare;
-}
-
 /**
  * Review gate for imported and pinned skills. The body is rendered as sanitized
- * Markdown (`allowHtml={false}`) and the fingerprint shown here is the one the
- * server compares before enabling.
+ * Markdown (`allowHtml={false}`), and enabling sends the reviewed version hash
+ * so the server can reject a changed body.
  */
 export function SkillReviewDialog({ open, skill, onEnable, onClose }: Props) {
   const { t } = useTranslation();
@@ -111,15 +105,12 @@ export function SkillReviewDialog({ open, skill, onEnable, onClose }: Props) {
           ? new Date(skill.importedAt).toLocaleString()
           : '—'
       })
-    : skill?.sourcePromptId
-      ? t('chat.skills.review.fromLink')
-      : '';
+    : '';
 
   return (
     <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
       <DialogContent
         className="sm:max-w-3xl flex flex-col max-h-[85vh]"
-        aria-describedby={undefined}
         data-testid="skill-review-dialog"
       >
         <DialogHeader>
@@ -148,14 +139,8 @@ export function SkillReviewDialog({ open, skill, onEnable, onClose }: Props) {
                   {t('chat.skills.fromLinkBadge')}
                 </Badge>
               ) : null}
-              {head ? <Badge>{`v${head.version}`}</Badge> : null}
             </div>
             {provenance ? <p className="break-all">{provenance}</p> : null}
-            <p className="break-all font-mono" data-testid="skill-review-hash">
-              {t('chat.skills.review.fingerprint', {
-                hash: shortHash(head?.contentHash ?? skill.contentHash)
-              })}
-            </p>
           </div>
         ) : null}
 

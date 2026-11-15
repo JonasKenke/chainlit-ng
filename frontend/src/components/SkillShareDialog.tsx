@@ -141,10 +141,7 @@ export function SkillShareDialog({ open, skill, onClose, onChanged }: Props) {
           </p>
         ) : null}
 
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onClose} disabled={busy}>
-            {t('common.actions.close')}
-          </Button>
+        <DialogFooter>
           {shared ? (
             <Button
               id="skill-unshare"
