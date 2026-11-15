@@ -33,45 +33,86 @@ const displayToolName = (tool: string): string =>
     .replace(/\s+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase());
 
+const formatDecisionTime = (value?: string | null): string | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(date);
+};
+
 type Preview = Record<string, unknown> | null | undefined;
 
-// JSON leaves stay quoted so string/number/boolean/null stay distinguishable,
-// but embedded newlines and tabs are shown as real layout inside the <pre>
-// instead of two-character "\n" / "\t" escapes. Other escapes (including a
-// literal backslash) are left untouched so the value stays unambiguous.
-const formatLeaf = (value: unknown): string => {
-  const json = JSON.stringify(value);
-  if (json === undefined) return 'undefined';
-  if (typeof value !== 'string') return json;
-  let formatted = '';
-  for (let index = 0; index < json.length; index += 1) {
-    const char = json[index];
-    if (char !== '\\' || index + 1 >= json.length) {
-      formatted += char;
-      continue;
-    }
-    const next = json[index + 1];
-    if (next === 'n') {
-      formatted += '\n';
+type LeafType = 'string' | 'number' | 'boolean' | 'null' | 'other';
+
+interface DiffLeaf {
+  text: string;
+  type: LeafType;
+}
+
+type DiffOperation = 'added' | 'removed' | 'replaced';
+
+interface DiffEntry {
+  path: string;
+  operation: DiffOperation;
+  from: DiffLeaf | null;
+  to: DiffLeaf | null;
+}
+
+interface DiffGroup {
+  key: string;
+  label: string;
+  entries: DiffEntry[];
+}
+
+// Strings lose their JSON quotes so rows read as prose, but keep embedded
+// newlines and tabs as real layout; other escapes stay literal so a value
+// remains unambiguous. Non-string leaves keep their JSON literal and are
+// rendered monospace, so the string "true" stays distinct from true.
+const formatLeaf = (value: unknown): DiffLeaf => {
+  if (typeof value === 'string') {
+    const json = JSON.stringify(value).slice(1, -1);
+    let text = '';
+    for (let index = 0; index < json.length; index += 1) {
+      const char = json[index];
+      if (char !== '\\' || index + 1 >= json.length) {
+        text += char;
+        continue;
+      }
+      const next = json[index + 1];
+      if (next === 'n') {
+        text += '\n';
+        index += 1;
+        continue;
+      }
+      if (next === 't') {
+        text += '\t';
+        index += 1;
+        continue;
+      }
+      text += char + next;
       index += 1;
-      continue;
     }
-    if (next === 't') {
-      formatted += '\t';
-      index += 1;
-      continue;
-    }
-    formatted += char + next;
-    index += 1;
+    return { text, type: 'string' };
   }
-  return formatted;
+  if (value === null) return { text: 'null', type: 'null' };
+  if (typeof value === 'number') {
+    return { text: String(value), type: 'number' };
+  }
+  if (typeof value === 'boolean') {
+    return { text: String(value), type: 'boolean' };
+  }
+  const json = JSON.stringify(value);
+  return { text: json ?? 'undefined', type: 'other' };
 };
 
 const flattenPreview = (
   value: unknown,
   prefix: string,
-  leaves: Map<string, string>
-): Map<string, string> => {
+  leaves: Map<string, DiffLeaf>
+): Map<string, DiffLeaf> => {
   if (Array.isArray(value)) {
     value.forEach((item, index) =>
       flattenPreview(item, `${prefix}[${index}]`, leaves)
@@ -88,22 +129,193 @@ const flattenPreview = (
   return leaves;
 };
 
+// Agent-facing paths stay compact (`labels[2]`, `nested.api_key`); the view
+// splits them again so each segment can be humanized for display.
+const humanizeSegment = (segment: string): string => {
+  if (/^\d+$/.test(segment)) return `item ${Number(segment) + 1}`;
+  const words = segment
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+  return words || segment;
+};
+
+const humanizePath = (path: string, skipTop = false): string => {
+  const parts = path.match(/[^.[\]]+/g) ?? [];
+  const segments = (skipTop ? parts.slice(1) : parts).map(humanizeSegment);
+  if (!segments.length) return skipTop ? '' : 'Value';
+  if (!skipTop) {
+    segments[0] = segments[0].charAt(0).toUpperCase() + segments[0].slice(1);
+  }
+  return segments.join(' · ');
+};
+
 // Diff of redacted previews only: the full arguments never reach this view
 // after a reload.
-const diffPreviews = (before: Preview, after: Preview): string[] => {
+const diffPreviews = (before: Preview, after: Preview): DiffEntry[] => {
   if (!after) return [];
   const left = flattenPreview(before ?? {}, '', new Map());
   const right = flattenPreview(after, '', new Map());
-  const lines: string[] = [];
+  const entries: DiffEntry[] = [];
   new Set([...left.keys(), ...right.keys()]).forEach((path) => {
     const from = left.get(path);
     const to = right.get(path);
-    if (from === to) return;
-    if (from === undefined) lines.push(`+ ${path}: ${to}`);
-    else if (to === undefined) lines.push(`- ${path}: ${from}`);
-    else lines.push(`~ ${path}: ${from} → ${to}`);
+    if (from && to) {
+      if (from.text === to.text && from.type === to.type) return;
+      entries.push({ path, operation: 'replaced', from, to });
+      return;
+    }
+    if (from) entries.push({ path, operation: 'removed', from, to: null });
+    else if (to) entries.push({ path, operation: 'added', from: null, to });
   });
-  return lines.sort();
+  return entries.sort((a, b) => a.path.localeCompare(b.path));
+};
+
+const groupDiff = (entries: DiffEntry[]): DiffGroup[] => {
+  const groups = new Map<string, DiffGroup>();
+  for (const entry of entries) {
+    const key = entry.path.match(/[^.[\]]+/)?.[0] ?? entry.path;
+    const group = groups.get(key) ?? {
+      key,
+      label: humanizePath(key),
+      entries: []
+    };
+    group.entries.push(entry);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+};
+
+const operationMeta: Record<
+  DiffOperation,
+  { marker: string; label: string; tone: string }
+> = {
+  added: {
+    marker: '+',
+    label: 'Added',
+    tone: 'text-emerald-600 dark:text-emerald-400'
+  },
+  removed: {
+    marker: '-',
+    label: 'Removed',
+    tone: 'text-red-600 dark:text-red-400'
+  },
+  replaced: {
+    marker: '~',
+    label: 'Replaced',
+    tone: 'text-amber-600 dark:text-amber-400'
+  }
+};
+
+// Values are plain React text, never HTML or markdown. Non-string leaves keep
+// a monospace face so numbers, booleans and null stay distinguishable from
+// the string with the same characters.
+const DiffValue = ({ leaf, tone }: { leaf: DiffLeaf; tone?: string }) => (
+  <span
+    data-value-type={leaf.type}
+    className={`whitespace-pre-wrap break-words ${
+      leaf.type === 'string' ? '' : 'font-mono'
+    } ${tone ?? ''}`}
+  >
+    {leaf.text}
+  </span>
+);
+
+const DiffRow = ({
+  entry,
+  grouped
+}: {
+  entry: DiffEntry;
+  grouped: boolean;
+}) => {
+  const meta = operationMeta[entry.operation];
+  const label =
+    (grouped ? humanizePath(entry.path, true) : '') || humanizePath(entry.path);
+  // A replacement whose either side spans lines reads better as an old block
+  // followed by a new block, so real newlines are not flattened into a row.
+  const multiline =
+    entry.operation === 'replaced' &&
+    Boolean(
+      entry.from &&
+      entry.to &&
+      (entry.from.text.includes('\n') || entry.to.text.includes('\n'))
+    );
+  return (
+    <li
+      data-testid="approval-diff-row"
+      data-operation={entry.operation}
+      className="flex gap-2"
+    >
+      <span
+        aria-hidden="true"
+        className={`w-3 shrink-0 font-mono font-semibold ${meta.tone}`}
+      >
+        {meta.marker}
+      </span>
+      <span className="sr-only">{`${meta.label}: `}</span>
+      <div className="min-w-0 flex-1">
+        {multiline ? (
+          <>
+            <div className="font-medium text-foreground">{label}</div>
+            <div className="mt-1 space-y-1 border-l border-border pl-2">
+              {entry.from ? (
+                <div className="flex gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="w-3 shrink-0 font-mono font-semibold text-red-600 dark:text-red-400"
+                  >
+                    -
+                  </span>
+                  <span className="sr-only">Before: </span>
+                  <DiffValue leaf={entry.from} tone="text-muted-foreground" />
+                </div>
+              ) : null}
+              {entry.to ? (
+                <div className="flex gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="w-3 shrink-0 font-mono font-semibold text-emerald-600 dark:text-emerald-400"
+                  >
+                    +
+                  </span>
+                  <span className="sr-only">After: </span>
+                  <DiffValue leaf={entry.to} />
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div className="break-words">
+            <span className="font-medium text-foreground">{label}</span>
+            <span className="text-muted-foreground">{': '}</span>
+            {entry.from ? (
+              <DiffValue
+                leaf={entry.from}
+                tone={
+                  entry.operation === 'removed' ? meta.tone : 'text-foreground'
+                }
+              />
+            ) : null}
+            {entry.operation === 'replaced' && entry.from && entry.to ? (
+              <span aria-hidden="true" className="text-muted-foreground">
+                {' → '}
+              </span>
+            ) : null}
+            {entry.to ? (
+              <DiffValue
+                leaf={entry.to}
+                tone={
+                  entry.operation === 'added' ? meta.tone : 'text-foreground'
+                }
+              />
+            ) : null}
+          </div>
+        )}
+      </div>
+    </li>
+  );
 };
 
 const approvalErrorMessage = (error: unknown): string => {
@@ -347,6 +559,9 @@ export const ApprovalCard = ({ approval }: Props) => {
       diffPreviews(approval.argumentsPreview, approval.editedArgumentsPreview),
     [approval.argumentsPreview, approval.editedArgumentsPreview]
   );
+  const decidedAtIso = approval.decidedAt ?? null;
+  const decidedAtLabel = formatDecisionTime(decidedAtIso);
+  const diffGroups = useMemo(() => groupDiff(diff), [diff]);
   const firstEditableFieldName =
     fields?.find((field) => !isServerHeld(field))?.name ?? null;
   const setFirstFieldElement = useCallback(
@@ -609,7 +824,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           <Markdown allowHtml={allowHtml} latex={latex}>
             {approval.content}
           </Markdown>
-          {approval.status === 'edited' ? (
+          {approval.status === 'edited' && diff.length ? (
             <p className="mt-1 text-xs text-muted-foreground">
               Requested content; the approved changes are in the diff.
             </p>
@@ -622,9 +837,29 @@ export const ApprovalCard = ({ approval }: Props) => {
           <div className="text-xs font-medium text-muted-foreground">
             Original → edited
           </div>
-          <pre className="mt-1 max-h-[80vh] overflow-auto custom-scrollbar rounded bg-muted p-3 text-xs">
-            {diff.join('\n')}
-          </pre>
+          <div className="mt-1 max-h-[80vh] space-y-2 overflow-auto custom-scrollbar rounded bg-muted p-3 text-xs">
+            {diffGroups.map((group) => {
+              const grouped = group.entries.length > 1;
+              return (
+                <div key={group.key}>
+                  {grouped ? (
+                    <div className="font-semibold text-foreground">
+                      {group.label}
+                    </div>
+                  ) : null}
+                  <ul className={grouped ? 'mt-1 space-y-1' : 'space-y-1'}>
+                    {group.entries.map((entry) => (
+                      <DiffRow
+                        key={entry.path}
+                        entry={entry}
+                        grouped={grouped}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 
@@ -789,8 +1024,19 @@ export const ApprovalCard = ({ approval }: Props) => {
       ) : (
         <div className="mt-3 text-xs text-muted-foreground">
           {approval.decidedBy ? `By ${approval.decidedBy}` : null}
-          {approval.decidedBy && approval.decidedAt ? ' · ' : null}
-          {approval.decidedAt ?? approval.terminalReason ?? null}
+          {approval.decidedBy && (decidedAtLabel || approval.terminalReason)
+            ? ' · '
+            : null}
+          {decidedAtLabel ? (
+            <time
+              dateTime={decidedAtIso ?? undefined}
+              title={decidedAtIso ?? ''}
+            >
+              {decidedAtLabel}
+            </time>
+          ) : (
+            (approval.terminalReason ?? null)
+          )}
           {approval.reason ? (
             <div
               data-testid="approval-comment"

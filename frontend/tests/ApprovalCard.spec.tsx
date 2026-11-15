@@ -436,11 +436,122 @@ describe('ApprovalCard', () => {
     });
 
     const diff = screen.getByTestId('approval-diff');
-    expect(diff.querySelector('pre')).not.toBeNull();
+    expect(diff.querySelector('pre')).toBeNull();
+    expect(screen.getAllByTestId('approval-diff-row')).toHaveLength(1);
     const text = diff.textContent ?? '';
-    expect(text).toContain('"first line\nsecond line"');
-    expect(text).toContain('second line\nthird line"');
+    expect(text).toContain('Body');
+    expect(text).toContain('first line\nsecond line');
+    expect(text).toContain('second line\nthird line');
+    expect(text).not.toContain('"');
     expect(text).not.toContain('\\n');
+  });
+
+  it('renders a scalar replacement as a humanized row without JSON syntax', () => {
+    renderCard({
+      status: 'edited',
+      decision: 'edit',
+      argumentsPreview: { priority: 'high' },
+      editedArgumentsPreview: { priority: 'medium' }
+    });
+
+    const diff = screen.getByTestId('approval-diff');
+    expect(screen.getAllByTestId('approval-diff-row')).toHaveLength(1);
+    expect(diff).toHaveTextContent('Priority: high → medium');
+    expect(diff.textContent).not.toContain('"high"');
+    expect(diff.textContent).not.toContain('priority:');
+  });
+
+  it('humanizes array item and dotted field paths', () => {
+    renderCard({
+      status: 'edited',
+      decision: 'edit',
+      argumentsPreview: { labels: ['api'], nested: { api_key: 'a' } },
+      editedArgumentsPreview: {
+        labels: ['api', 'job'],
+        nested: { api_key: 'b' }
+      }
+    });
+
+    const diff = screen.getByTestId('approval-diff');
+    const text = diff.textContent ?? '';
+    expect(text).toContain('Labels · item 2');
+    expect(text).toContain('Nested · api key');
+    expect(text).not.toContain('labels[1]');
+    expect(text).not.toContain('nested.api_key');
+  });
+
+  it('groups array changes under one top-level field heading', () => {
+    renderCard({
+      status: 'edited',
+      decision: 'edit',
+      argumentsPreview: { labels: ['api', 'old'] },
+      editedArgumentsPreview: { labels: ['api', 'new', 'job'] }
+    });
+
+    const diff = screen.getByTestId('approval-diff');
+    const text = diff.textContent ?? '';
+    expect(text.match(/Labels/g)).toHaveLength(1);
+    expect(text).toContain('item 2');
+    expect(text).toContain('item 3');
+    expect(text).toContain('old → new');
+    expect(text).not.toContain('labels[');
+  });
+
+  it('marks each operation with a marker and its own tone', () => {
+    const { container } = renderCard({
+      status: 'edited',
+      decision: 'edit',
+      argumentsPreview: { keep: 'same', drop: 'gone', change: 'old' },
+      editedArgumentsPreview: { keep: 'same', add: 'new', change: 'fresh' }
+    });
+
+    const row = (operation: string) =>
+      container.querySelector<HTMLElement>(
+        `[data-testid="approval-diff-row"][data-operation="${operation}"]`
+      );
+    const marker = (operation: string) =>
+      row(operation)?.querySelector<HTMLElement>('span[aria-hidden="true"]');
+
+    expect(row('added')?.textContent).toContain('Add: new');
+    expect(row('removed')?.textContent).toContain('Drop: gone');
+    expect(row('replaced')?.textContent).toContain('Change: old → fresh');
+
+    expect(marker('added')?.textContent).toBe('+');
+    expect(marker('added')?.className).toContain('text-emerald-600');
+    expect(marker('removed')?.textContent).toBe('-');
+    expect(marker('removed')?.className).toContain('text-red-600');
+    expect(marker('replaced')?.textContent).toBe('~');
+    expect(marker('replaced')?.className).toContain('text-amber-600');
+  });
+
+  it('renders no diff block and no diff claim when nothing changed', () => {
+    const { unmount } = renderCard({
+      status: 'edited',
+      decision: 'edit',
+      content: 'Requested draft',
+      arguments: { to: 'person@example.com' },
+      argumentsPreview: { to: 'person@example.com' },
+      editedArgumentsPreview: { to: 'person@example.com' }
+    });
+
+    expect(screen.queryByTestId('approval-diff')).toBeNull();
+    expect(
+      screen.queryByText(
+        'Requested content; the approved changes are in the diff.'
+      )
+    ).toBeNull();
+    expect(screen.getByTestId('approval-content')).toHaveTextContent(
+      'Requested draft'
+    );
+    unmount();
+
+    renderCard({ status: 'edited', decision: 'edit', content: 'Requested' });
+    expect(screen.queryByTestId('approval-diff')).toBeNull();
+    expect(
+      screen.queryByText(
+        'Requested content; the approved changes are in the diff.'
+      )
+    ).toBeNull();
   });
 
   it('reports an invalid number field', () => {
@@ -707,6 +818,10 @@ describe('ApprovalCard', () => {
     expect(screen.getByTestId('approval-comment')).toHaveTextContent(
       'split the ticket'
     );
+    expect(screen.queryByText('2026-01-01T00:00:00Z')).toBeNull();
+    const decidedAt = screen.getByText(/2026/);
+    expect(decidedAt.tagName).toBe('TIME');
+    expect(decidedAt).toHaveAttribute('dateTime', '2026-01-01T00:00:00Z');
   });
 
   it('shows a persisted comment on a rejected card', () => {
@@ -776,8 +891,9 @@ describe('ApprovalCard', () => {
     expect(screen.getAllByText(/other@example.com/).length).toBeGreaterThan(0);
     const diff = screen.getByTestId('approval-diff');
     expect(diff).toHaveTextContent(
-      '~ to: "person@example.com" → "other@example.com"'
+      'To: person@example.com → other@example.com'
     );
+    expect(diff.textContent).not.toContain('"person@example.com"');
     expect(diff).not.toHaveTextContent('apiKey');
   });
 
@@ -983,7 +1099,7 @@ describe('ApprovalCard', () => {
     );
 
     expect(screen.getByTestId('approval-diff')).toHaveTextContent(
-      '~ to: "person@example.com" → "other@example.com"'
+      'To: person@example.com → other@example.com'
     );
   });
 });
