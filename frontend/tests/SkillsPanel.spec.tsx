@@ -156,6 +156,14 @@ describe('SkillsPanel', () => {
     });
   };
 
+  const openSkillFilter = () => {
+    fireEvent.pointerDown(screen.getByTestId('skill-filter'), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: 'mouse'
+    });
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     state.skills = [];
@@ -314,10 +322,19 @@ describe('SkillsPanel', () => {
     render(<SkillsPanel />);
 
     await screen.findAllByTestId('skill-row');
+    expect(screen.queryByTestId('skill-sections')).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: 'chat.skills.filter.current chat.skills.sections.all'
+      })
+    ).toBeInTheDocument();
+
+    openSkillFilter();
     fireEvent.click(screen.getByTestId('skill-section-active'));
     expect(screen.getAllByTestId('skill-row')).toHaveLength(1);
     expect(screen.getByTestId('skill-row')).toHaveTextContent('my-skill');
 
+    openSkillFilter();
     fireEvent.click(screen.getByTestId('skill-section-review'));
     const reviewRows = screen.getAllByTestId('skill-row');
     expect(reviewRows).toHaveLength(2);
@@ -326,6 +343,7 @@ describe('SkillsPanel', () => {
       expect.stringContaining('linked-skill')
     ]);
 
+    openSkillFilter();
     fireEvent.click(screen.getByTestId('skill-section-updates'));
     expect(screen.getByTestId('skill-row')).toHaveTextContent('linked-skill');
     expect(screen.getByTestId('skill-update-chip-s3')).toHaveTextContent(

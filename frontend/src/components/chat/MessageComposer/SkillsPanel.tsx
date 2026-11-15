@@ -5,6 +5,7 @@ import {
   formatSkillTimestamp,
   skillErrorDetail
 } from '@/lib/skills';
+import { cn } from '@/lib/utils';
 import {
   ISkill,
   promptErrorCode,
@@ -15,6 +16,7 @@ import {
 import {
   Download,
   Ellipsis,
+  ListFilter,
   Pencil,
   Plus,
   RefreshCw,
@@ -37,6 +39,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
@@ -286,6 +290,9 @@ export function SkillsPanel() {
     }
   ];
 
+  const currentSection =
+    sections.find((item) => item.id === section) ?? sections[0];
+
   return (
     <>
       <div className="flex flex-1 min-h-0 flex-col gap-3">
@@ -312,6 +319,47 @@ export function SkillsPanel() {
             className="hidden"
             onChange={(event) => handleFile(event.target.files?.[0])}
           />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className={cn(
+                  'ml-auto h-8 w-8',
+                  section !== 'all' && 'border-primary text-primary'
+                )}
+                aria-label={t('chat.skills.filter.current', {
+                  filter: currentSection.label
+                })}
+                title={t('chat.skills.filter.current', {
+                  filter: currentSection.label
+                })}
+                data-testid="skill-filter"
+              >
+                <ListFilter className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuRadioGroup
+                value={section}
+                onValueChange={(value) => setSection(value as Section)}
+              >
+                {sections.map((item) => (
+                  <DropdownMenuRadioItem
+                    key={item.id}
+                    value={item.id}
+                    data-testid={`skill-section-${item.id}`}
+                  >
+                    {item.label}
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {item.count}
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {!libraryEnabled ? (
@@ -329,28 +377,6 @@ export function SkillsPanel() {
             {error}
           </p>
         )}
-
-        <div
-          role="group"
-          aria-label={t('chat.skills.sections.label')}
-          className="flex flex-wrap items-center gap-1"
-          data-testid="skill-sections"
-        >
-          {sections.map((item) => (
-            <Button
-              key={item.id}
-              type="button"
-              size="sm"
-              variant={section === item.id ? 'default' : 'outline'}
-              aria-pressed={section === item.id}
-              data-testid={`skill-section-${item.id}`}
-              onClick={() => setSection(item.id)}
-            >
-              {item.label}
-              <span className="ml-1 text-xs opacity-70">{item.count}</span>
-            </Button>
-          ))}
-        </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar px-1">
           {loading ? (
@@ -533,7 +559,7 @@ export function SkillsPanel() {
                             </DropdownMenuItem>
                           )}
                           <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
+                            className="text-red-600 focus:bg-red-600/10 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
                             onClick={() => handleDelete(skill)}
                           >
                             {t('chat.skills.delete')}

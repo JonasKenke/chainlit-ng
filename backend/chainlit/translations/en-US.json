@@ -397,6 +397,9 @@
       "updateAvailable": "Update available v{{version}}",
       "updatesToast": "{{count}} shared skill has a newer version",
       "updatesToastAction": "Review",
+      "filter": {
+        "current": "Filter skills: {{filter}}"
+      },
       "sections": {
         "label": "Skill sections",
         "all": "All",
