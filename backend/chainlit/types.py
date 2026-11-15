@@ -528,6 +528,77 @@ class PromptDict(TypedDict):
     importedFrom: NotRequired[Optional[str]]
     importedAt: NotRequired[Optional[str]]
     contentHash: NotRequired[Optional[str]]
+    # Versioning and pinned-copy provenance. They stay optional so existing
+    # data layers and pre-versioning rows keep their shape.
+    version: NotRequired[int]
+    sourcePromptId: NotRequired[Optional[str]]
+    pinnedVersionId: NotRequired[Optional[str]]
+    pinnedContentHash: NotRequired[Optional[str]]
+    pinnedAt: NotRequired[Optional[str]]
+    sharedAt: NotRequired[Optional[str]]
+
+
+class PromptVersionDict(TypedDict):
+    """One immutable snapshot of a prompt or skill."""
+
+    id: str
+    promptId: str
+    kind: str
+    version: int
+    title: str
+    description: str
+    content: str
+    contentHash: str
+    createdAt: str
+    createdBy: str
+    sourceVersionId: Optional[str]
+
+
+class PromptVersionSummaryDict(TypedDict):
+    id: str
+    promptId: str
+    kind: str
+    version: int
+    title: str
+    description: str
+    contentHash: str
+    createdAt: str
+    sourceVersionId: Optional[str]
+    createdBy: NotRequired[Optional[str]]
+
+
+class PromptUpdateDict(TypedDict):
+    """A pinned copy whose source has advanced past the acknowledged version."""
+
+    promptId: str
+    title: str
+    sourcePromptId: str
+    pinnedVersionId: Optional[str]
+    pinnedVersion: Optional[int]
+    localVersion: int
+    latestVersionId: str
+    latestVersion: int
+    notifiedVersion: int
+
+
+PromptDiffDict = TypedDict(
+    "PromptDiffDict",
+    {
+        "promptId": str,
+        "from": str,
+        "to": str,
+        "fromVersionId": Optional[str],
+        "toVersionId": str,
+        "fromVersion": Optional[int],
+        "toVersion": int,
+        "fromContentHash": Optional[str],
+        "toContentHash": str,
+        "rows": List[Dict[str, Any]],
+        "truncated": bool,
+        "maxRows": int,
+        "maxBytes": int,
+    },
+)
 
 
 class CreatePromptRequest(BaseModel):
@@ -542,6 +613,23 @@ class UpdatePromptRequest(BaseModel):
 
 class SharePromptRequest(BaseModel):
     isShared: bool
+
+
+class AddSharedPromptRequest(BaseModel):
+    """Optional pin target for a shared prompt; defaults to the source head."""
+
+    versionId: Optional[str] = None
+
+
+class AckPromptUpdateRequest(BaseModel):
+    promptId: str
+    version: int = Field(ge=1)
+
+
+class SyncPromptRequest(BaseModel):
+    versionId: Optional[str] = None
+    confirm: bool = False
+    expectedLocalHash: Optional[str] = None
 
 
 class CreateSkillRequest(BaseModel):

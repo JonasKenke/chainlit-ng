@@ -14,7 +14,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union, cast
 
 import socketio
 from fastapi import (
@@ -101,6 +101,19 @@ from chainlit.mcp_protocol import (
     render_prompt,
 )
 from chainlit.oauth_providers import get_oauth_provider
+from chainlit.prompt_versioning import (
+    MAX_DIFF_BYTES,
+    MAX_DIFF_ROWS,
+    PromptContentTooLarge,
+    PromptVersionConflict,
+    PromptVersionError,
+    PromptVersionLimitReached,
+    build_diff,
+    enforce_content_limit,
+    fingerprint,
+    latest_head,
+    public_version,
+)
 from chainlit.scheduled_task import (
     next_run_at,
     validate_cron,
@@ -121,6 +134,8 @@ from chainlit.skill import (
 )
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
+    AckPromptUpdateRequest,
+    AddSharedPromptRequest,
     ApprovalDecisionRequest,
     ApprovalDecisionResponse,
     AskFileSpec,
@@ -144,6 +159,7 @@ from chainlit.types import (
     ScheduledTaskDict,
     SharePromptRequest,
     ShareThreadRequest,
+    SyncPromptRequest,
     Theme,
     ThreadGrant,
     UpdateFeedbackRequest,
@@ -1205,6 +1221,26 @@ def _supports_prompt_gallery(data_layer: Optional[BaseDataLayer]) -> bool:
     )
 
 
+_PROMPT_VERSION_METHODS = (
+    "list_prompt_versions",
+    "get_prompt_version",
+    "list_prompt_updates",
+    "ack_prompt_update",
+)
+
+
+def _supports_prompt_versioning(data_layer: Optional[BaseDataLayer]) -> bool:
+    """Return whether a data layer stores immutable prompt versions and notices."""
+    if data_layer is None:
+        return False
+    return all(
+        callable(getattr(data_layer, method, None))
+        and getattr(type(data_layer), method, None)
+        is not getattr(BaseDataLayer, method)
+        for method in _PROMPT_VERSION_METHODS
+    )
+
+
 def _supports_delete_all_threads(data_layer: Optional[BaseDataLayer]) -> bool:
     """Return whether a data layer overrides bulk thread deletion."""
     if data_layer is None:
@@ -1510,6 +1546,11 @@ async def project_settings(
             "promptGallery": bool(
                 getattr(cfg.features, "prompt_gallery", False)
                 and _supports_prompt_gallery(data_layer)
+            ),
+            "promptVersioning": bool(
+                getattr(cfg.features, "prompt_gallery", False)
+                and _supports_prompt_gallery(data_layer)
+                and _supports_prompt_versioning(data_layer)
             ),
             "threadClearAll": _supports_delete_all_threads(data_layer),
             "promptScheduling": bool(
@@ -1950,7 +1991,7 @@ def _prompt_gallery_enabled() -> None:
 
 
 async def _dl_prompt(coro: Any) -> Any:
-    """Await a prompt data-layer call; map NotImplementedError to HTTP 501."""
+    """Await a prompt data-layer call; map typed errors to HTTP responses."""
     try:
         return await coro
     except NotImplementedError as exc:
@@ -1958,6 +1999,40 @@ async def _dl_prompt(coro: Any) -> Any:
             status_code=501,
             detail=str(exc) or "Prompt gallery is not supported by this data layer",
         ) from exc
+    except PromptContentTooLarge as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "content_too_large", "message": str(exc)},
+        ) from exc
+    except PromptVersionLimitReached as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "version_limit_reached", "message": str(exc)},
+        ) from exc
+    except PromptVersionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except PromptVersionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+
+
+def _prompt_error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code, detail={"code": code, "message": message}
+    )
+
+
+def _validate_prompt_content(content: str) -> None:
+    """Enforce the prompt body cap before any data-layer call."""
+    try:
+        enforce_content_limit(content)
+    except PromptContentTooLarge as exc:
+        raise _prompt_error(413, "content_too_large", str(exc)) from exc
 
 
 @router.get("/project/prompts")
@@ -1987,6 +2062,7 @@ async def create_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    _validate_prompt_content(payload.content)
     import uuid as _uuid
 
     now = utc_now()
@@ -2019,6 +2095,8 @@ async def update_prompt(
     existing = await _dl_prompt(data_layer.get_prompt(prompt_id))
     if not existing or existing["userId"] != user_id:
         raise HTTPException(status_code=404, detail="Prompt not found")
+    if payload.content is not None:
+        _validate_prompt_content(payload.content)
     updated = dict(existing)
     if payload.title is not None:
         updated["title"] = payload.title
@@ -2068,9 +2146,21 @@ async def share_prompt(
         raise HTTPException(status_code=404, detail="Prompt not found")
     updated = dict(existing)
     updated["isShared"] = payload.isShared
+    if payload.isShared and not existing.get("isShared"):
+        updated["sharedAt"] = utc_now()
     updated["updatedAt"] = utc_now()
     result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
     return JSONResponse(content={"prompt": result, "shareUrl": f"/prompt/{prompt_id}"})
+
+
+async def _shared_prompt_or_404(
+    data_layer: BaseDataLayer, prompt_id: str
+) -> PromptDict:
+    """Load a prompt for an unauthenticated share endpoint, or raise 404."""
+    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not prompt or not prompt.get("isShared"):
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return prompt
 
 
 @router.get("/project/prompt/share/{prompt_id}")
@@ -2083,11 +2173,18 @@ async def get_shared_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
-    if not prompt or not prompt["isShared"]:
-        raise HTTPException(status_code=404, detail="Prompt not found")
+    prompt = await _shared_prompt_or_404(data_layer, prompt_id)
+
+    current_version_id = None
+    if _supports_prompt_versioning(data_layer):
+        versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+        head = latest_head(versions) if isinstance(versions, list) else None
+        if head:
+            current_version_id = head["id"]
+
     # Public projection only: this endpoint is unauthenticated, so owner-only
-    # fields (userId and future provenance/version fields) must never leak.
+    # fields (userId, createdBy and future provenance fields) must never leak.
+    # Version metadata is limited to the head number, id and content hash.
     return JSONResponse(
         content={
             "id": prompt["id"],
@@ -2096,8 +2193,66 @@ async def get_shared_prompt(
             "isShared": prompt["isShared"],
             "createdAt": prompt["createdAt"],
             "updatedAt": prompt["updatedAt"],
+            "version": int(prompt.get("version") or 1),
+            "currentVersionId": current_version_id,
+            "currentContentHash": prompt.get("contentHash"),
         }
     )
+
+
+@router.get("/project/prompt/share/{prompt_id}/versions")
+async def get_shared_prompt_versions(
+    request: Request,
+    prompt_id: str,
+):
+    """List public version metadata for a shared prompt, newest first.
+
+    Anonymous callers never see the owner or version author identities.
+    """
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    await _shared_prompt_or_404(data_layer, prompt_id)
+    versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+    ordered = sorted(
+        versions, key=lambda version: int(version["version"]), reverse=True
+    )
+    return JSONResponse(
+        content=[public_version(version, include_author=False) for version in ordered]
+    )
+
+
+@router.get("/project/prompt/share/{prompt_id}/versions/{version_id}")
+async def get_shared_prompt_version(
+    request: Request,
+    prompt_id: str,
+    version_id: str,
+):
+    """Return one public version snapshot of a shared prompt."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    await _shared_prompt_or_404(data_layer, prompt_id)
+    version = await _dl_prompt(data_layer.get_prompt_version(prompt_id, version_id))
+    if not version:
+        raise HTTPException(status_code=404, detail="Prompt version not found")
+    return JSONResponse(content=public_version(version, include_author=False))
+
+
+async def _prompt_for_reader(
+    data_layer: BaseDataLayer, prompt_id: str, current_user: GenericUser
+) -> tuple[PromptDict, bool]:
+    """Load a prompt the caller may read; return ``(prompt, is_owner)``."""
+    user_id = await _get_user_id(current_user, data_layer)
+    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    is_owner = prompt["userId"] == user_id
+    if not is_owner and not prompt.get("isShared"):
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return prompt, is_owner
 
 
 @router.post("/project/prompt/share/{prompt_id}/add")
@@ -2105,8 +2260,9 @@ async def add_shared_prompt(
     request: Request,
     prompt_id: str,
     current_user: UserParam,
+    payload: Optional[AddSharedPromptRequest] = None,
 ):
-    """Copy a shared prompt into the current user's gallery."""
+    """Copy a shared prompt into the current user's gallery, pinned to a version."""
     _prompt_gallery_enabled()
     data_layer = get_data_layer()
     if not data_layer:
@@ -2114,20 +2270,332 @@ async def add_shared_prompt(
     source = await _dl_prompt(data_layer.get_prompt(prompt_id))
     if not source or not source["isShared"]:
         raise HTTPException(status_code=404, detail="Prompt not found")
+
+    user_id = await _get_user_id(current_user, data_layer)
+    existing = await _dl_prompt(data_layer.list_prompts(user_id))
+    if any(item.get("sourcePromptId") == prompt_id for item in existing):
+        raise _prompt_error(
+            409, "already_added", "This shared prompt is already in your gallery"
+        )
+
+    title = source["title"]
+    content = source["content"]
+    pinned_version_id: Optional[str] = None
+    pinned_content_hash: Optional[str] = source.get("contentHash") or fingerprint(
+        source
+    )
+    requested_version = payload.versionId if payload else None
+
+    if _supports_prompt_versioning(data_layer):
+        if requested_version:
+            target = await _dl_prompt(
+                data_layer.get_prompt_version(prompt_id, requested_version)
+            )
+            if not target:
+                raise HTTPException(status_code=404, detail="Prompt version not found")
+        else:
+            versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+            if isinstance(versions, list) and versions:
+                target = await _dl_prompt(
+                    data_layer.get_prompt_version(prompt_id, versions[0]["id"])
+                )
+            else:
+                target = None
+        if target:
+            title = target["title"]
+            content = target["content"]
+            pinned_version_id = target["id"]
+            pinned_content_hash = target["contentHash"]
+    elif requested_version:
+        raise HTTPException(status_code=501, detail="Prompt versioning is unavailable")
+
     import uuid as _uuid
 
     now = utc_now()
     copy = {
         "id": str(_uuid.uuid4()),
-        "title": source["title"],
-        "content": source["content"],
-        "userId": await _get_user_id(current_user, data_layer),
+        "title": title,
+        "content": content,
+        "userId": user_id,
         "isShared": False,
         "createdAt": now,
         "updatedAt": now,
+        "sourcePromptId": prompt_id,
+        "pinnedVersionId": pinned_version_id,
+        "pinnedContentHash": pinned_content_hash,
+        "pinnedAt": now,
     }
     created = await _dl_prompt(data_layer.create_prompt(copy))  # type: ignore[arg-type]
     return JSONResponse(content=created)
+
+
+@router.get("/project/prompts/updates")
+async def list_prompt_updates(
+    request: Request,
+    current_user: UserParam,
+):
+    """List pinned copies whose shared source has a newer version."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    user_id = await _get_user_id(current_user, data_layer)
+    updates = await _dl_prompt(data_layer.list_prompt_updates(user_id))
+    return JSONResponse(content=updates)
+
+
+@router.post("/project/prompts/updates/ack")
+async def ack_prompt_update(
+    request: Request,
+    payload: AckPromptUpdateRequest,
+    current_user: UserParam,
+):
+    """Acknowledge an update; the notice version only moves forward."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    user_id = await _get_user_id(current_user, data_layer)
+    prompt = await _dl_prompt(data_layer.get_prompt(payload.promptId))
+    if not prompt or prompt["userId"] != user_id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    updated = await _dl_prompt(
+        data_layer.ack_prompt_update(user_id, payload.promptId, payload.version)
+    )
+    return JSONResponse(
+        content={"promptId": payload.promptId, "notifiedVersion": updated}
+    )
+
+
+@router.get("/project/prompts/{prompt_id}/versions")
+async def list_prompt_versions(
+    request: Request,
+    prompt_id: str,
+    current_user: UserParam,
+):
+    """List version metadata for an owned or shared prompt."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    _, is_owner = await _prompt_for_reader(data_layer, prompt_id, current_user)
+    versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+    projected = [
+        public_version(version, include_author=is_owner) for version in versions
+    ]
+    return JSONResponse(content=projected)
+
+
+@router.get("/project/prompts/{prompt_id}/versions/{version_id}")
+async def get_prompt_version(
+    request: Request,
+    prompt_id: str,
+    version_id: str,
+    current_user: UserParam,
+):
+    """Return one immutable version, with author identity only to the owner."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    _, is_owner = await _prompt_for_reader(data_layer, prompt_id, current_user)
+    version = await _dl_prompt(data_layer.get_prompt_version(prompt_id, version_id))
+    if not version:
+        raise HTTPException(status_code=404, detail="Prompt version not found")
+    return JSONResponse(content=public_version(version, include_author=is_owner))
+
+
+@router.get("/project/prompts/{prompt_id}/diff")
+async def prompt_diff(
+    request: Request,
+    prompt_id: str,
+    current_user: UserParam,
+    from_: Literal["pinned", "local"] = Query("pinned", alias="from"),
+    to: str = Query(..., description="Version id to compare against"),
+):
+    """Return line rows, never HTML, for a pinned/local to version comparison."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    prompt, _ = await _prompt_for_reader(data_layer, prompt_id, current_user)
+
+    target = await _dl_prompt(data_layer.get_prompt_version(prompt_id, to))
+    if not target:
+        raise HTTPException(status_code=404, detail="Prompt version not found")
+
+    from_version_id: Optional[str] = None
+    from_version: Optional[int] = None
+    from_hash: Optional[str] = None
+    if from_ == "pinned":
+        pinned_hash = prompt.get("pinnedContentHash")
+        pinned_id = prompt.get("pinnedVersionId")
+        if not pinned_hash and not pinned_id:
+            raise _prompt_error(
+                409, "not_pinned", "This prompt is not pinned to a source version"
+            )
+        old_text: Optional[str] = None
+        versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+        for summary in versions:
+            if pinned_hash and summary.get("contentHash") == pinned_hash:
+                local = await _dl_prompt(
+                    data_layer.get_prompt_version(prompt_id, summary["id"])
+                )
+                if local:
+                    old_text = local["content"]
+                    from_version_id = local["id"]
+                    from_version = local["version"]
+                    from_hash = local["contentHash"]
+                    break
+        if old_text is None and pinned_id and prompt.get("sourcePromptId"):
+            source_version = await _dl_prompt(
+                data_layer.get_prompt_version(prompt["sourcePromptId"], pinned_id)
+            )
+            if source_version:
+                old_text = source_version["content"]
+                from_version_id = source_version["id"]
+                from_version = source_version["version"]
+                from_hash = source_version["contentHash"]
+        if old_text is None:
+            raise _prompt_error(
+                409,
+                "pinned_unavailable",
+                "The pinned version is no longer available",
+            )
+    else:
+        old_text = prompt["content"]
+        from_hash = prompt.get("contentHash")
+        from_version = int(prompt.get("version") or 1)
+        versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+        if versions:
+            from_version_id = versions[0]["id"]
+
+    rows, truncated = build_diff(old_text, target["content"])
+    return JSONResponse(
+        content={
+            "promptId": prompt_id,
+            "from": from_,
+            "to": to,
+            "fromVersionId": from_version_id,
+            "toVersionId": target["id"],
+            "fromVersion": from_version,
+            "toVersion": target["version"],
+            "fromContentHash": from_hash,
+            "toContentHash": target["contentHash"],
+            "rows": rows,
+            "truncated": truncated,
+            "maxRows": MAX_DIFF_ROWS,
+            "maxBytes": MAX_DIFF_BYTES,
+        }
+    )
+
+
+@router.post("/project/prompts/{prompt_id}/sync")
+async def sync_prompt(
+    request: Request,
+    prompt_id: str,
+    payload: SyncPromptRequest,
+    current_user: UserParam,
+):
+    """Copy a source version into a pinned prompt, appending one version."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    user_id = await _get_user_id(current_user, data_layer)
+    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not prompt or prompt["userId"] != user_id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    source_id = prompt.get("sourcePromptId")
+    if not source_id:
+        raise _prompt_error(409, "not_pinned", "This prompt is not pinned to a source")
+    source = await _dl_prompt(data_layer.get_prompt(source_id))
+    if not source or not source.get("isShared"):
+        raise _prompt_error(
+            409, "source_unavailable", "The source prompt is no longer available"
+        )
+
+    if payload.versionId:
+        target = await _dl_prompt(
+            data_layer.get_prompt_version(source_id, payload.versionId)
+        )
+        if not target:
+            raise _prompt_error(
+                409, "version_conflict", "That version does not belong to the source"
+            )
+    else:
+        versions = await _dl_prompt(data_layer.list_prompt_versions(source_id))
+        if not versions:
+            raise _prompt_error(
+                409, "source_unavailable", "The source prompt has no versions"
+            )
+        target = await _dl_prompt(
+            data_layer.get_prompt_version(source_id, versions[0]["id"])
+        )
+        if not target:
+            raise _prompt_error(
+                409, "source_unavailable", "The source prompt has no versions"
+            )
+
+    if prompt.get("contentHash") == target["contentHash"]:
+        raise _prompt_error(409, "already_current", "This prompt is already current")
+    if (
+        payload.expectedLocalHash is not None
+        and payload.expectedLocalHash != prompt.get("contentHash")
+    ):
+        raise _prompt_error(
+            409,
+            "preview_stale",
+            "The prompt changed after the preview; review the diff again",
+        )
+    pinned_hash = prompt.get("pinnedContentHash")
+    if pinned_hash and prompt.get("contentHash") != pinned_hash and not payload.confirm:
+        raise _prompt_error(
+            409,
+            "local_changes",
+            "This prompt has local edits; confirm to replace them",
+        )
+
+    now = utc_now()
+    updated = dict(prompt)
+    updated["title"] = target["title"]
+    updated["content"] = target["content"]
+    if target.get("kind") == "skill":
+        updated["description"] = target.get("description") or ""
+    updated["pinnedVersionId"] = target["id"]
+    updated["pinnedContentHash"] = target["contentHash"]
+    updated["pinnedAt"] = now
+    updated["updatedAt"] = now
+    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+    return JSONResponse(content=result)
+
+
+@router.post("/project/prompts/{prompt_id}/detach")
+async def detach_prompt(
+    request: Request,
+    prompt_id: str,
+    current_user: UserParam,
+):
+    """Remove the source pin while keeping the prompt and its history."""
+    _prompt_gallery_enabled()
+    data_layer = get_data_layer()
+    if not data_layer:
+        raise HTTPException(status_code=400, detail="Data persistence is not enabled")
+    user_id = await _get_user_id(current_user, data_layer)
+    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
+    if not prompt or prompt["userId"] != user_id:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    if not prompt.get("sourcePromptId"):
+        raise _prompt_error(409, "not_pinned", "This prompt is not pinned to a source")
+    updated = dict(prompt)
+    updated["sourcePromptId"] = None
+    updated["pinnedVersionId"] = None
+    updated["pinnedContentHash"] = None
+    updated["pinnedAt"] = None
+    updated["updatedAt"] = utc_now()
+    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+    return JSONResponse(content=result)
 
 
 # ---- Per-user skills endpoints (router registered only when the flag is on) ----

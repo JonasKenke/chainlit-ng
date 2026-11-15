@@ -258,6 +258,10 @@ def test_get_shared_prompt_returns_public_projection_only(
         "isShared": True,
         "createdAt": "2024-01-01T00:00:00Z",
         "updatedAt": "2024-01-01T00:00:00Z",
+        # Intentional versioning contract: head number, version id and hash.
+        "version": 1,
+        "currentVersionId": None,
+        "currentContentHash": "deadbeef",
     }
     for owner_only in (
         "userId",

@@ -3,12 +3,12 @@ import ssl
 import uuid
 from dataclasses import asdict
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
 
 import aiofiles
 import aiohttp
 from sqlalchemy import bindparam, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -17,6 +17,14 @@ from chainlit.data.storage_clients.base import BaseStorageClient
 from chainlit.data.utils import delete_storage_objects, queue_until_user_message
 from chainlit.element import ElementDict
 from chainlit.logger import logger
+from chainlit.prompt_versioning import (
+    MAX_PROMPT_VERSIONS,
+    PromptVersionConflict,
+    PromptVersionLimitReached,
+    enforce_content_limit,
+    fingerprint,
+    prompt_kind,
+)
 from chainlit.step import StepDict
 from chainlit.types import (
     Feedback,
@@ -26,6 +34,9 @@ from chainlit.types import (
     PaginatedResponse,
     Pagination,
     PromptDict,
+    PromptUpdateDict,
+    PromptVersionDict,
+    PromptVersionSummaryDict,
     ScheduledTaskCompletion,
     ScheduledTaskDict,
     ThreadDict,
@@ -1406,6 +1417,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     # ---- Prompt Gallery ----
 
     _prompts_table_checked: bool = False
+    _prompt_versioning_checked: bool = False
 
     async def _ensure_prompts_table(self) -> None:
         """Create the prompts table if it doesn't exist. Only runs once per instance."""
@@ -1427,64 +1439,196 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         )
         self._prompts_table_checked = True
 
-    async def create_prompt(self, prompt: PromptDict) -> PromptDict:
-        if self.show_logger:
-            logger.info(f"SQLAlchemy: create_prompt, id={prompt['id']}")
-        await self._ensure_prompts_table()
-        await self.execute_sql(
-            """
-            INSERT INTO prompts ("id", "userId", "title", "content", "isShared", "createdAt", "updatedAt")
-            VALUES (:id, :userId, :title, :content, :isShared, :createdAt, :updatedAt)
-            """,
-            {
-                "id": prompt["id"],
-                "userId": prompt["userId"],
-                "title": prompt["title"],
-                "content": prompt["content"],
-                "isShared": prompt["isShared"],
-                "createdAt": prompt["createdAt"],
-                "updatedAt": prompt["updatedAt"],
-            },
-        )
-        return prompt
-
-    async def list_prompts(self, user_id: str) -> List[PromptDict]:
-        if self.show_logger:
-            logger.info(f"SQLAlchemy: list_prompts, user_id={user_id}")
-        await self._ensure_prompts_table()
-        result = await self.execute_sql(
-            'SELECT * FROM prompts WHERE "userId" = :user_id ORDER BY "createdAt" DESC',
-            {"user_id": user_id},
-        )
-        if not isinstance(result, list):
-            return []
-        return [
-            PromptDict(
-                id=row["id"],
-                userId=row["userId"],
-                title=row["title"],
-                content=row["content"],
-                isShared=bool(row["isShared"]),
-                createdAt=row["createdAt"],
-                updatedAt=row["updatedAt"],
+    async def _get_prompts_columns(self) -> set[str]:
+        """Return the current prompts column names for the active dialect."""
+        if self.engine.dialect.name == "sqlite":
+            columns = await self.execute_sql("PRAGMA table_info(prompts)", {})
+            key = "name"
+        else:
+            columns = await self.execute_sql(
+                """
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'prompts'
+                """,
+                {},
             )
-            for row in result
-            if row.get("kind", "prompt") == "prompt"
-        ]
+            key = "column_name"
+        if not isinstance(columns, list):
+            raise RuntimeError("Could not inspect the prompts table for versioning")
+        names: set[str] = set()
+        for row in columns:
+            name = row.get(key)
+            if name:
+                names.add(str(name))
+        return names
 
-    async def get_prompt(self, prompt_id: str) -> Optional[PromptDict]:
-        if self.show_logger:
-            logger.info(f"SQLAlchemy: get_prompt, id={prompt_id}")
+    async def _run_transaction(
+        self, statements: List[tuple[str, Dict[str, Any]]]
+    ) -> List[Any]:
+        """Execute statements in one transaction; roll every one back on failure."""
+        async with self.async_session() as session:
+            try:
+                await session.begin()
+                results = []
+                for query, parameters in statements:
+                    results.append(await session.execute(text(query), parameters))
+                await session.commit()
+                return results
+            except Exception:
+                await session.rollback()
+                raise
+
+    async def _ensure_prompt_versioning(self) -> None:
+        """Add version columns and tables in place, then backfill v1 lazily."""
+        if self._prompt_versioning_checked:
+            return
         await self._ensure_prompts_table()
+        existing = await self._get_prompts_columns()
+
+        # Only prompt versioning columns here. Skill columns stay opt-in so a
+        # prompt-only app keeps its old prompts schema untouched.
+        for name, ddl in (
+            ("contentHash", "TEXT"),
+            ("version", "INTEGER NOT NULL DEFAULT 1"),
+            ("sourcePromptId", "TEXT"),
+            ("pinnedVersionId", "TEXT"),
+            ("pinnedContentHash", "TEXT"),
+            ("pinnedAt", "TEXT"),
+            ("sharedAt", "TEXT"),
+        ):
+            if name not in existing:
+                result = await self.execute_sql(
+                    f'ALTER TABLE prompts ADD COLUMN "{name}" {ddl}', {}
+                )
+                if result is None:
+                    raise RuntimeError("Could not add versioning columns to prompts")
+
         result = await self.execute_sql(
-            'SELECT * FROM prompts WHERE "id" = :id',
-            {"id": prompt_id},
+            """
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                "id"              TEXT PRIMARY KEY,
+                "promptId"        TEXT NOT NULL,
+                "kind"            TEXT NOT NULL DEFAULT 'prompt',
+                "version"         INTEGER NOT NULL,
+                "title"           TEXT NOT NULL,
+                "description"     TEXT NOT NULL DEFAULT '',
+                "content"         TEXT NOT NULL,
+                "contentHash"     TEXT NOT NULL,
+                "createdAt"       TEXT NOT NULL,
+                "createdBy"       TEXT NOT NULL,
+                "sourceVersionId" TEXT
+            )
+            """,
+            {},
         )
-        if not isinstance(result, list) or not result:
-            return None
-        row = result[0]
-        if row.get("kind", "prompt") != "prompt":
-            return None
+        if result is None:
+            raise RuntimeError("Could not create the prompt_versions table")
+
+        result = await self.execute_sql(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS prompt_versions_prompt_version
+            ON prompt_versions ("promptId", "version")
+            """,
+            {},
+        )
+        if result is None:
+            raise RuntimeError("Could not create the prompt version index")
+        result = await self.execute_sql(
+            """
+            CREATE INDEX IF NOT EXISTS prompt_versions_prompt_created
+            ON prompt_versions ("promptId", "createdAt")
+            """,
+            {},
+        )
+        if result is None:
+            raise RuntimeError("Could not create the prompt version index")
+
+        result = await self.execute_sql(
+            """
+            CREATE INDEX IF NOT EXISTS prompts_source_prompt
+            ON prompts ("sourcePromptId")
+            """,
+            {},
+        )
+        if result is None:
+            raise RuntimeError("Could not create the pinned prompt index")
+
+        result = await self.execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS prompt_update_notices (
+                "userId"          TEXT NOT NULL,
+                "promptId"        TEXT NOT NULL,
+                "notifiedVersion" INTEGER NOT NULL DEFAULT 0,
+                "notifiedAt"      TEXT NOT NULL,
+                PRIMARY KEY ("userId", "promptId")
+            )
+            """,
+            {},
+        )
+        if result is None:
+            raise RuntimeError("Could not create the prompt_update_notices table")
+
+        await self._materialise_prompt_versions(kind_column="kind" in existing)
+        self._prompt_versioning_checked = True
+
+    async def _materialise_prompt_versions(self, kind_column: bool) -> None:
+        """Backfill one immutable v1 row for prompts written before versioning."""
+        query = 'SELECT * FROM prompts WHERE "version" IS NULL OR "version" <= 1'
+        if kind_column:
+            query += " AND COALESCE(\"kind\", 'prompt') = 'prompt'"
+        rows = await self.execute_sql(query, {})
+        if not isinstance(rows, list):
+            raise RuntimeError("Could not read prompts for the version backfill")
+
+        for row in rows:
+            existing = await self.execute_sql(
+                'SELECT "id" FROM prompt_versions WHERE "promptId" = :id LIMIT 1',
+                {"id": row["id"]},
+            )
+            if not isinstance(existing, list):
+                raise RuntimeError("Could not inspect prompt versions")
+            if existing:
+                continue
+            payload = {
+                "kind": "prompt",
+                "title": row["title"],
+                "content": row["content"],
+            }
+            digest = fingerprint(payload)
+            created_at = row.get("createdAt") or row.get("updatedAt")
+            await self._run_transaction(
+                [
+                    (
+                        """
+                        INSERT INTO prompt_versions
+                        ("id", "promptId", "kind", "version", "title", "description",
+                         "content", "contentHash", "createdAt", "createdBy", "sourceVersionId")
+                        VALUES (:id, :promptId, 'prompt', 1, :title, '',
+                                :content, :contentHash, :createdAt, :createdBy, NULL)
+                        """,
+                        {
+                            "id": str(uuid.uuid4()),
+                            "promptId": row["id"],
+                            "title": row["title"],
+                            "content": row["content"],
+                            "contentHash": digest,
+                            "createdAt": created_at,
+                            "createdBy": row["userId"],
+                        },
+                    ),
+                    (
+                        """
+                        UPDATE prompts
+                        SET "version" = 1, "contentHash" = :contentHash
+                        WHERE "id" = :id
+                        """,
+                        {"id": row["id"], "contentHash": digest},
+                    ),
+                ]
+            )
+
+    @staticmethod
+    def _prompt_from_row(row: Dict[str, Any]) -> PromptDict:
         return PromptDict(
             id=row["id"],
             userId=row["userId"],
@@ -1493,38 +1637,541 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             isShared=bool(row["isShared"]),
             createdAt=row["createdAt"],
             updatedAt=row["updatedAt"],
+            kind=row.get("kind") or "prompt",
+            description=row.get("description") or "",
+            enabled=bool(row.get("enabled") or False),
+            importedFrom=row.get("importedFrom"),
+            importedAt=row.get("importedAt"),
+            contentHash=row.get("contentHash"),
+            version=int(row.get("version") or 1),
+            sourcePromptId=row.get("sourcePromptId"),
+            pinnedVersionId=row.get("pinnedVersionId"),
+            pinnedContentHash=row.get("pinnedContentHash"),
+            pinnedAt=row.get("pinnedAt"),
+            sharedAt=row.get("sharedAt"),
         )
 
+    async def create_prompt(self, prompt: PromptDict) -> PromptDict:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: create_prompt, id={prompt['id']}")
+        await self._ensure_prompt_versioning()
+        enforce_content_limit(prompt["content"])
+        digest = fingerprint(prompt)
+        version_id = str(uuid.uuid4())
+        version_values = {
+            "id": version_id,
+            "promptId": prompt["id"],
+            "kind": "prompt",
+            "version": 1,
+            "title": prompt["title"],
+            "description": "",
+            "content": prompt["content"],
+            "contentHash": digest,
+            "createdAt": prompt["createdAt"],
+            "createdBy": prompt["userId"],
+            "sourceVersionId": None,
+        }
+        try:
+            await self._run_transaction(
+                [
+                    (
+                        """
+                        INSERT INTO prompts
+                        ("id", "userId", "title", "content", "isShared", "createdAt",
+                         "updatedAt", "contentHash", "version", "sourcePromptId",
+                         "pinnedVersionId", "pinnedContentHash", "pinnedAt", "sharedAt")
+                        VALUES (:id, :userId, :title, :content, :isShared, :createdAt,
+                                :updatedAt, :contentHash, 1, :sourcePromptId,
+                                :pinnedVersionId, :pinnedContentHash, :pinnedAt, :sharedAt)
+                        """,
+                        {
+                            "id": prompt["id"],
+                            "userId": prompt["userId"],
+                            "title": prompt["title"],
+                            "content": prompt["content"],
+                            "isShared": prompt["isShared"],
+                            "createdAt": prompt["createdAt"],
+                            "updatedAt": prompt["updatedAt"],
+                            "contentHash": digest,
+                            "sourcePromptId": prompt.get("sourcePromptId"),
+                            "pinnedVersionId": prompt.get("pinnedVersionId"),
+                            "pinnedContentHash": prompt.get("pinnedContentHash"),
+                            "pinnedAt": prompt.get("pinnedAt"),
+                            "sharedAt": prompt.get("sharedAt"),
+                        },
+                    ),
+                    (
+                        """
+                        INSERT INTO prompt_versions
+                        ("id", "promptId", "kind", "version", "title", "description",
+                         "content", "contentHash", "createdAt", "createdBy", "sourceVersionId")
+                        VALUES (:id, :promptId, :kind, :version, :title, :description,
+                                :content, :contentHash, :createdAt, :createdBy, :sourceVersionId)
+                        """,
+                        version_values,
+                    ),
+                ]
+            )
+        except IntegrityError as exc:
+            raise RuntimeError("Could not store the prompt") from exc
+
+        result = dict(prompt)
+        result.update(
+            {
+                "version": 1,
+                "contentHash": digest,
+                "sourcePromptId": prompt.get("sourcePromptId"),
+                "pinnedVersionId": prompt.get("pinnedVersionId"),
+                "pinnedContentHash": prompt.get("pinnedContentHash"),
+                "pinnedAt": prompt.get("pinnedAt"),
+                "sharedAt": prompt.get("sharedAt"),
+            }
+        )
+        return cast(PromptDict, result)
+
+    async def list_prompts(self, user_id: str) -> List[PromptDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: list_prompts, user_id={user_id}")
+        await self._ensure_prompt_versioning()
+        result = await self.execute_sql(
+            'SELECT * FROM prompts WHERE "userId" = :user_id ORDER BY "createdAt" DESC',
+            {"user_id": user_id},
+        )
+        if not isinstance(result, list):
+            return []
+        return [
+            self._prompt_from_row(row)
+            for row in result
+            if (row.get("kind") or "prompt") == "prompt"
+        ]
+
+    async def get_prompt(self, prompt_id: str) -> Optional[PromptDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: get_prompt, id={prompt_id}")
+        await self._ensure_prompt_versioning()
+        result = await self.execute_sql(
+            'SELECT * FROM prompts WHERE "id" = :id',
+            {"id": prompt_id},
+        )
+        if not isinstance(result, list) or not result:
+            return None
+        row = result[0]
+        if (row.get("kind") or "prompt") != "prompt":
+            return None
+        return self._prompt_from_row(row)
+
     async def update_prompt(self, prompt: PromptDict) -> PromptDict:
+        """Write the head and, when the fingerprint changes, append a version.
+
+        Both statements run in one transaction so a failed append cannot leave
+        the head pointing at content that has no version row.
+        """
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_prompt, id={prompt['id']}")
-        await self._ensure_prompts_table()
-        await self.execute_sql(
-            """
-            UPDATE prompts
-            SET "title" = :title, "content" = :content, "isShared" = :isShared, "updatedAt" = :updatedAt
-            WHERE "id" = :id AND "userId" = :userId
-            """,
+        await self._ensure_prompt_versioning()
+        enforce_content_limit(prompt["content"])
+        digest = fingerprint(prompt)
+        new_version: Optional[int] = None
+
+        async with self.async_session() as session:
+            try:
+                await session.begin()
+                stored = (
+                    (
+                        await session.execute(
+                            text(
+                                """
+                            SELECT "version", "contentHash", "title", "content"
+                            FROM prompts
+                            WHERE "id" = :id AND "userId" = :userId
+                            """
+                            ),
+                            {"id": prompt["id"], "userId": prompt["userId"]},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if stored is None:
+                    await session.rollback()
+                    raise RuntimeError("Could not update the prompt")
+
+                unchanged = stored["contentHash"] == digest
+                if not unchanged and stored["contentHash"] is None:
+                    unchanged = (
+                        stored["title"] == prompt["title"]
+                        and stored["content"] == prompt["content"]
+                    )
+
+                current_version = int(stored["version"] or 1)
+                if unchanged:
+                    new_version = current_version
+                else:
+                    count_row = (
+                        (
+                            await session.execute(
+                                text(
+                                    "SELECT COUNT(*) AS count FROM prompt_versions "
+                                    'WHERE "promptId" = :id'
+                                ),
+                                {"id": prompt["id"]},
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    count = int(count_row["count"]) if count_row else 0
+                    if count >= MAX_PROMPT_VERSIONS:
+                        await session.rollback()
+                        raise PromptVersionLimitReached(
+                            f"At most {MAX_PROMPT_VERSIONS} versions per prompt"
+                        )
+                    max_row = (
+                        (
+                            await session.execute(
+                                text(
+                                    'SELECT MAX("version") AS max_version '
+                                    'FROM prompt_versions WHERE "promptId" = :id'
+                                ),
+                                {"id": prompt["id"]},
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    new_version = int(max_row["max_version"] or 0) + 1
+
+                await session.execute(
+                    text(
+                        """
+                        UPDATE prompts
+                        SET "title" = :title, "content" = :content,
+                            "isShared" = :isShared, "contentHash" = :contentHash,
+                            "version" = :version, "updatedAt" = :updatedAt,
+                            "sourcePromptId" = :sourcePromptId,
+                            "pinnedVersionId" = :pinnedVersionId,
+                            "pinnedContentHash" = :pinnedContentHash,
+                            "pinnedAt" = :pinnedAt,
+                            "sharedAt" = COALESCE(:sharedAt, "sharedAt")
+                        WHERE "id" = :id AND "userId" = :userId
+                        """
+                    ),
+                    {
+                        "id": prompt["id"],
+                        "userId": prompt["userId"],
+                        "title": prompt["title"],
+                        "content": prompt["content"],
+                        "isShared": prompt["isShared"],
+                        "contentHash": digest,
+                        "version": new_version,
+                        "updatedAt": prompt["updatedAt"],
+                        "sourcePromptId": prompt.get("sourcePromptId"),
+                        "pinnedVersionId": prompt.get("pinnedVersionId"),
+                        "pinnedContentHash": prompt.get("pinnedContentHash"),
+                        "pinnedAt": prompt.get("pinnedAt"),
+                        "sharedAt": prompt.get("sharedAt"),
+                    },
+                )
+
+                if not unchanged:
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO prompt_versions
+                            ("id", "promptId", "kind", "version", "title", "description",
+                             "content", "contentHash", "createdAt", "createdBy", "sourceVersionId")
+                            VALUES (:id, :promptId, :kind, :version, :title, :description,
+                                    :content, :contentHash, :createdAt, :createdBy, :sourceVersionId)
+                            """
+                        ),
+                        {
+                            "id": str(uuid.uuid4()),
+                            "promptId": prompt["id"],
+                            "kind": prompt_kind(prompt),
+                            "version": new_version,
+                            "title": prompt["title"],
+                            "description": prompt.get("description") or "",
+                            "content": prompt["content"],
+                            "contentHash": digest,
+                            "createdAt": prompt["updatedAt"],
+                            "createdBy": prompt["userId"],
+                            "sourceVersionId": None,
+                        },
+                    )
+                await session.commit()
+            except IntegrityError as exc:
+                await session.rollback()
+                raise PromptVersionConflict(
+                    "Prompt version was written concurrently"
+                ) from exc
+            except Exception:
+                await session.rollback()
+                raise
+
+        result = dict(prompt)
+        result.update(
             {
-                "id": prompt["id"],
-                "userId": prompt["userId"],
-                "title": prompt["title"],
-                "content": prompt["content"],
-                "isShared": prompt["isShared"],
-                "updatedAt": prompt["updatedAt"],
-            },
+                "version": new_version,
+                "contentHash": digest,
+                "sourcePromptId": prompt.get("sourcePromptId"),
+                "pinnedVersionId": prompt.get("pinnedVersionId"),
+                "pinnedContentHash": prompt.get("pinnedContentHash"),
+                "pinnedAt": prompt.get("pinnedAt"),
+                "sharedAt": prompt.get("sharedAt"),
+            }
         )
-        return prompt
+        return cast(PromptDict, result)
 
     async def delete_prompt(self, prompt_id: str, user_id: str) -> bool:
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_prompt, id={prompt_id}")
-        await self._ensure_prompts_table()
+        await self._ensure_prompt_versioning()
+        results = await self._run_transaction(
+            [
+                (
+                    'DELETE FROM prompt_update_notices WHERE "promptId" = :id',
+                    {"id": prompt_id},
+                ),
+                (
+                    'DELETE FROM prompt_versions WHERE "promptId" = :id',
+                    {"id": prompt_id},
+                ),
+                (
+                    'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id',
+                    {"id": prompt_id, "user_id": user_id},
+                ),
+            ]
+        )
+        return bool(results and results[-1].rowcount > 0)
+
+    # ---- Prompt versions and pinned-copy notices ----
+
+    async def list_prompt_versions(
+        self, prompt_id: str
+    ) -> List[PromptVersionSummaryDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: list_prompt_versions, prompt_id={prompt_id}")
+        await self._ensure_prompt_versioning()
         result = await self.execute_sql(
-            'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id',
+            """
+            SELECT "id", "promptId", "kind", "version", "title", "description",
+                   "contentHash", "createdAt", "createdBy", "sourceVersionId"
+            FROM prompt_versions
+            WHERE "promptId" = :prompt_id
+            ORDER BY "version" DESC
+            """,
+            {"prompt_id": prompt_id},
+        )
+        if not isinstance(result, list):
+            raise RuntimeError("Could not read prompt versions")
+        return [
+            cast(PromptVersionSummaryDict, {**row, "version": int(row["version"])})
+            for row in result
+        ]
+
+    async def get_prompt_version(
+        self, prompt_id: str, version_id: str
+    ) -> Optional[PromptVersionDict]:
+        if self.show_logger:
+            logger.info(
+                f"SQLAlchemy: get_prompt_version, prompt_id={prompt_id}, id={version_id}"
+            )
+        await self._ensure_prompt_versioning()
+        result = await self.execute_sql(
+            """
+            SELECT * FROM prompt_versions
+            WHERE "promptId" = :prompt_id AND "id" = :version_id
+            """,
+            {"prompt_id": prompt_id, "version_id": version_id},
+        )
+        if not isinstance(result, list) or not result:
+            return None
+        row = result[0]
+        return cast(
+            PromptVersionDict,
+            {
+                **row,
+                "kind": row.get("kind") or "prompt",
+                "description": row.get("description") or "",
+                "version": int(row["version"]),
+            },
+        )
+
+    async def _source_head(self, source_prompt_id: str) -> Optional[Dict[str, Any]]:
+        result = await self.execute_sql(
+            """
+            SELECT * FROM prompt_versions
+            WHERE "promptId" = :prompt_id
+            ORDER BY "version" DESC
+            LIMIT 1
+            """,
+            {"prompt_id": source_prompt_id},
+        )
+        if not isinstance(result, list):
+            raise RuntimeError("Could not read the source prompt versions")
+        return result[0] if result else None
+
+    async def list_prompt_updates(self, user_id: str) -> List[PromptUpdateDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: list_prompt_updates, user_id={user_id}")
+        await self._ensure_prompt_versioning()
+        owned = await self.execute_sql(
+            """
+            SELECT * FROM prompts
+            WHERE "userId" = :user_id AND "sourcePromptId" IS NOT NULL
+            """,
+            {"user_id": user_id},
+        )
+        if not isinstance(owned, list):
+            raise RuntimeError("Could not read pinned prompts")
+
+        updates: List[PromptUpdateDict] = []
+        for prompt in owned:
+            source_result = await self.execute_sql(
+                'SELECT * FROM prompts WHERE "id" = :id',
+                {"id": prompt["sourcePromptId"]},
+            )
+            if not isinstance(source_result, list) or not source_result:
+                continue
+            source = source_result[0]
+            if not source.get("isShared"):
+                continue
+            head = await self._source_head(source["id"])
+            if head is None:
+                continue
+
+            pinned_version: Optional[int] = None
+            if prompt.get("pinnedVersionId"):
+                pinned = await self.execute_sql(
+                    """
+                    SELECT "version" FROM prompt_versions
+                    WHERE "id" = :id AND "promptId" = :prompt_id
+                    """,
+                    {
+                        "id": prompt["pinnedVersionId"],
+                        "prompt_id": source["id"],
+                    },
+                )
+                if isinstance(pinned, list) and pinned:
+                    pinned_version = int(pinned[0]["version"])
+
+            noticed = await self.execute_sql(
+                """
+                SELECT "notifiedVersion" FROM prompt_update_notices
+                WHERE "userId" = :user_id AND "promptId" = :prompt_id
+                """,
+                {"user_id": user_id, "prompt_id": prompt["id"]},
+            )
+            if not isinstance(noticed, list):
+                raise RuntimeError("Could not read prompt update notices")
+            notified_version = int(noticed[0]["notifiedVersion"]) if noticed else 0
+            local_version = int(prompt.get("version") or 1)
+            baseline = max(local_version, pinned_version or 0, notified_version)
+            latest_version = int(head["version"])
+            if latest_version <= baseline:
+                continue
+            updates.append(
+                PromptUpdateDict(
+                    promptId=prompt["id"],
+                    title=prompt["title"],
+                    sourcePromptId=source["id"],
+                    pinnedVersionId=prompt.get("pinnedVersionId"),
+                    pinnedVersion=pinned_version,
+                    localVersion=local_version,
+                    latestVersionId=head["id"],
+                    latestVersion=latest_version,
+                    notifiedVersion=notified_version,
+                )
+            )
+
+        updates.sort(key=lambda item: item["latestVersion"], reverse=True)
+        return updates
+
+    async def ack_prompt_update(
+        self, user_id: str, prompt_id: str, version: int
+    ) -> int:
+        if self.show_logger:
+            logger.info(
+                f"SQLAlchemy: ack_prompt_update, prompt_id={prompt_id}, version={version}"
+            )
+        await self._ensure_prompt_versioning()
+        owned = await self.execute_sql(
+            """
+            SELECT "sourcePromptId", "pinnedVersionId" FROM prompts
+            WHERE "id" = :id AND "userId" = :user_id
+            """,
             {"id": prompt_id, "user_id": user_id},
         )
-        return isinstance(result, int) and result > 0
+        if not isinstance(owned, list):
+            raise RuntimeError("Could not read the pinned prompt")
+        if not owned or not owned[0].get("sourcePromptId"):
+            raise PromptVersionConflict("Prompt is not pinned to a shared source")
+
+        head = await self._source_head(owned[0]["sourcePromptId"])
+        if head is None:
+            raise PromptVersionConflict("Prompt source has no versions")
+        clamped = min(max(int(version), 1), int(head["version"]))
+
+        async with self.async_session() as session:
+            try:
+                await session.begin()
+                row = (
+                    (
+                        await session.execute(
+                            text(
+                                """
+                            SELECT "notifiedVersion" FROM prompt_update_notices
+                            WHERE "userId" = :user_id AND "promptId" = :prompt_id
+                            """
+                            ),
+                            {"user_id": user_id, "prompt_id": prompt_id},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if row is None:
+                    effective = clamped
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO prompt_update_notices
+                            ("userId", "promptId", "notifiedVersion", "notifiedAt")
+                            VALUES (:user_id, :prompt_id, :version, :notified_at)
+                            """
+                        ),
+                        {
+                            "user_id": user_id,
+                            "prompt_id": prompt_id,
+                            "version": effective,
+                            "notified_at": await self.get_current_timestamp(),
+                        },
+                    )
+                else:
+                    existing = int(row["notifiedVersion"] or 0)
+                    effective = max(existing, clamped)
+                    if effective > existing:
+                        await session.execute(
+                            text(
+                                """
+                                UPDATE prompt_update_notices
+                                SET "notifiedVersion" = :version,
+                                    "notifiedAt" = :notified_at
+                                WHERE "userId" = :user_id AND "promptId" = :prompt_id
+                                """
+                            ),
+                            {
+                                "user_id": user_id,
+                                "prompt_id": prompt_id,
+                                "version": effective,
+                                "notified_at": await self.get_current_timestamp(),
+                            },
+                        )
+                await session.commit()
+                return effective
+            except Exception:
+                await session.rollback()
+                raise
 
     # ---- Per-user skills (rows in the prompts table, kind='skill') ----
 

@@ -8,6 +8,9 @@ from chainlit.types import (
     PaginatedResponse,
     Pagination,
     PromptDict,
+    PromptUpdateDict,
+    PromptVersionDict,
+    PromptVersionSummaryDict,
     ScheduledTaskCompletion,
     ScheduledTaskDict,
     ThreadDict,
@@ -276,6 +279,34 @@ class BaseDataLayer(ABC):
     async def delete_prompt(self, prompt_id: str, user_id: str) -> bool:
         raise NotImplementedError(
             "Prompt gallery is not implemented for this data layer"
+        )
+
+    # ---- Prompt versions and pinned-copy notices (opt-in; immutable rows) ----
+
+    async def list_prompt_versions(
+        self, prompt_id: str
+    ) -> List[PromptVersionSummaryDict]:
+        raise NotImplementedError(
+            "Prompt versioning is not implemented for this data layer"
+        )
+
+    async def get_prompt_version(
+        self, prompt_id: str, version_id: str
+    ) -> Optional[PromptVersionDict]:
+        raise NotImplementedError(
+            "Prompt versioning is not implemented for this data layer"
+        )
+
+    async def list_prompt_updates(self, user_id: str) -> List[PromptUpdateDict]:
+        raise NotImplementedError(
+            "Prompt versioning is not implemented for this data layer"
+        )
+
+    async def ack_prompt_update(
+        self, user_id: str, prompt_id: str, version: int
+    ) -> int:
+        raise NotImplementedError(
+            "Prompt versioning is not implemented for this data layer"
         )
 
     # ---- Per-user skills (opt-in; share the prompts table in SQLAlchemy) ----
