@@ -125,7 +125,7 @@ describe('PromptVersionDiff', () => {
     mocks.detachPrompt.mockResolvedValue({ ...prompt, sourcePromptId: null });
   });
 
-  it('renders unified server rows and version metadata', async () => {
+  it('renders the diff for the selected source version', async () => {
     renderDialog();
 
     expect(await screen.findByText('new line')).toBeInTheDocument();
@@ -136,10 +136,6 @@ describe('PromptVersionDiff', () => {
     expect(mocks.fetchPromptVersions).toHaveBeenCalledWith('source-1', {
       shared: true
     });
-
-    const metadata = screen.getByTestId('prompt-diff-metadata');
-    expect(metadata).toHaveTextContent('v3');
-    expect(metadata).not.toHaveTextContent('sha256');
   });
 
   it('toggles between unified and side-by-side rendering', async () => {
@@ -268,7 +264,8 @@ describe('PromptVersionDiff', () => {
       sourcePromptId: null,
       pinnedVersionId: null,
       pinnedContentHash: null,
-      pinnedAt: null
+      pinnedAt: null,
+      contentHash: 'sha256:source-new-head'
     };
     const localVersions = [
       { ...versions[0], id: 'lv3', promptId: 'local-1', version: 3 },

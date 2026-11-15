@@ -360,6 +360,41 @@ describe('SkillsPanel', () => {
     await waitFor(() => expect(detachSkill).toHaveBeenCalledWith('s3'));
   });
 
+  it('opens skill history from the version badge', async () => {
+    state.skills = [own];
+    fetchSkillVersions.mockResolvedValue([
+      {
+        id: 'local-v2',
+        promptId: 's2',
+        kind: 'skill',
+        version: 2,
+        title: 'my-skill',
+        description: '',
+        contentHash: 'b'.repeat(64),
+        createdAt: '2026-02-01T00:00:00Z'
+      },
+      {
+        id: 'local-v1',
+        promptId: 's2',
+        kind: 'skill',
+        version: 1,
+        title: 'my-skill',
+        description: '',
+        contentHash: 'sha256:older',
+        createdAt: '2026-01-01T00:00:00Z'
+      }
+    ]);
+    render(<SkillsPanel />);
+
+    fireEvent.click(await screen.findByTestId('skill-versions-s2'));
+
+    expect(
+      await screen.findByText('chat.skills.update.historyTitle')
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('skill-update-version')).toHaveTextContent('v1');
+    expect(screen.queryByTestId('skill-update-submit')).toBeNull();
+  });
+
   it('opens the update dialog from the quiet update marker', async () => {
     state.skills = [pinned];
     state.skillUpdates = [notice];

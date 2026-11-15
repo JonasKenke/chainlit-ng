@@ -38,12 +38,6 @@ export interface PromptVersionDiffProps {
 
 type ViewMode = VersionDiffViewMode;
 
-function formatDate(value?: string): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
-
 export function PromptVersionDiff({
   prompt,
   open,
@@ -124,15 +118,18 @@ export function PromptVersionDiff({
       const list = await fetchPromptVersions(versionSourceId, {
         shared: isPinned
       });
-      const sorted = [...list].sort((a, b) => b.version - a.version);
+      const sorted = [...list]
+        .filter(
+          (version) =>
+            !prompt?.contentHash || version.contentHash !== prompt.contentHash
+        )
+        .sort((a, b) => b.version - a.version);
       setVersions(sorted);
       const preferred = sorted.some(
         (version) => version.id === initialVersionId
       )
         ? initialVersionId
-        : isPinned
-          ? sorted[0]?.id
-          : (sorted[1]?.id ?? sorted[0]?.id);
+        : sorted[0]?.id;
       setTargetId(preferred ?? null);
     } catch (error) {
       const code = promptErrorCode(error);
@@ -149,7 +146,13 @@ export function PromptVersionDiff({
     } finally {
       setLoadingVersions(false);
     }
-  }, [versionSourceId, isPinned, fetchPromptVersions, initialVersionId]);
+  }, [
+    versionSourceId,
+    isPinned,
+    prompt?.contentHash,
+    fetchPromptVersions,
+    initialVersionId
+  ]);
 
   useEffect(() => {
     if (!open || !promptId) return;
@@ -314,24 +317,6 @@ export function PromptVersionDiff({
                 </Button>
               </div>
             </div>
-
-            {targetVersion ? (
-              <p
-                className="text-xs text-muted-foreground"
-                data-testid="prompt-diff-metadata"
-                title={[targetVersion.contentHash, targetVersion.createdBy]
-                  .filter(Boolean)
-                  .join(' · ')}
-              >
-                <span className="text-foreground">
-                  v{targetVersion.version}
-                </span>
-                {' · '}
-                <time dateTime={targetVersion.createdAt}>
-                  {formatDate(targetVersion.createdAt)}
-                </time>
-              </p>
-            ) : null}
 
             {stale ? (
               <p

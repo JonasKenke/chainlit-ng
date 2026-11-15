@@ -36,12 +36,6 @@ export interface SkillUpdateDialogProps {
   onUpdated?: (skill: ISkill) => void;
 }
 
-function formatDate(value?: string): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
-
 /**
  * Review a shared skill version before copying it over the pinned local copy.
  * The server always stores the result disabled, so this dialog never enables a
@@ -79,14 +73,23 @@ export function SkillUpdateDialog({
 
   const skillId = skill?.id;
   const sourceId = skill?.sourcePromptId ?? null;
+  const isPinned = Boolean(sourceId);
+  const versionSourceId = sourceId ?? skillId;
 
   const loadVersions = useCallback(async () => {
-    if (!sourceId) return;
+    if (!versionSourceId) return;
     setLoadingVersions(true);
     setLoadError(false);
     try {
-      const list = await fetchSkillVersions(sourceId, { shared: true });
-      const sorted = [...list].sort((a, b) => b.version - a.version);
+      const list = await fetchSkillVersions(versionSourceId, {
+        shared: isPinned
+      });
+      const sorted = [...list]
+        .filter(
+          (version) =>
+            !skill?.contentHash || version.contentHash !== skill.contentHash
+        )
+        .sort((a, b) => b.version - a.version);
       setVersions(sorted);
       const preferred = sorted.some(
         (version) => version.id === initialVersionId
@@ -100,19 +103,25 @@ export function SkillUpdateDialog({
     } finally {
       setLoadingVersions(false);
     }
-  }, [sourceId, fetchSkillVersions, initialVersionId]);
+  }, [
+    versionSourceId,
+    isPinned,
+    skill?.contentHash,
+    fetchSkillVersions,
+    initialVersionId
+  ]);
 
   useEffect(() => {
-    if (!open || !skillId || !sourceId) return;
+    if (!open || !skillId || !versionSourceId) return;
     setConfirmLocal(false);
     setStale(false);
     setSourceUnavailable(false);
     setActionError(null);
     void loadVersions();
-  }, [open, skillId, sourceId, initialVersionId, loadVersions]);
+  }, [open, skillId, versionSourceId, initialVersionId, loadVersions]);
 
   useEffect(() => {
-    if (!open || !sourceId || !targetId) {
+    if (!open || !versionSourceId || !targetId) {
       setTarget(null);
       return;
     }
@@ -121,14 +130,17 @@ export function SkillUpdateDialog({
     setConfirmLocal(false);
     setStale(false);
     setActionError(null);
-    fetchSkillVersion(sourceId, targetId, { shared: true })
+    fetchSkillVersion(versionSourceId, targetId, { shared: isPinned })
       .then((version) => {
         if (!cancelled) setTarget(version);
       })
       .catch((error) => {
         if (cancelled) return;
         const code = promptErrorCode(error);
-        if (code === 'source_unavailable' || code === 'not_pinned') {
+        if (
+          isPinned &&
+          (code === 'source_unavailable' || code === 'not_pinned')
+        ) {
           setSourceUnavailable(true);
         } else {
           setLoadError(true);
@@ -141,7 +153,14 @@ export function SkillUpdateDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, sourceId, targetId, fetchSkillVersion, reloadToken]);
+  }, [
+    open,
+    versionSourceId,
+    isPinned,
+    targetId,
+    fetchSkillVersion,
+    reloadToken
+  ]);
 
   const targetVersion = useMemo(
     () => versions.find((version) => version.id === targetId) ?? null,
@@ -166,17 +185,6 @@ export function SkillUpdateDialog({
   const alreadyCurrent = Boolean(
     target && skill?.contentHash && target.contentHash === skill.contentHash
   );
-
-  const targetHashLabel = targetVersion?.contentHash
-    ? targetVersion.contentHash.length > 18
-      ? `${targetVersion.contentHash.slice(0, 18)}…`
-      : targetVersion.contentHash
-    : '—';
-  const pinnedHashLabel = skill?.pinnedContentHash
-    ? skill.pinnedContentHash.length > 18
-      ? `${skill.pinnedContentHash.slice(0, 18)}…`
-      : skill.pinnedContentHash
-    : '—';
 
   const handleUpdate = async (confirm: boolean) => {
     if (!skillId) return;
@@ -238,10 +246,18 @@ export function SkillUpdateDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <GitCompare className="h-4 w-4" />
-            {t('chat.skills.update.title')}
+            {t(
+              isPinned
+                ? 'chat.skills.update.title'
+                : 'chat.skills.update.historyTitle'
+            )}
           </DialogTitle>
           <DialogDescription>
-            {t('chat.skills.update.description')}
+            {t(
+              isPinned
+                ? 'chat.skills.update.description'
+                : 'chat.skills.update.historyDescription'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -252,6 +268,14 @@ export function SkillUpdateDialog({
         ) : loadError ? (
           <p className="text-sm text-destructive">
             {t('chat.skills.update.loadError')}
+          </p>
+        ) : versions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t(
+              isPinned
+                ? 'chat.skills.update.upToDate'
+                : 'chat.skills.update.noEarlierVersions'
+            )}
           </p>
         ) : (
           <>
@@ -287,24 +311,6 @@ export function SkillUpdateDialog({
                 </Button>
               </div>
             </div>
-
-            {targetVersion ? (
-              <p
-                className="text-xs text-muted-foreground"
-                data-testid="skill-update-metadata"
-                title={[targetHashLabel, pinnedHashLabel]
-                  .filter(Boolean)
-                  .join(' · ')}
-              >
-                <span className="text-foreground">
-                  v{targetVersion.version}
-                </span>
-                {' · '}
-                <time dateTime={targetVersion.createdAt}>
-                  {formatDate(targetVersion.createdAt)}
-                </time>
-              </p>
-            ) : null}
 
             {sourceUnavailable ? (
               <div className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
@@ -420,26 +426,28 @@ export function SkillUpdateDialog({
               </p>
             ) : null}
 
-            <div className="flex items-center justify-end">
-              <Button
-                type="button"
-                onClick={() => handleUpdate(false)}
-                disabled={
-                  !targetId ||
-                  updating ||
-                  alreadyCurrent ||
-                  sourceUnavailable ||
-                  confirmLocal
-                }
-                data-testid="skill-update-submit"
-              >
-                {targetVersion
-                  ? t('chat.skills.update.update', {
-                      version: targetVersion.version
-                    })
-                  : t('chat.skills.update.updateFallback')}
-              </Button>
-            </div>
+            {isPinned ? (
+              <div className="flex items-center justify-end">
+                <Button
+                  type="button"
+                  onClick={() => handleUpdate(false)}
+                  disabled={
+                    !targetId ||
+                    updating ||
+                    alreadyCurrent ||
+                    sourceUnavailable ||
+                    confirmLocal
+                  }
+                  data-testid="skill-update-submit"
+                >
+                  {targetVersion
+                    ? t('chat.skills.update.update', {
+                        version: targetVersion.version
+                      })
+                    : t('chat.skills.update.updateFallback')}
+                </Button>
+              </div>
+            ) : null}
           </>
         )}
       </DialogContent>

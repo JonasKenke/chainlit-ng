@@ -129,7 +129,7 @@ describe('SkillUpdateDialog', () => {
     });
   });
 
-  it('loads shared versions, shows metadata and diffs the local body', async () => {
+  it('loads shared versions and diffs the local body', async () => {
     renderDialog();
 
     expect(await screen.findByTestId('skill-update-version')).toHaveTextContent(
@@ -141,9 +141,6 @@ describe('SkillUpdateDialog', () => {
     expect(fetchSkillVersionMock).toHaveBeenCalledWith('source-1', 'sv2', {
       shared: true
     });
-    const metadata = await screen.findByTestId('skill-update-metadata');
-    expect(metadata).toHaveTextContent('v2');
-    expect(metadata).not.toHaveTextContent('sha256');
     const rows = screen.getAllByTestId('skill-update-row');
     expect(rows.some((row) => row.dataset.op === 'replace')).toBe(true);
     expect(screen.getByText('new line')).toBeInTheDocument();
@@ -184,19 +181,49 @@ describe('SkillUpdateDialog', () => {
       )
     ).not.toBeNull();
 
+    fireEvent.pointerDown(screen.getByTestId('skill-update-version'));
+    expect(
+      await screen.findByTestId('skill-update-version-option-sv2')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('skill-update-version-option-sv1')).toBeNull();
+  });
+
+  it('shows local skill history without an update action', async () => {
+    const localSkill: ISkill = {
+      ...skill,
+      id: 'local-skill',
+      sourcePromptId: null,
+      pinnedVersionId: null,
+      pinnedContentHash: null,
+      contentHash: 'sha256:current'
+    };
+    fetchSkillVersionsMock.mockResolvedValue([
+      {
+        ...versions[0],
+        id: 'lv2',
+        promptId: 'local-skill',
+        contentHash: 'sha256:current'
+      },
+      {
+        ...versions[1],
+        id: 'lv1',
+        promptId: 'local-skill',
+        contentHash: 'sha256:old'
+      }
+    ]);
     fetchSkillVersionMock.mockResolvedValue({
       ...versions[1],
+      id: 'lv1',
       content: '# Skill\nfirst line'
     });
-    fireEvent.pointerDown(screen.getByTestId('skill-update-version'));
-    fireEvent.click(
-      await screen.findByTestId('skill-update-version-option-sv1')
-    );
-    await waitFor(() =>
-      expect(fetchSkillVersionMock).toHaveBeenCalledWith('source-1', 'sv1', {
-        shared: true
-      })
-    );
+
+    renderDialog({ skill: localSkill });
+
+    expect(
+      await screen.findByText('chat.skills.update.historyTitle')
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('skill-update-version')).toHaveTextContent('v1');
+    expect(screen.queryByTestId('skill-update-submit')).toBeNull();
   });
 
   it('warns about local edits and requires an explicit confirmation', async () => {
@@ -290,7 +317,10 @@ describe('SkillUpdateDialog', () => {
   });
 
   it('preselects the version named by an update notice', async () => {
-    renderDialog({ initialVersionId: 'sv1' });
+    renderDialog({
+      skill: { ...skill, contentHash: 'sha256:current' },
+      initialVersionId: 'sv1'
+    });
 
     expect(await screen.findByTestId('skill-update-version')).toHaveTextContent(
       'v1'
