@@ -537,7 +537,7 @@ describe('ApprovalCard', () => {
     expect(screen.queryByTestId('approval-diff')).toBeNull();
     expect(
       screen.queryByText(
-        'Requested content; the approved changes are in the diff.'
+        'Edited content; the approved changes are in the diff.'
       )
     ).toBeNull();
     expect(screen.getByTestId('approval-content')).toHaveTextContent(
@@ -549,7 +549,7 @@ describe('ApprovalCard', () => {
     expect(screen.queryByTestId('approval-diff')).toBeNull();
     expect(
       screen.queryByText(
-        'Requested content; the approved changes are in the diff.'
+        'Edited content; the approved changes are in the diff.'
       )
     ).toBeNull();
   });
@@ -884,9 +884,7 @@ describe('ApprovalCard', () => {
 
     expect(screen.queryByText('Edited')).toBeNull();
     expect(
-      screen.getByText(
-        'Requested content; the approved changes are in the diff.'
-      )
+      screen.getByText('Edited content; the approved changes are in the diff.')
     ).toBeInTheDocument();
     expect(screen.getAllByText(/other@example.com/).length).toBeGreaterThan(0);
     const diff = screen.getByTestId('approval-diff');

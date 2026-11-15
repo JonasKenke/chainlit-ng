@@ -826,7 +826,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           </Markdown>
           {approval.status === 'edited' && diff.length ? (
             <p className="mt-1 text-xs text-muted-foreground">
-              Requested content; the approved changes are in the diff.
+              Edited content; the approved changes are in the diff.
             </p>
           ) : null}
         </div>
