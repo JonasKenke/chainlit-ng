@@ -101,6 +101,67 @@ async def test_existing_prompts_table_is_migrated_in_place(
     } <= names
 
 
+async def test_existing_skill_rows_get_a_lazy_skill_version(
+    db_file: Path, skill_data_layer: SQLAlchemyDataLayer
+):
+    """Skills written before versioning keep their import hash and gain a v1."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE prompts (
+                    "id" TEXT PRIMARY KEY,
+                    "userId" TEXT NOT NULL,
+                    "title" TEXT NOT NULL,
+                    "content" TEXT NOT NULL,
+                    "isShared" BOOLEAN NOT NULL DEFAULT FALSE,
+                    "createdAt" TEXT NOT NULL,
+                    "updatedAt" TEXT NOT NULL,
+                    "kind" TEXT NOT NULL DEFAULT 'prompt',
+                    "description" TEXT NOT NULL DEFAULT '',
+                    "enabled" BOOLEAN NOT NULL DEFAULT FALSE,
+                    "importedFrom" TEXT,
+                    "importedAt" TEXT,
+                    "contentHash" TEXT
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                INSERT INTO prompts
+                ("id", "userId", "title", "content", "isShared", "createdAt",
+                 "updatedAt", "kind", "description", "enabled", "importedFrom",
+                 "importedAt", "contentHash")
+                VALUES
+                ('skill-1', 'user-1', 'legacy', 'legacy body', 0,
+                 '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 'skill',
+                 'legacy description', 0, 'legacy.md', '2024-01-01T00:00:00Z',
+                 'import-hash')
+                """
+            )
+        )
+    await engine.dispose()
+
+    skill = await skill_data_layer.get_skill("skill-1", "user-1")
+    assert skill is not None
+    assert skill["version"] == 1
+    assert skill["contentHash"] == "import-hash"
+
+    versions = await skill_data_layer.list_prompt_versions("skill-1")
+    assert len(versions) == 1
+    assert versions[0]["version"] == 1
+    assert versions[0]["kind"] == "skill"
+    assert versions[0]["description"] == "legacy description"
+    assert versions[0]["contentHash"].startswith("sha256:")
+
+    stored = await skill_data_layer.get_prompt_version("skill-1", versions[0]["id"])
+    assert stored is not None
+    assert stored["content"] == "legacy body"
+
+
 async def test_prompt_only_use_does_not_add_skill_columns(
     skill_data_layer: SQLAlchemyDataLayer,
 ):
@@ -130,12 +191,21 @@ async def test_skill_crud_is_owner_scoped(skill_data_layer: SQLAlchemyDataLayer)
     assert [s["id"] for s in await skill_data_layer.list_skills("user-a")] == [
         mine["id"]
     ]
-    assert await skill_data_layer.list_skills("user-b") == [theirs]
+    assert [s["id"] for s in await skill_data_layer.list_skills("user-b")] == [
+        theirs["id"]
+    ]
 
     assert await skill_data_layer.get_skill(theirs["id"], "user-a") is None
     stored = await skill_data_layer.get_skill(mine["id"], "user-a")
     assert stored is not None
     assert stored["title"] == "mine"
+    assert stored["version"] == 1
+    assert stored["contentHash"] is not None
+    assert stored["contentHash"].startswith("sha256:")
+    versions = await skill_data_layer.list_prompt_versions(mine["id"])
+    assert [version["version"] for version in versions] == [1]
+    assert versions[0]["kind"] == "skill"
+    assert versions[0]["description"] == "mine description"
 
     updated = cast(
         PromptDict,
@@ -148,8 +218,10 @@ async def test_skill_crud_is_owner_scoped(skill_data_layer: SQLAlchemyDataLayer)
 
     assert await skill_data_layer.delete_skill(mine["id"], "user-b") is False
     assert await skill_data_layer.get_skill(mine["id"], "user-a") is not None
+    assert len(await skill_data_layer.list_prompt_versions(mine["id"])) == 2
     assert await skill_data_layer.delete_skill(mine["id"], "user-a") is True
     assert await skill_data_layer.get_skill(mine["id"], "user-a") is None
+    assert await skill_data_layer.list_prompt_versions(mine["id"]) == []
 
 
 async def test_update_cannot_move_a_skill_to_another_user(
@@ -198,10 +270,10 @@ async def test_failed_create_is_not_reported_as_success(
 ):
     await skill_data_layer._ensure_skills_columns()
 
-    async def failing(query, parameters):
-        return None
+    async def failing(statements):
+        raise RuntimeError("Could not store the skill")
 
-    monkeypatch.setattr(skill_data_layer, "execute_sql", failing)
+    monkeypatch.setattr(skill_data_layer, "_run_transaction", failing)
     with pytest.raises(RuntimeError, match="Could not store"):
         await skill_data_layer.create_skill(skill_row("user-a"))
 
@@ -213,17 +285,14 @@ async def test_failed_update_is_not_reported_as_success(
     await skill_data_layer.create_skill(skill)
     disabled = cast(PromptDict, {**skill, "enabled": False})
 
-    async def no_result(query, parameters):
-        return None
+    class FailingSession:
+        async def __aenter__(self):
+            raise RuntimeError("Could not update the skill")
 
-    monkeypatch.setattr(skill_data_layer, "execute_sql", no_result)
-    with pytest.raises(RuntimeError, match="Could not update"):
-        await skill_data_layer.update_skill(disabled)
+        async def __aexit__(self, *args):
+            return False
 
-    async def no_rows(query, parameters):
-        return 0
-
-    monkeypatch.setattr(skill_data_layer, "execute_sql", no_rows)
+    monkeypatch.setattr(skill_data_layer, "async_session", lambda: FailingSession())
     with pytest.raises(RuntimeError, match="Could not update"):
         await skill_data_layer.update_skill(disabled)
 
@@ -242,6 +311,11 @@ async def test_failed_reads_and_delete_raise(
         await skill_data_layer.list_skills("user-a")
     with pytest.raises(RuntimeError, match="Could not read"):
         await skill_data_layer.get_skill(skill["id"], "user-a")
+
+    async def failing_delete(statements):
+        raise RuntimeError("Could not delete the skill")
+
+    monkeypatch.setattr(skill_data_layer, "_run_transaction", failing_delete)
     with pytest.raises(RuntimeError, match="Could not delete"):
         await skill_data_layer.delete_skill(skill["id"], "user-a")
 
@@ -257,7 +331,7 @@ async def test_failed_migration_does_not_latch_and_retry_succeeds(
         return await real_execute_sql(query, parameters)
 
     monkeypatch.setattr(skill_data_layer, "execute_sql", failing_alter)
-    with pytest.raises(RuntimeError, match="skill columns"):
+    with pytest.raises(RuntimeError, match="Could not add"):
         await skill_data_layer._ensure_skills_columns()
     assert skill_data_layer._skills_columns_checked is False
 

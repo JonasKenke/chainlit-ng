@@ -23,6 +23,7 @@ from chainlit.prompt_versioning import (
     PromptVersionLimitReached,
     enforce_content_limit,
     fingerprint,
+    fingerprint_from_values,
     prompt_kind,
 )
 from chainlit.step import StepDict
@@ -39,6 +40,7 @@ from chainlit.types import (
     PromptVersionSummaryDict,
     ScheduledTaskCompletion,
     ScheduledTaskDict,
+    SkillUpdateDict,
     ThreadDict,
     ThreadFilter,
     ThreadGrant,
@@ -1495,6 +1497,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             ("pinnedContentHash", "TEXT"),
             ("pinnedAt", "TEXT"),
             ("sharedAt", "TEXT"),
+            ("updateSeenVersionId", "TEXT"),
         ):
             if name not in existing:
                 result = await self.execute_sql(
@@ -1572,10 +1575,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         self._prompt_versioning_checked = True
 
     async def _materialise_prompt_versions(self, kind_column: bool) -> None:
-        """Backfill one immutable v1 row for prompts written before versioning."""
+        """Backfill one immutable v1 row for prompts and skills written earlier."""
         query = 'SELECT * FROM prompts WHERE "version" IS NULL OR "version" <= 1'
-        if kind_column:
-            query += " AND COALESCE(\"kind\", 'prompt') = 'prompt'"
         rows = await self.execute_sql(query, {})
         if not isinstance(rows, list):
             raise RuntimeError("Could not read prompts for the version backfill")
@@ -1589,13 +1590,26 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 raise RuntimeError("Could not inspect prompt versions")
             if existing:
                 continue
+            kind = (row.get("kind") or "prompt") if kind_column else "prompt"
+            if kind not in ("prompt", "skill"):
+                kind = "prompt"
+            description = (row.get("description") or "") if kind == "skill" else ""
             payload = {
-                "kind": "prompt",
+                "kind": kind,
                 "title": row["title"],
                 "content": row["content"],
+                "description": description,
             }
             digest = fingerprint(payload)
             created_at = row.get("createdAt") or row.get("updatedAt")
+            # Prompts treat the head hash as the version fingerprint. Skills
+            # keep their imported Markdown hash when one exists, so provenance
+            # survives the lazy migration.
+            content_hash_statement = (
+                '"contentHash" = :contentHash'
+                if kind == "prompt"
+                else '"contentHash" = COALESCE("contentHash", :contentHash)'
+            )
             await self._run_transaction(
                 [
                     (
@@ -1603,13 +1617,15 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         INSERT INTO prompt_versions
                         ("id", "promptId", "kind", "version", "title", "description",
                          "content", "contentHash", "createdAt", "createdBy", "sourceVersionId")
-                        VALUES (:id, :promptId, 'prompt', 1, :title, '',
+                        VALUES (:id, :promptId, :kind, 1, :title, :description,
                                 :content, :contentHash, :createdAt, :createdBy, NULL)
                         """,
                         {
                             "id": str(uuid.uuid4()),
                             "promptId": row["id"],
+                            "kind": kind,
                             "title": row["title"],
+                            "description": description,
                             "content": row["content"],
                             "contentHash": digest,
                             "createdAt": created_at,
@@ -1617,9 +1633,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         },
                     ),
                     (
-                        """
+                        f"""
                         UPDATE prompts
-                        SET "version" = 1, "contentHash" = :contentHash
+                        SET "version" = 1, {content_hash_statement}
                         WHERE "id" = :id
                         """,
                         {"id": row["id"], "contentHash": digest},
@@ -1649,6 +1665,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             pinnedContentHash=row.get("pinnedContentHash"),
             pinnedAt=row.get("pinnedAt"),
             sharedAt=row.get("sharedAt"),
+            updateSeenVersionId=row.get("updateSeenVersionId"),
         )
 
     async def create_prompt(self, prompt: PromptDict) -> PromptDict:
@@ -2182,6 +2199,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if self._skills_columns_checked:
             return
         await self._ensure_prompts_table()
+        await self._ensure_prompt_versioning()
 
         if self.engine.dialect.name == "sqlite":
             columns = await self.execute_sql("PRAGMA table_info(prompts)", {})
@@ -2207,6 +2225,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             ("importedFrom", "TEXT"),
             ("importedAt", "TEXT"),
             ("contentHash", "TEXT"),
+            ("updateSeenVersionId", "TEXT"),
         ):
             if name not in existing:
                 result = await self.execute_sql(
@@ -2224,6 +2243,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         )
         if result is None:
             raise RuntimeError("Could not create the skill index")
+        await self._materialise_prompt_versions(kind_column=True)
         self._skills_columns_checked = True
 
     @staticmethod
@@ -2242,36 +2262,101 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             importedFrom=row.get("importedFrom"),
             importedAt=row.get("importedAt"),
             contentHash=row.get("contentHash"),
+            version=int(row.get("version") or 1),
+            sourcePromptId=row.get("sourcePromptId"),
+            pinnedVersionId=row.get("pinnedVersionId"),
+            pinnedContentHash=row.get("pinnedContentHash"),
+            pinnedAt=row.get("pinnedAt"),
+            sharedAt=row.get("sharedAt"),
+            updateSeenVersionId=row.get("updateSeenVersionId"),
         )
 
     async def create_skill(self, skill: PromptDict) -> PromptDict:
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_skill, id={skill['id']}")
         await self._ensure_skills_columns()
-        result = await self.execute_sql(
-            """
-            INSERT INTO prompts
-            ("id", "userId", "title", "content", "isShared", "kind", "description", "enabled", "importedFrom", "importedAt", "contentHash", "createdAt", "updatedAt")
-            VALUES (:id, :userId, :title, :content, :isShared, 'skill', :description, :enabled, :importedFrom, :importedAt, :contentHash, :createdAt, :updatedAt)
-            """,
+        enforce_content_limit(skill["content"])
+        digest = fingerprint(skill)
+        version_id = str(uuid.uuid4())
+        # Imported Markdown hashes are provenance, so keep a supplied hash.
+        content_hash = skill.get("contentHash") or digest
+        try:
+            await self._run_transaction(
+                [
+                    (
+                        """
+                        INSERT INTO prompts
+                        ("id", "userId", "title", "content", "isShared", "kind",
+                         "description", "enabled", "importedFrom", "importedAt",
+                         "contentHash", "createdAt", "updatedAt", "version",
+                         "sourcePromptId", "pinnedVersionId", "pinnedContentHash",
+                         "pinnedAt", "sharedAt", "updateSeenVersionId")
+                        VALUES (:id, :userId, :title, :content, :isShared, 'skill',
+                                :description, :enabled, :importedFrom, :importedAt,
+                                :contentHash, :createdAt, :updatedAt, 1,
+                                :sourcePromptId, :pinnedVersionId, :pinnedContentHash,
+                                :pinnedAt, :sharedAt, :updateSeenVersionId)
+                        """,
+                        {
+                            "id": skill["id"],
+                            "userId": skill["userId"],
+                            "title": skill["title"],
+                            "content": skill["content"],
+                            "isShared": skill.get("isShared", False),
+                            "description": skill.get("description", ""),
+                            "enabled": skill.get("enabled", False),
+                            "importedFrom": skill.get("importedFrom"),
+                            "importedAt": skill.get("importedAt"),
+                            "contentHash": content_hash,
+                            "createdAt": skill["createdAt"],
+                            "updatedAt": skill["updatedAt"],
+                            "sourcePromptId": skill.get("sourcePromptId"),
+                            "pinnedVersionId": skill.get("pinnedVersionId"),
+                            "pinnedContentHash": skill.get("pinnedContentHash"),
+                            "pinnedAt": skill.get("pinnedAt"),
+                            "sharedAt": skill.get("sharedAt"),
+                            "updateSeenVersionId": skill.get("updateSeenVersionId"),
+                        },
+                    ),
+                    (
+                        """
+                        INSERT INTO prompt_versions
+                        ("id", "promptId", "kind", "version", "title", "description",
+                         "content", "contentHash", "createdAt", "createdBy", "sourceVersionId")
+                        VALUES (:id, :promptId, 'skill', 1, :title, :description,
+                                :content, :contentHash, :createdAt, :createdBy, NULL)
+                        """,
+                        {
+                            "id": version_id,
+                            "promptId": skill["id"],
+                            "title": skill["title"],
+                            "description": skill.get("description", ""),
+                            "content": skill["content"],
+                            "contentHash": digest,
+                            "createdAt": skill["createdAt"],
+                            "createdBy": skill["userId"],
+                        },
+                    ),
+                ]
+            )
+        except IntegrityError as exc:
+            raise RuntimeError("Could not store the skill") from exc
+
+        result = dict(skill)
+        result.update(
             {
-                "id": skill["id"],
-                "userId": skill["userId"],
-                "title": skill["title"],
-                "content": skill["content"],
-                "isShared": skill.get("isShared", False),
-                "description": skill.get("description", ""),
-                "enabled": skill.get("enabled", False),
-                "importedFrom": skill.get("importedFrom"),
-                "importedAt": skill.get("importedAt"),
-                "contentHash": skill.get("contentHash"),
-                "createdAt": skill["createdAt"],
-                "updatedAt": skill["updatedAt"],
-            },
+                "kind": "skill",
+                "contentHash": content_hash,
+                "version": 1,
+                "sourcePromptId": skill.get("sourcePromptId"),
+                "pinnedVersionId": skill.get("pinnedVersionId"),
+                "pinnedContentHash": skill.get("pinnedContentHash"),
+                "pinnedAt": skill.get("pinnedAt"),
+                "sharedAt": skill.get("sharedAt"),
+                "updateSeenVersionId": skill.get("updateSeenVersionId"),
+            }
         )
-        if result is None:
-            raise RuntimeError("Could not store the skill")
-        return skill
+        return cast(PromptDict, result)
 
     async def list_skills(self, user_id: str) -> List[PromptDict]:
         if self.show_logger:
@@ -2299,42 +2384,375 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             return None
         return self._skill_from_row(result[0])
 
-    async def update_skill(self, skill: PromptDict) -> PromptDict:
+    async def get_shared_skill(self, skill_id: str) -> Optional[PromptDict]:
         if self.show_logger:
-            logger.info(f"SQLAlchemy: update_skill, id={skill['id']}")
+            logger.info(f"SQLAlchemy: get_shared_skill, id={skill_id}")
         await self._ensure_skills_columns()
         result = await self.execute_sql(
             """
-            UPDATE prompts
-            SET "title" = :title, "description" = :description, "content" = :content,
-                "enabled" = :enabled, "updatedAt" = :updatedAt
-            WHERE "id" = :id AND "userId" = :userId AND "kind" = 'skill'
+            SELECT * FROM prompts
+            WHERE "id" = :id AND "kind" = 'skill' AND "isShared" = TRUE
             """,
-            {
-                "id": skill["id"],
-                "userId": skill["userId"],
-                "title": skill["title"],
-                "description": skill.get("description", ""),
-                "content": skill["content"],
-                "enabled": skill.get("enabled", False),
-                "updatedAt": skill["updatedAt"],
-            },
+            {"id": skill_id},
         )
-        if result != 1:
-            raise RuntimeError("Could not update the skill")
-        return skill
+        if not isinstance(result, list):
+            raise RuntimeError("Could not read the shared skill")
+        if not result:
+            return None
+        return self._skill_from_row(result[0])
+
+    async def update_skill(self, skill: PromptDict) -> PromptDict:
+        """Write the skill head and append one version when its fingerprint moves.
+
+        Content, description and title changes disable a skill: an enabled
+        skill must be re-reviewed after its body changes. Sharing, pins and
+        enable/disable toggles keep the version and only touch the head.
+        """
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: update_skill, id={skill['id']}")
+        await self._ensure_skills_columns()
+        enforce_content_limit(skill["content"])
+        digest = fingerprint(skill)
+        new_version: Optional[int] = None
+        enabled = bool(skill.get("enabled", False))
+
+        async with self.async_session() as session:
+            try:
+                await session.begin()
+                stored = (
+                    (
+                        await session.execute(
+                            text(
+                                """
+                                SELECT "version", "title", "description", "content",
+                                       "importedFrom", "contentHash"
+                                FROM prompts
+                                WHERE "id" = :id AND "userId" = :userId
+                                  AND "kind" = 'skill'
+                                """
+                            ),
+                            {"id": skill["id"], "userId": skill["userId"]},
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if stored is None:
+                    await session.rollback()
+                    raise RuntimeError("Could not update the skill")
+
+                unchanged = (
+                    fingerprint_from_values(
+                        "skill",
+                        stored["title"] or "",
+                        stored["content"] or "",
+                        stored["description"] or "",
+                    )
+                    == digest
+                )
+                if not unchanged:
+                    enabled = False
+
+                # Imported Markdown keep their provenance hash; owned and
+                # copied skills expose the current version fingerprint.
+                head_hash = (
+                    skill.get("contentHash") or stored["contentHash"]
+                    if stored["importedFrom"]
+                    else digest
+                )
+
+                current_version = int(stored["version"] or 1)
+                if unchanged:
+                    new_version = current_version
+                else:
+                    count_row = (
+                        (
+                            await session.execute(
+                                text(
+                                    "SELECT COUNT(*) AS count FROM prompt_versions "
+                                    'WHERE "promptId" = :id'
+                                ),
+                                {"id": skill["id"]},
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    count = int(count_row["count"]) if count_row else 0
+                    if count >= MAX_PROMPT_VERSIONS:
+                        await session.rollback()
+                        raise PromptVersionLimitReached(
+                            f"At most {MAX_PROMPT_VERSIONS} versions per skill"
+                        )
+                    max_row = (
+                        (
+                            await session.execute(
+                                text(
+                                    'SELECT MAX("version") AS max_version '
+                                    'FROM prompt_versions WHERE "promptId" = :id'
+                                ),
+                                {"id": skill["id"]},
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    new_version = int(max_row["max_version"] or 0) + 1
+
+                await session.execute(
+                    text(
+                        """
+                        UPDATE prompts
+                        SET "title" = :title, "description" = :description,
+                            "content" = :content, "enabled" = :enabled,
+                            "isShared" = :isShared, "updatedAt" = :updatedAt,
+                            "version" = :version,
+                            "contentHash" = COALESCE(:contentHash, "contentHash"),
+                            "sourcePromptId" = :sourcePromptId,
+                            "pinnedVersionId" = :pinnedVersionId,
+                            "pinnedContentHash" = :pinnedContentHash,
+                            "pinnedAt" = :pinnedAt,
+                            "sharedAt" = COALESCE(:sharedAt, "sharedAt"),
+                            "updateSeenVersionId" = :updateSeenVersionId
+                        WHERE "id" = :id AND "userId" = :userId
+                          AND "kind" = 'skill'
+                        """
+                    ),
+                    {
+                        "id": skill["id"],
+                        "userId": skill["userId"],
+                        "title": skill["title"],
+                        "description": skill.get("description", ""),
+                        "content": skill["content"],
+                        "enabled": enabled,
+                        "isShared": skill.get("isShared", False),
+                        "updatedAt": skill["updatedAt"],
+                        "version": new_version,
+                        "contentHash": head_hash,
+                        "sourcePromptId": skill.get("sourcePromptId"),
+                        "pinnedVersionId": skill.get("pinnedVersionId"),
+                        "pinnedContentHash": skill.get("pinnedContentHash"),
+                        "pinnedAt": skill.get("pinnedAt"),
+                        "sharedAt": skill.get("sharedAt"),
+                        "updateSeenVersionId": skill.get("updateSeenVersionId"),
+                    },
+                )
+
+                if not unchanged:
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO prompt_versions
+                            ("id", "promptId", "kind", "version", "title", "description",
+                             "content", "contentHash", "createdAt", "createdBy", "sourceVersionId")
+                            VALUES (:id, :promptId, 'skill', :version, :title, :description,
+                                    :content, :contentHash, :createdAt, :createdBy, NULL)
+                            """
+                        ),
+                        {
+                            "id": str(uuid.uuid4()),
+                            "promptId": skill["id"],
+                            "version": new_version,
+                            "title": skill["title"],
+                            "description": skill.get("description", ""),
+                            "content": skill["content"],
+                            "contentHash": digest,
+                            "createdAt": skill["updatedAt"],
+                            "createdBy": skill["userId"],
+                        },
+                    )
+                await session.commit()
+            except IntegrityError as exc:
+                await session.rollback()
+                raise PromptVersionConflict(
+                    "Skill version was written concurrently"
+                ) from exc
+            except Exception:
+                await session.rollback()
+                raise
+
+        result = dict(skill)
+        result.update(
+            {
+                "kind": "skill",
+                "enabled": enabled,
+                "version": new_version,
+                "contentHash": head_hash,
+                "sourcePromptId": skill.get("sourcePromptId"),
+                "pinnedVersionId": skill.get("pinnedVersionId"),
+                "pinnedContentHash": skill.get("pinnedContentHash"),
+                "pinnedAt": skill.get("pinnedAt"),
+                "sharedAt": skill.get("sharedAt"),
+                "updateSeenVersionId": skill.get("updateSeenVersionId"),
+            }
+        )
+        return cast(PromptDict, result)
 
     async def delete_skill(self, skill_id: str, user_id: str) -> bool:
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_skill, id={skill_id}")
         await self._ensure_skills_columns()
-        result = await self.execute_sql(
-            'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id AND "kind" = \'skill\'',
+        owned = (
+            'EXISTS (SELECT 1 FROM prompts WHERE "id" = :id '
+            'AND "userId" = :user_id AND "kind" = \'skill\')'
+        )
+        results = await self._run_transaction(
+            [
+                (
+                    f'DELETE FROM prompt_update_notices WHERE "promptId" = :id AND {owned}',
+                    {"id": skill_id, "user_id": user_id},
+                ),
+                (
+                    f'DELETE FROM prompt_versions WHERE "promptId" = :id AND {owned}',
+                    {"id": skill_id, "user_id": user_id},
+                ),
+                (
+                    (
+                        'DELETE FROM prompts WHERE "id" = :id '
+                        'AND "userId" = :user_id AND "kind" = \'skill\''
+                    ),
+                    {"id": skill_id, "user_id": user_id},
+                ),
+            ]
+        )
+        return bool(results and results[-1].rowcount > 0)
+
+    async def list_skill_updates(self, user_id: str) -> List[SkillUpdateDict]:
+        if self.show_logger:
+            logger.info(f"SQLAlchemy: list_skill_updates, user_id={user_id}")
+        await self._ensure_skills_columns()
+        owned = await self.execute_sql(
+            """
+            SELECT * FROM prompts
+            WHERE "userId" = :user_id AND "kind" = 'skill'
+              AND "sourcePromptId" IS NOT NULL
+            """,
+            {"user_id": user_id},
+        )
+        if not isinstance(owned, list):
+            raise RuntimeError("Could not read pinned skills")
+
+        updates: List[SkillUpdateDict] = []
+        for skill in owned:
+            source = await self.execute_sql(
+                'SELECT * FROM prompts WHERE "id" = :id AND "kind" = \'skill\'',
+                {"id": skill["sourcePromptId"]},
+            )
+            if not isinstance(source, list) or not source:
+                continue
+            if not source[0].get("isShared"):
+                continue
+            source_id = source[0]["id"]
+            head = await self._source_head(source_id)
+            if head is None:
+                continue
+
+            versions = await self.execute_sql(
+                'SELECT "id", "version" FROM prompt_versions WHERE "promptId" = :id',
+                {"id": source_id},
+            )
+            if not isinstance(versions, list):
+                raise RuntimeError("Could not read the source skill versions")
+            by_id = {row["id"]: int(row["version"]) for row in versions}
+
+            pinned_version = by_id.get(skill.get("pinnedVersionId"))
+            seen_version_id = skill.get("updateSeenVersionId")
+            seen_version = by_id.get(seen_version_id)
+            baseline = max(pinned_version or 0, seen_version or 0)
+            latest_version = int(head["version"])
+            if latest_version <= baseline:
+                continue
+            updates.append(
+                SkillUpdateDict(
+                    skillId=skill["id"],
+                    title=skill["title"],
+                    sourcePromptId=source_id,
+                    pinnedVersionId=skill.get("pinnedVersionId"),
+                    pinnedVersion=pinned_version,
+                    localVersion=int(skill.get("version") or 1),
+                    latestVersionId=head["id"],
+                    latestVersion=latest_version,
+                    seenVersionId=seen_version_id,
+                    seenVersion=seen_version,
+                )
+            )
+
+        updates.sort(key=lambda item: item["latestVersion"], reverse=True)
+        return updates
+
+    async def ack_skill_update(self, user_id: str, skill_id: str, version: int) -> int:
+        if self.show_logger:
+            logger.info(
+                f"SQLAlchemy: ack_skill_update, skill_id={skill_id}, version={version}"
+            )
+        await self._ensure_skills_columns()
+        owned = await self.execute_sql(
+            """
+            SELECT "sourcePromptId", "updateSeenVersionId" FROM prompts
+            WHERE "id" = :id AND "userId" = :user_id AND "kind" = 'skill'
+            """,
             {"id": skill_id, "user_id": user_id},
         )
-        if result is None:
-            raise RuntimeError("Could not delete the skill")
-        return isinstance(result, int) and result > 0
+        if not isinstance(owned, list):
+            raise RuntimeError("Could not read the pinned skill")
+        if not owned or not owned[0].get("sourcePromptId"):
+            raise PromptVersionConflict("Skill is not pinned to a shared source")
+
+        source_id = owned[0]["sourcePromptId"]
+        source = await self.execute_sql(
+            """
+            SELECT "isShared" FROM prompts
+            WHERE "id" = :id AND "kind" = 'skill'
+            """,
+            {"id": source_id},
+        )
+        if not isinstance(source, list) or not source or not source[0].get("isShared"):
+            raise PromptVersionConflict("The source skill is no longer available")
+
+        head = await self._source_head(source_id)
+        if head is None:
+            raise PromptVersionConflict("The source skill has no versions")
+
+        versions = await self.execute_sql(
+            'SELECT "id", "version" FROM prompt_versions WHERE "promptId" = :id',
+            {"id": source_id},
+        )
+        if not isinstance(versions, list):
+            raise RuntimeError("Could not read the source skill versions")
+        seen_id = owned[0].get("updateSeenVersionId")
+        seen_version = next(
+            (int(row["version"]) for row in versions if row["id"] == seen_id), 0
+        )
+        clamped = min(max(int(version), 1), int(head["version"]))
+        if seen_version >= clamped:
+            return seen_version
+        target = next((row for row in versions if int(row["version"]) == clamped), None)
+        if target is None:
+            raise PromptVersionConflict("Skill version was not found")
+
+        async with self.async_session() as session:
+            try:
+                await session.begin()
+                await session.execute(
+                    text(
+                        """
+                        UPDATE prompts
+                        SET "updateSeenVersionId" = :version_id
+                        WHERE "id" = :id AND "userId" = :user_id
+                          AND "kind" = 'skill'
+                        """
+                    ),
+                    {
+                        "version_id": target["id"],
+                        "id": skill_id,
+                        "user_id": user_id,
+                    },
+                )
+                await session.commit()
+                return clamped
+            except Exception:
+                await session.rollback()
+                raise
 
     # ---- Prompt scheduling ----
 

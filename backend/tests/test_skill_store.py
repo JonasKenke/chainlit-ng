@@ -199,7 +199,10 @@ def test_enabling_an_imported_skill_keeps_provenance(client, user):
     row = skill_row(user.id, imported_from="https://example.com/alpha.md")
     dl = data_layer_for([row])
     with patch("chainlit.server.get_data_layer", return_value=dl):
-        response = client.put("/project/skills/skill-1", json={"enabled": True})
+        response = client.put(
+            "/project/skills/skill-1",
+            json={"enabled": True, "reviewedContentHash": "a" * 64},
+        )
 
     assert response.status_code == 200
     updated = response.json()

@@ -13,6 +13,7 @@ from chainlit.types import (
     PromptVersionSummaryDict,
     ScheduledTaskCompletion,
     ScheduledTaskDict,
+    SkillUpdateDict,
     ThreadDict,
     ThreadFilter,
     ThreadGrant,
@@ -325,6 +326,24 @@ class BaseDataLayer(ABC):
 
     async def delete_skill(self, skill_id: str, user_id: str) -> bool:
         raise NotImplementedError("Skills are not implemented for this data layer")
+
+    async def get_shared_skill(self, skill_id: str) -> Optional[PromptDict]:
+        """Read a shared skill without an owner filter, or return ``None``."""
+        raise NotImplementedError(
+            "Skill sharing is not implemented for this data layer"
+        )
+
+    async def list_skill_updates(self, user_id: str) -> List[SkillUpdateDict]:
+        """List pinned skill copies whose source has a newer version."""
+        raise NotImplementedError(
+            "Skill sharing is not implemented for this data layer"
+        )
+
+    async def ack_skill_update(self, user_id: str, skill_id: str, version: int) -> int:
+        """Acknowledge a source version; the stored notice never moves down."""
+        raise NotImplementedError(
+            "Skill sharing is not implemented for this data layer"
+        )
 
     # ---- Prompt scheduling (opt-in; non-abstract for compatibility) ----
 

@@ -136,6 +136,7 @@ from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AckPromptUpdateRequest,
     AddSharedPromptRequest,
+    AddSharedSkillRequest,
     ApprovalDecisionRequest,
     ApprovalDecisionResponse,
     AskFileSpec,
@@ -158,13 +159,16 @@ from chainlit.types import (
     QuestionAnswerResponse,
     ScheduledTaskDict,
     SharePromptRequest,
+    ShareSkillRequest,
     ShareThreadRequest,
+    SkillSeenUpdateRequest,
     SyncPromptRequest,
     Theme,
     ThreadGrant,
     UpdateFeedbackRequest,
     UpdatePromptRequest,
     UpdateScheduledTaskRequest,
+    UpdateSkillFromSourceRequest,
     UpdateSkillRequest,
     UpdateThreadRequest,
 )
@@ -1208,16 +1212,25 @@ _PROMPT_GALLERY_METHODS = (
 )
 
 
+def _overrides_base_method(data_layer: BaseDataLayer, method: str) -> bool:
+    """Return whether a layer really implements a base method.
+
+    Check the class, not the instance: mocks carrying a spec expose callable
+    attributes but have not implemented anything.
+    """
+    implementation = getattr(type(data_layer), method, None)
+    return callable(implementation) and implementation is not getattr(
+        BaseDataLayer, method, None
+    )
+
+
 def _supports_prompt_gallery(data_layer: Optional[BaseDataLayer]) -> bool:
     """Return whether a data layer implements all prompt gallery operations."""
     if data_layer is None:
         return False
 
     return all(
-        callable(getattr(data_layer, method, None))
-        and getattr(type(data_layer), method, None)
-        is not getattr(BaseDataLayer, method)
-        for method in _PROMPT_GALLERY_METHODS
+        _overrides_base_method(data_layer, method) for method in _PROMPT_GALLERY_METHODS
     )
 
 
@@ -1234,10 +1247,56 @@ def _supports_prompt_versioning(data_layer: Optional[BaseDataLayer]) -> bool:
     if data_layer is None:
         return False
     return all(
-        callable(getattr(data_layer, method, None))
-        and getattr(type(data_layer), method, None)
-        is not getattr(BaseDataLayer, method)
-        for method in _PROMPT_VERSION_METHODS
+        _overrides_base_method(data_layer, method) for method in _PROMPT_VERSION_METHODS
+    )
+
+
+_SKILL_LIBRARY_METHODS = (
+    "create_skill",
+    "list_skills",
+    "get_skill",
+    "update_skill",
+    "delete_skill",
+)
+
+
+def _supports_skill_library(data_layer: Optional[BaseDataLayer]) -> bool:
+    """Return whether a data layer implements per-user skill persistence."""
+    if data_layer is None:
+        return False
+    return all(
+        _overrides_base_method(data_layer, method) for method in _SKILL_LIBRARY_METHODS
+    )
+
+
+_SKILL_VERSION_METHODS = ("list_prompt_versions", "get_prompt_version")
+
+
+def _supports_skill_versions(data_layer: Optional[BaseDataLayer]) -> bool:
+    """Return whether a layer can read the immutable version store."""
+    if data_layer is None:
+        return False
+    return all(
+        _overrides_base_method(data_layer, method) for method in _SKILL_VERSION_METHODS
+    )
+
+
+_SKILL_SHARING_METHODS = (
+    "get_shared_skill",
+    "list_skill_updates",
+    "ack_skill_update",
+)
+
+
+def _supports_skill_sharing(data_layer: Optional[BaseDataLayer]) -> bool:
+    """Return whether a layer stores shared skills, versions and notices."""
+    if not _supports_skill_library(data_layer) or not _supports_skill_versions(
+        data_layer
+    ):
+        return False
+    assert data_layer is not None
+    return all(
+        _overrides_base_method(data_layer, method) for method in _SKILL_SHARING_METHODS
     )
 
 
@@ -1551,6 +1610,14 @@ async def project_settings(
                 getattr(cfg.features, "prompt_gallery", False)
                 and _supports_prompt_gallery(data_layer)
                 and _supports_prompt_versioning(data_layer)
+            ),
+            "skillsLibrary": bool(
+                getattr(cfg.features, "skills", False)
+                and _supports_skill_library(data_layer)
+            ),
+            "skillsSharing": bool(
+                getattr(cfg.features, "skills", False)
+                and _supports_skill_sharing(data_layer)
             ),
             "threadClearAll": _supports_delete_all_threads(data_layer),
             "promptScheduling": bool(
@@ -2610,14 +2677,45 @@ def _skills_data_layer() -> BaseDataLayer:
     return data_layer
 
 
+def _require_skill_sharing(data_layer: BaseDataLayer) -> None:
+    if not _supports_skill_sharing(data_layer):
+        raise HTTPException(
+            status_code=501,
+            detail="Skill sharing is not supported by this data layer",
+        )
+
+
+def _require_skill_versions(data_layer: BaseDataLayer) -> None:
+    if not _supports_skill_versions(data_layer):
+        raise HTTPException(
+            status_code=501,
+            detail="Skill versioning is not supported by this data layer",
+        )
+
+
 async def _dl_skill(coro: Any) -> Any:
-    """Await a skills data-layer call; map NotImplementedError to HTTP 501."""
+    """Await a skills data-layer call; map typed errors to HTTP responses."""
     try:
         return await coro
     except NotImplementedError as exc:
         raise HTTPException(
             status_code=501,
             detail=str(exc) or "Skills are not supported by this data layer",
+        ) from exc
+    except PromptContentTooLarge as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "content_too_large", "message": str(exc)},
+        ) from exc
+    except PromptVersionLimitReached as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "version_limit_reached", "message": str(exc)},
+        ) from exc
+    except PromptVersionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": str(exc)},
         ) from exc
 
 
@@ -2642,16 +2740,16 @@ def _check_skill_name(
     name: str,
     existing: List[Dict[str, Any]],
     skill_id: Optional[str] = None,
+    code: Optional[str] = None,
 ) -> None:
+    def conflict(message: str) -> HTTPException:
+        detail: Any = {"code": code, "message": message} if code else message
+        return HTTPException(status_code=409, detail=detail)
+
     if name in {skill.name for skill in load_skills()}:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Skill name {name!r} is reserved by an app skill",
-        )
+        raise conflict(f"Skill name {name!r} is reserved by an app skill")
     if any(item["title"] == name and item["id"] != skill_id for item in existing):
-        raise HTTPException(
-            status_code=409, detail=f"Skill name {name!r} already exists"
-        )
+        raise conflict(f"Skill name {name!r} already exists")
 
 
 def _skill_row(
@@ -2664,6 +2762,13 @@ def _skill_row(
     imported_from: Optional[str] = None,
     imported_at: Optional[str] = None,
     content_hash: Optional[str] = None,
+    is_shared: bool = False,
+    version: int = 1,
+    source_prompt_id: Optional[str] = None,
+    pinned_version_id: Optional[str] = None,
+    pinned_content_hash: Optional[str] = None,
+    pinned_at: Optional[str] = None,
+    update_seen_version_id: Optional[str] = None,
 ) -> PromptDict:
     now = utc_now()
     return {
@@ -2671,7 +2776,7 @@ def _skill_row(
         "userId": user_id,
         "title": name,
         "content": content,
-        "isShared": False,
+        "isShared": is_shared,
         "kind": "skill",
         "description": description,
         "enabled": enabled,
@@ -2680,7 +2785,45 @@ def _skill_row(
         "contentHash": content_hash,
         "createdAt": now,
         "updatedAt": now,
+        "version": version,
+        "sourcePromptId": source_prompt_id,
+        "pinnedVersionId": pinned_version_id,
+        "pinnedContentHash": pinned_content_hash,
+        "pinnedAt": pinned_at,
+        "updateSeenVersionId": update_seen_version_id,
     }
+
+
+async def _skill_versions(
+    data_layer: BaseDataLayer, skill_id: str
+) -> List[Dict[str, Any]]:
+    versions = await _dl_skill(data_layer.list_prompt_versions(skill_id))
+    if not isinstance(versions, list):
+        raise HTTPException(status_code=500, detail="Could not read skill versions")
+    return versions
+
+
+async def _skill_review_hash(
+    data_layer: BaseDataLayer, skill: PromptDict
+) -> Optional[str]:
+    """Return the current version fingerprint used by the enable review gate."""
+    if _supports_skill_versions(data_layer):
+        try:
+            versions = await data_layer.list_prompt_versions(skill["id"])
+        except NotImplementedError:
+            versions = None
+        if isinstance(versions, list):
+            head = latest_head(cast(List[Dict[str, Any]], versions))
+            if head:
+                return head["contentHash"]
+    return skill.get("contentHash")
+
+
+async def _shared_skill_or_404(data_layer: BaseDataLayer, skill_id: str) -> PromptDict:
+    skill = await _dl_skill(data_layer.get_shared_skill(skill_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return skill
 
 
 @skills_router.get("/project/skills")
@@ -2774,6 +2917,19 @@ async def import_user_skill(
     return JSONResponse(status_code=201, content=created)
 
 
+@skills_router.get("/project/skills/updates")
+async def list_skill_updates(
+    request: Request,
+    current_user: UserParam,
+):
+    """List pinned skill copies whose shared source has a newer version."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    user_id = await _get_user_id(current_user, data_layer)
+    updates = await _dl_skill(data_layer.list_skill_updates(user_id))
+    return JSONResponse(content=updates)
+
+
 @skills_router.get("/project/skills/{skill_id}")
 async def get_user_skill(
     request: Request,
@@ -2821,7 +2977,12 @@ async def update_user_skill(
     payload: UpdateSkillRequest,
     current_user: UserParam,
 ):
-    """Edit or enable one of the current user's skills."""
+    """Edit, share-toggle or enable one of the current user's skills.
+
+    Imported and pinned skills must be reviewed before they are enabled. A
+    content, description or name edit always disables the skill so an edited
+    body can never reach a model without a fresh review.
+    """
     data_layer = _skills_data_layer()
     user_id = await _get_user_id(current_user, data_layer)
     existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
@@ -2844,8 +3005,29 @@ async def update_user_skill(
     updated["title"] = skill.name
     updated["description"] = skill.description
     updated["content"] = skill.body
-    if payload.enabled is not None:
-        updated["enabled"] = payload.enabled
+
+    content_changed = (
+        skill.name != existing["title"]
+        or skill.description != existing.get("description", "")
+        or skill.body != existing["content"]
+    )
+    if content_changed:
+        updated["enabled"] = False
+    elif payload.enabled is True:
+        imported_or_shared = bool(
+            existing.get("sourcePromptId") or existing.get("importedFrom")
+        )
+        if imported_or_shared:
+            expected_hash = await _skill_review_hash(data_layer, existing)
+            if not expected_hash or payload.reviewedContentHash != expected_hash:
+                raise _prompt_error(
+                    409,
+                    "content_changed",
+                    "Review the current skill version before enabling it",
+                )
+        updated["enabled"] = True
+    elif payload.enabled is False:
+        updated["enabled"] = False
     updated["updatedAt"] = utc_now()
 
     result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
@@ -2865,6 +3047,350 @@ async def delete_user_skill(
     if not deleted:
         raise HTTPException(status_code=404, detail="Skill not found")
     return JSONResponse(content={"success": True})
+
+
+_SHARED_SKILL_AUTHOR_LABEL = "Chainlit user"
+
+
+@skills_router.post("/project/skills/{skill_id}/share")
+async def share_user_skill(
+    request: Request,
+    skill_id: str,
+    payload: ShareSkillRequest,
+    current_user: UserParam,
+):
+    """Toggle sharing of a skill (owner only). Returns the public URL."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    user_id = await _get_user_id(current_user, data_layer)
+    existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not existing:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    updated = dict(existing)
+    updated["isShared"] = payload.isShared
+    if payload.isShared and not existing.get("isShared"):
+        updated["sharedAt"] = utc_now()
+    updated["updatedAt"] = utc_now()
+    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+    return JSONResponse(content={"skill": result, "shareUrl": f"/skill/{skill_id}"})
+
+
+@skills_router.get("/project/skill/share/{skill_id}")
+async def get_shared_skill(
+    request: Request,
+    skill_id: str,
+):
+    """Return a sanitized preview of a shared skill to anonymous callers."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    skill = await _shared_skill_or_404(data_layer, skill_id)
+    versions = await _skill_versions(data_layer, skill_id)
+    head = latest_head(versions)
+
+    # Public projection only: no userId, createdBy, enabled or import label.
+    return JSONResponse(
+        content={
+            "id": skill["id"],
+            "title": skill["title"],
+            "description": skill.get("description", ""),
+            "content": skill["content"],
+            "version": int(head["version"]) if head else int(skill.get("version") or 1),
+            "currentVersionId": head["id"] if head else None,
+            "contentHash": head["contentHash"] if head else skill.get("contentHash"),
+            "updatedAt": skill["updatedAt"],
+            "sharedAt": skill.get("sharedAt"),
+            "authorLabel": _SHARED_SKILL_AUTHOR_LABEL,
+        }
+    )
+
+
+@skills_router.get("/project/skill/share/{skill_id}/versions")
+async def get_shared_skill_versions(
+    request: Request,
+    skill_id: str,
+):
+    """List public version metadata for a shared skill, newest first."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    await _shared_skill_or_404(data_layer, skill_id)
+    versions = await _skill_versions(data_layer, skill_id)
+    ordered = sorted(
+        versions, key=lambda version: int(version["version"]), reverse=True
+    )
+    return JSONResponse(
+        content=[public_version(version, include_author=False) for version in ordered]
+    )
+
+
+@skills_router.get("/project/skill/share/{skill_id}/versions/{version_id}")
+async def get_shared_skill_version(
+    request: Request,
+    skill_id: str,
+    version_id: str,
+):
+    """Return one anonymous version snapshot of a shared skill."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    await _shared_skill_or_404(data_layer, skill_id)
+    version = await _dl_skill(data_layer.get_prompt_version(skill_id, version_id))
+    if not version:
+        raise HTTPException(status_code=404, detail="Skill version not found")
+    return JSONResponse(content=public_version(version, include_author=False))
+
+
+@skills_router.post("/project/skill/share/{skill_id}/add")
+async def add_shared_skill(
+    request: Request,
+    skill_id: str,
+    current_user: UserParam,
+    payload: Optional[AddSharedSkillRequest] = None,
+):
+    """Copy a shared skill as a disabled, pinned copy owned by the caller."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    await _shared_skill_or_404(data_layer, skill_id)
+    user_id = await _get_user_id(current_user, data_layer)
+
+    existing = await _dl_skill(data_layer.list_skills(user_id))
+    if any(item.get("sourcePromptId") == skill_id for item in existing):
+        raise _prompt_error(
+            409, "already_added", "This shared skill is already in your library"
+        )
+
+    versions = await _skill_versions(data_layer, skill_id)
+    target: Optional[Dict[str, Any]] = None
+    requested_version = payload.versionId if payload else None
+    if requested_version:
+        target = await _dl_skill(
+            data_layer.get_prompt_version(skill_id, requested_version)
+        )
+        if not target:
+            raise HTTPException(status_code=404, detail="Skill version not found")
+    else:
+        head = latest_head(versions)
+        if head:
+            target = await _dl_skill(
+                data_layer.get_prompt_version(skill_id, head["id"])
+            )
+    if target is None:
+        raise _prompt_error(
+            409, "source_unavailable", "The shared skill has no versions"
+        )
+
+    _check_skill_name(target["title"], existing, code="name_taken")
+
+    import uuid as _uuid
+
+    now = utc_now()
+    copy = _skill_row(
+        str(_uuid.uuid4()),
+        user_id,
+        target["title"],
+        target.get("description") or "",
+        target["content"],
+        False,
+        content_hash=target["contentHash"],
+        source_prompt_id=skill_id,
+        pinned_version_id=target["id"],
+        pinned_content_hash=target["contentHash"],
+        pinned_at=now,
+        update_seen_version_id=target["id"],
+    )
+    copy["createdAt"] = now
+    copy["updatedAt"] = now
+    created = await _dl_skill(data_layer.create_skill(copy))
+    return JSONResponse(content=created)
+
+
+@skills_router.post("/project/skills/{skill_id}/updates/seen")
+async def mark_skill_update_seen(
+    request: Request,
+    skill_id: str,
+    payload: SkillSeenUpdateRequest,
+    current_user: UserParam,
+):
+    """Acknowledge a source version; the stored notice never moves down."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if not skill.get("sourcePromptId"):
+        raise _prompt_error(409, "not_pinned", "This skill is not pinned to a source")
+    source = await _dl_skill(data_layer.get_shared_skill(skill["sourcePromptId"]))
+    if not source:
+        raise _prompt_error(
+            409, "source_unavailable", "The source skill is no longer available"
+        )
+
+    clamped = await _dl_skill(
+        data_layer.ack_skill_update(user_id, skill_id, payload.version)
+    )
+    updated = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    return JSONResponse(
+        content={
+            "skillId": skill_id,
+            "version": clamped,
+            "updateSeenVersionId": (updated or {}).get("updateSeenVersionId"),
+        }
+    )
+
+
+@skills_router.post("/project/skills/{skill_id}/update-from-source")
+async def update_skill_from_source(
+    request: Request,
+    skill_id: str,
+    payload: UpdateSkillFromSourceRequest,
+    current_user: UserParam,
+):
+    """Apply a source version to a pinned skill, disabling it for review."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    source_id = skill.get("sourcePromptId")
+    if not source_id:
+        raise _prompt_error(409, "not_pinned", "This skill is not pinned to a source")
+    source = await _dl_skill(data_layer.get_shared_skill(source_id))
+    if not source:
+        raise _prompt_error(
+            409, "source_unavailable", "The source skill is no longer available"
+        )
+    source_versions = await _skill_versions(data_layer, source_id)
+    if not source_versions:
+        raise _prompt_error(
+            409, "source_unavailable", "The source skill has no versions"
+        )
+
+    target: Optional[Dict[str, Any]] = None
+    if payload.versionId:
+        target = await _dl_skill(
+            data_layer.get_prompt_version(source_id, payload.versionId)
+        )
+        if not target or target.get("kind") != "skill":
+            raise _prompt_error(
+                409, "version_conflict", "That version does not belong to the source"
+            )
+    else:
+        head = latest_head(source_versions)
+        if head:
+            target = await _dl_skill(
+                data_layer.get_prompt_version(source_id, head["id"])
+            )
+    if target is None:
+        raise _prompt_error(
+            409, "source_unavailable", "The source skill has no versions"
+        )
+
+    local_versions = await _skill_versions(data_layer, skill_id)
+    local_head = latest_head(local_versions)
+    local_hash = local_head["contentHash"] if local_head else None
+
+    if (
+        payload.expectedLocalHash is not None
+        and payload.expectedLocalHash != local_hash
+    ):
+        raise _prompt_error(
+            409,
+            "preview_stale",
+            "The skill changed after the preview; review the update again",
+        )
+    pinned_hash = skill.get("pinnedContentHash")
+    if pinned_hash and local_hash != pinned_hash and not payload.confirm:
+        raise _prompt_error(
+            409,
+            "local_changes",
+            "This skill has local edits; confirm to replace them",
+        )
+
+    now = utc_now()
+    updated = dict(skill)
+    updated["title"] = target["title"]
+    updated["description"] = target.get("description") or ""
+    updated["content"] = target["content"]
+    updated["enabled"] = False
+    updated["isShared"] = False
+    updated["pinnedVersionId"] = target["id"]
+    updated["pinnedContentHash"] = target["contentHash"]
+    updated["pinnedAt"] = now
+    updated["updateSeenVersionId"] = target["id"]
+    updated["updatedAt"] = now
+    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+    return JSONResponse(content=result)
+
+
+@skills_router.post("/project/skills/{skill_id}/detach")
+async def detach_skill(
+    request: Request,
+    skill_id: str,
+    current_user: UserParam,
+):
+    """Remove a skill's source pin while keeping the skill and its history."""
+    data_layer = _skills_data_layer()
+    _require_skill_sharing(data_layer)
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if not skill.get("sourcePromptId"):
+        raise _prompt_error(409, "not_pinned", "This skill is not pinned to a source")
+
+    updated = dict(skill)
+    updated["sourcePromptId"] = None
+    updated["pinnedVersionId"] = None
+    updated["pinnedContentHash"] = None
+    updated["pinnedAt"] = None
+    updated["updateSeenVersionId"] = None
+    updated["updatedAt"] = utc_now()
+    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+    return JSONResponse(content=result)
+
+
+@skills_router.get("/project/skills/{skill_id}/versions")
+async def list_skill_versions(
+    request: Request,
+    skill_id: str,
+    current_user: UserParam,
+):
+    """List immutable versions for one of the current user's skills."""
+    data_layer = _skills_data_layer()
+    _require_skill_versions(data_layer)
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    versions = await _skill_versions(data_layer, skill_id)
+    ordered = sorted(
+        versions, key=lambda version: int(version["version"]), reverse=True
+    )
+    return JSONResponse(
+        content=[public_version(version, include_author=True) for version in ordered]
+    )
+
+
+@skills_router.get("/project/skills/{skill_id}/versions/{version_id}")
+async def get_skill_version(
+    request: Request,
+    skill_id: str,
+    version_id: str,
+    current_user: UserParam,
+):
+    """Return one immutable version of the current user's skill."""
+    data_layer = _skills_data_layer()
+    _require_skill_versions(data_layer)
+    user_id = await _get_user_id(current_user, data_layer)
+    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    version = await _dl_skill(data_layer.get_prompt_version(skill_id, version_id))
+    if not version:
+        raise HTTPException(status_code=404, detail="Skill version not found")
+    return JSONResponse(content=public_version(version, include_author=True))
 
 
 @router.get("/project/thread/{thread_id}/element/{element_id}")

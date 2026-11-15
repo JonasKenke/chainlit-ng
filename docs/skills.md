@@ -116,12 +116,89 @@ Data layers that do not implement `create_skill`/`list_skills`/`get_skill`/
 `update_skill`/`delete_skill` get a clean `501` from the routes. App data layers
 stay valid because the base methods are non-abstract.
 
+### Versioning and sharing
+
+Skill rows reuse the prompt version store: every skill has a head row in
+`prompts` and immutable snapshots in `prompt_versions` with `kind = 'skill'`.
+The fingerprint covers `kind + title + description + content`, so changing a
+description creates a version just like changing the body. A no-op edit,
+sharing toggle, enable/disable, or pin change does not append a version. Skill
+rows written before versioning receive one lazy `v1` snapshot on first access;
+an imported skill keeps its imported Markdown `contentHash` while the version
+row stores the version fingerprint.
+
+Set `[features].skills = true` to expose the library. `GET /project/settings`
+also reports two data-layer capabilities:
+
+| Flag            | Meaning                                                                  |
+| --------------- | ------------------------------------------------------------------------ |
+| `skillsLibrary` | Skill CRUD is enabled and the data layer implements all five methods.    |
+| `skillsSharing` | Sharing/versioning is enabled: history, public reads, pins, and notices. |
+
+An unsupported data layer keeps existing CRUD behavior and answers sharing
+routes with `501`.
+
+| Method | Path                                             | Purpose                                            |
+| ------ | ------------------------------------------------ | -------------------------------------------------- |
+| `POST` | `/project/skills/{id}/share`                     | Owner toggles sharing; returns `/skill/{id}`       |
+| `GET`  | `/project/skill/share/{id}`                      | Anonymous sanitized preview of a shared skill      |
+| `GET`  | `/project/skill/share/{id}/versions`             | Anonymous version summaries, newest first          |
+| `GET`  | `/project/skill/share/{id}/versions/{versionId}` | Anonymous version snapshot including content       |
+| `POST` | `/project/skill/share/{id}/add`                  | Copy as a disabled pinned skill (`versionId` opt.) |
+| `GET`  | `/project/skills/updates`                        | Pinned skills whose source is ahead                |
+| `POST` | `/project/skills/{id}/updates/seen`              | Acknowledge a source version (`{"version": n}`)    |
+| `POST` | `/project/skills/{id}/update-from-source`        | Apply a source version, disable, and mark seen     |
+| `POST` | `/project/skills/{id}/detach`                    | Clear the source pin; keep content and history     |
+| `GET`  | `/project/skills/{id}/versions`                  | Owner version list with author                     |
+| `GET`  | `/project/skills/{id}/versions/{versionId}`      | Owner version snapshot                             |
+
+Public responses never include `userId`, `createdBy`, `enabled`, or import
+provenance. They expose `title`, `description`, `content`, `version`,
+`currentVersionId`, `contentHash`, `updatedAt`, `sharedAt`, and a fixed
+non-identifying `authorLabel`. Unsharing hides every public route with `404`.
+
+`add` copies the current head unless `{"versionId": "..."}` pins an older
+version, always stores the copy disabled and unshared, and records
+`sourcePromptId`, `pinnedVersionId`, `pinnedContentHash`, `pinnedAt`, and
+`updateSeenVersionId`. It returns `409 already_added` for a second copy of the
+same source and `409 name_taken` when the target name collides with an existing
+or app skill.
+
+`update-from-source` copies the selected source version into the local head,
+appends one local version, moves the pins, marks the source version seen, and
+forces `enabled = false`. `GET /project/skills/updates` reports a source only
+while its head is newer than both the pinned and seen source versions. Seen
+values only move forward and are clamped to the source head, so a notice fires
+once per source version.
+
+| Code                 | Meaning                                                  |
+| -------------------- | -------------------------------------------------------- |
+| `local_changes`      | Local edits exist; resend with `"confirm": true`.        |
+| `preview_stale`      | `expectedLocalHash` no longer matches the local version. |
+| `source_unavailable` | The source skill is gone or no longer shared.            |
+| `version_conflict`   | `versionId` does not belong to the source skill.         |
+| `not_pinned`         | The skill has no source pin.                             |
+
+### Enable review
+
+Imported and pinned skills are gated: `PUT /project/skills/{id}` with
+`{"enabled": true}` must include `reviewedContentHash` equal to the current
+version fingerprint from the versions or share endpoint. A mismatch or missing
+hash returns `409 content_changed`. Changing the name, description, or content
+always forces `enabled = false`, even if the same request asks to enable it, so
+a changed body must be reviewed again. Skills created and never imported by the
+owner keep the existing immediate enable path.
+
 ### Storage and migration
 
 SQLAlchemy stores skills in the existing `prompts` table with a `kind`
 discriminator, plus `description`, `enabled`, `importedFrom`, `importedAt`, and
-`contentHash` columns. Migration happens lazily on the first skill operation, so
-an app with the flag off never changes its schema.
+`contentHash` columns. Sharing and versioning add `version`, `sourcePromptId`,
+`pinnedVersionId`, `pinnedContentHash`, `pinnedAt`, `sharedAt`, and
+`updateSeenVersionId`, plus the `prompt_versions` and `prompt_update_notices`
+tables described in [prompt-versioning.md](prompt-versioning.md). Migration
+happens lazily on the first skill operation, so an app with the flag off never
+changes its schema.
 
 **Up (automatic).** The first skill call inspects the table (`PRAGMA table_info`
 on SQLite, `information_schema.columns` on Postgres) and adds only the missing
@@ -134,12 +211,22 @@ ALTER TABLE prompts ADD COLUMN "enabled" BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE prompts ADD COLUMN "importedFrom" TEXT;
 ALTER TABLE prompts ADD COLUMN "importedAt" TEXT;
 ALTER TABLE prompts ADD COLUMN "contentHash" TEXT;
+ALTER TABLE prompts ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE prompts ADD COLUMN "sourcePromptId" TEXT;
+ALTER TABLE prompts ADD COLUMN "pinnedVersionId" TEXT;
+ALTER TABLE prompts ADD COLUMN "pinnedContentHash" TEXT;
+ALTER TABLE prompts ADD COLUMN "pinnedAt" TEXT;
+ALTER TABLE prompts ADD COLUMN "sharedAt" TEXT;
+ALTER TABLE prompts ADD COLUMN "updateSeenVersionId" TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS prompts_skill_name
   ON prompts ("userId", "title") WHERE "kind" = 'skill';
 ```
 
-Existing prompt rows get `kind = 'prompt'` and `enabled = false`. The partial
-unique index allows one skill name per user.
+Existing prompt rows get `kind = 'prompt'` and `enabled = false`. Existing skill
+rows get one lazy `v1` row in `prompt_versions` with their description and the
+version fingerprint. The partial unique index allows one skill name per user.
+Sharing also creates `prompt_versions` and `prompt_update_notices`; their DDL is
+in [prompt-versioning.md](prompt-versioning.md#api).
 
 **Down (manual, no data loss).** Stop using the feature, set
 `[features].skills = false`, then remove the index and columns:
@@ -147,21 +234,34 @@ unique index allows one skill name per user.
 ```sql
 -- Postgres
 DROP INDEX IF EXISTS prompts_skill_name;
+DROP TABLE IF EXISTS prompt_update_notices;
+DROP TABLE IF EXISTS prompt_versions;
 ALTER TABLE prompts
   DROP COLUMN IF EXISTS "kind",
   DROP COLUMN IF EXISTS "description",
   DROP COLUMN IF EXISTS "enabled",
   DROP COLUMN IF EXISTS "importedFrom",
   DROP COLUMN IF EXISTS "importedAt",
-  DROP COLUMN IF EXISTS "contentHash";
+  DROP COLUMN IF EXISTS "contentHash",
+  DROP COLUMN IF EXISTS "version",
+  DROP COLUMN IF EXISTS "sourcePromptId",
+  DROP COLUMN IF EXISTS "pinnedVersionId",
+  DROP COLUMN IF EXISTS "pinnedContentHash",
+  DROP COLUMN IF EXISTS "pinnedAt",
+  DROP COLUMN IF EXISTS "sharedAt",
+  DROP COLUMN IF EXISTS "updateSeenVersionId";
 ```
+
+Dropping the version tables also removes prompt history, so keep them if prompt
+versioning is still in use.
 
 SQLite before 3.35 cannot drop columns: keep them (prompt queries ignore them)
 or rebuild the table, copying `id`, `userId`, `title`, `content`, `isShared`,
 `createdAt`, and `updatedAt` and filtering `WHERE "kind" = 'prompt'`.
 
 **DynamoDB and custom layers:** not implemented; the routes return `501` until a
-layer implements the five methods.
+layer implements the five CRUD methods plus `get_shared_skill`,
+`list_skill_updates`, `ack_skill_update`, and the prompt version methods.
 
 In no-auth mode (`require_login` false) all anonymous sessions share the
 `anonymous` owner, exactly like the prompt gallery. Enable authentication for
@@ -239,8 +339,9 @@ The design note for skills (KRE-179 sections 3-5) sets the boundaries:
   size are validated before a body can reach a model. Per-user skills share the
   same caps; the create and import routes validate with the app-skill parser.
 - **Per-user skills are private by default.** There is no automatic sharing or
-  marketplace. Imported skills start disabled and keep their provenance; users
-  can export a skill as Markdown and import it elsewhere explicitly.
+  marketplace. A skill becomes readable only after its owner toggles sharing,
+  and imported or shared copies stay disabled until reviewed. Users can export
+  a skill as Markdown and import it elsewhere explicitly.
 - **Treat bodies as untrusted.** A skill body can contain arbitrary instructions.
   Only install skills you would put in a system prompt, and keep provenance
   delimiters intact when passing a body to a model.

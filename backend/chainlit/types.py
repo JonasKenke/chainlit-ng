@@ -536,6 +536,8 @@ class PromptDict(TypedDict):
     pinnedContentHash: NotRequired[Optional[str]]
     pinnedAt: NotRequired[Optional[str]]
     sharedAt: NotRequired[Optional[str]]
+    # Highest source version the owner has acknowledged for this pinned skill.
+    updateSeenVersionId: NotRequired[Optional[str]]
 
 
 class PromptVersionDict(TypedDict):
@@ -579,6 +581,21 @@ class PromptUpdateDict(TypedDict):
     latestVersionId: str
     latestVersion: int
     notifiedVersion: int
+
+
+class SkillUpdateDict(TypedDict):
+    """A pinned skill copy whose shared source has a newer version."""
+
+    skillId: str
+    title: str
+    sourcePromptId: str
+    pinnedVersionId: Optional[str]
+    pinnedVersion: Optional[int]
+    localVersion: int
+    latestVersionId: str
+    latestVersion: int
+    seenVersionId: Optional[str]
+    seenVersion: Optional[int]
 
 
 PromptDiffDict = TypedDict(
@@ -644,11 +661,32 @@ class UpdateSkillRequest(BaseModel):
     description: Optional[str] = None
     content: Optional[str] = None
     enabled: Optional[bool] = None
+    reviewedContentHash: Optional[str] = None
 
 
 class ImportSkillRequest(BaseModel):
     markdown: str
     imported_from: str = Field(min_length=1, max_length=2048)
+
+
+class ShareSkillRequest(BaseModel):
+    isShared: bool
+
+
+class AddSharedSkillRequest(BaseModel):
+    """Optional pin target for a shared skill; defaults to the source head."""
+
+    versionId: Optional[str] = None
+
+
+class SkillSeenUpdateRequest(BaseModel):
+    version: int = Field(ge=1)
+
+
+class UpdateSkillFromSourceRequest(BaseModel):
+    versionId: Optional[str] = None
+    confirm: bool = False
+    expectedLocalHash: Optional[str] = None
 
 
 class ScheduledTaskDict(TypedDict):
