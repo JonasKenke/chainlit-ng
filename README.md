@@ -156,6 +156,31 @@ contract, model application, after-hooks, and recurrence details.
   <sub>Starting a new chat warns before discarding a pending approval or question.</sub>
 </p>
 
+### Library and scheduled prompts
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="images/prompt-library.png" alt="Library dialog with Prompts and Skills tabs, saved prompts, and an update available badge" />
+      <p align="center"><sub>One Library for saved prompts and skills.</sub></p>
+    </td>
+    <td width="50%">
+      <img src="images/prompt-version-diff.png" alt="Prompt version dialog showing the added line and Update to v2 action" />
+      <p align="center"><sub>Review a source version before updating a pinned copy.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="images/skill-library.png" alt="Skills tab showing an enabled local skill and a disabled imported skill with a review notice and update available badge" />
+      <p align="center"><sub>Imported skills stay disabled until reviewed.</sub></p>
+    </td>
+    <td width="50%">
+      <img src="images/scheduled-prompts.png" alt="Scheduled prompts dialog with a weekday prompt, timezone, next run, and Run now action" />
+      <p align="center"><sub>Recurring prompts with timezone and next run.</sub></p>
+    </td>
+  </tr>
+</table>
+
 ## Security fixes
 
 Security fixes in this line include:
