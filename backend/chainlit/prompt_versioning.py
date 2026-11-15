@@ -207,3 +207,25 @@ def latest_head(versions: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not versions:
         return None
     return max(versions, key=lambda item: int(item["version"]))
+
+
+def public_versions(
+    prompt: Mapping[str, Any], versions: Sequence[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Return the versions a public share may expose.
+
+    Sharing records the version that was current when the link was created.
+    That version and every later one are public; older drafts stay private.
+    Legacy shares without a baseline keep their historical all-versions
+    behavior.
+    """
+    base = prompt.get("sharedVersion")
+    if base is None:
+        return list(versions)
+    try:
+        minimum = int(base)
+    except (TypeError, ValueError):
+        return list(versions)
+    return [
+        version for version in versions if int(version.get("version") or 0) >= minimum
+    ]

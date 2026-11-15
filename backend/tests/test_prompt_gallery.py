@@ -330,9 +330,8 @@ def test_add_shared_prompt_no_auth(
     with patch("chainlit.server.get_data_layer", return_value=mock_data_layer):
         response = test_client.post("/project/prompt/share/prompt-1/add")
 
-    assert response.status_code == 200
-    created = mock_data_layer.create_prompt.call_args.args[0]
-    assert created["userId"] == "anonymous"
+    assert response.status_code == 403
+    mock_data_layer.create_prompt.assert_not_called()
 
 
 def test_add_shared_prompt_ok(

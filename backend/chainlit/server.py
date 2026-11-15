@@ -113,6 +113,7 @@ from chainlit.prompt_versioning import (
     fingerprint,
     latest_head,
     public_version,
+    public_versions,
 )
 from chainlit.scheduled_task import (
     next_run_at,
@@ -2049,6 +2050,15 @@ async def _get_user_id(current_user: GenericUser, data_layer: "BaseDataLayer") -
     return persisted.id
 
 
+def _require_authenticated_sharing(current_user: GenericUser) -> None:
+    """Sharing needs a real identity; the no-auth anonymous user has none."""
+    if current_user is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Sharing requires an authenticated user",
+        )
+
+
 def _prompt_gallery_enabled() -> None:
     """Raise 400 when the feature is disabled, to keep guards DRY."""
     if not config.features.prompt_gallery:
@@ -2204,6 +2214,7 @@ async def share_prompt(
 ):
     """Toggle sharing of a prompt (author only). Returns share URL."""
     _prompt_gallery_enabled()
+    _require_authenticated_sharing(current_user)
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
@@ -2215,6 +2226,7 @@ async def share_prompt(
     updated["isShared"] = payload.isShared
     if payload.isShared and not existing.get("isShared"):
         updated["sharedAt"] = utc_now()
+        updated["sharedVersion"] = int(existing.get("version") or 1)
     updated["updatedAt"] = utc_now()
     result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
     return JSONResponse(content={"prompt": result, "shareUrl": f"/prompt/{prompt_id}"})
@@ -2280,11 +2292,10 @@ async def get_shared_prompt_versions(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    await _shared_prompt_or_404(data_layer, prompt_id)
+    prompt = await _shared_prompt_or_404(data_layer, prompt_id)
     versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
-    ordered = sorted(
-        versions, key=lambda version: int(version["version"]), reverse=True
-    )
+    visible = public_versions(prompt, versions)
+    ordered = sorted(visible, key=lambda version: int(version["version"]), reverse=True)
     return JSONResponse(
         content=[public_version(version, include_author=False) for version in ordered]
     )
@@ -2301,7 +2312,12 @@ async def get_shared_prompt_version(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    await _shared_prompt_or_404(data_layer, prompt_id)
+    prompt = await _shared_prompt_or_404(data_layer, prompt_id)
+    versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+    if version_id not in {
+        version["id"] for version in public_versions(prompt, versions)
+    }:
+        raise HTTPException(status_code=404, detail="Prompt version not found")
     version = await _dl_prompt(data_layer.get_prompt_version(prompt_id, version_id))
     if not version:
         raise HTTPException(status_code=404, detail="Prompt version not found")
@@ -2331,6 +2347,7 @@ async def add_shared_prompt(
 ):
     """Copy a shared prompt into the current user's gallery, pinned to a version."""
     _prompt_gallery_enabled()
+    _require_authenticated_sharing(current_user)
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
@@ -2354,25 +2371,34 @@ async def add_shared_prompt(
     requested_version = payload.versionId if payload else None
 
     if _supports_prompt_versioning(data_layer):
+        versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+        visible = (
+            public_versions(source, versions) if isinstance(versions, list) else []
+        )
         if requested_version:
+            if requested_version not in {version["id"] for version in visible}:
+                raise HTTPException(status_code=404, detail="Prompt version not found")
             target = await _dl_prompt(
                 data_layer.get_prompt_version(prompt_id, requested_version)
             )
             if not target:
                 raise HTTPException(status_code=404, detail="Prompt version not found")
         else:
-            versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
-            if isinstance(versions, list) and versions:
-                target = await _dl_prompt(
-                    data_layer.get_prompt_version(prompt_id, versions[0]["id"])
-                )
-            else:
-                target = None
+            head = latest_head(visible)
+            target = (
+                await _dl_prompt(data_layer.get_prompt_version(prompt_id, head["id"]))
+                if head
+                else None
+            )
         if target:
             title = target["title"]
             content = target["content"]
             pinned_version_id = target["id"]
             pinned_content_hash = target["contentHash"]
+        else:
+            raise _prompt_error(
+                409, "source_unavailable", "The shared prompt has no public versions"
+            )
     elif requested_version:
         raise HTTPException(status_code=501, detail="Prompt versioning is unavailable")
 
@@ -2445,8 +2471,10 @@ async def list_prompt_versions(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    _, is_owner = await _prompt_for_reader(data_layer, prompt_id, current_user)
+    prompt, is_owner = await _prompt_for_reader(data_layer, prompt_id, current_user)
     versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+    if not is_owner:
+        versions = public_versions(prompt, versions)
     projected = [
         public_version(version, include_author=is_owner) for version in versions
     ]
@@ -2465,7 +2493,13 @@ async def get_prompt_version(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    _, is_owner = await _prompt_for_reader(data_layer, prompt_id, current_user)
+    prompt, is_owner = await _prompt_for_reader(data_layer, prompt_id, current_user)
+    if not is_owner:
+        versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+        if version_id not in {
+            version["id"] for version in public_versions(prompt, versions)
+        }:
+            raise HTTPException(status_code=404, detail="Prompt version not found")
     version = await _dl_prompt(data_layer.get_prompt_version(prompt_id, version_id))
     if not version:
         raise HTTPException(status_code=404, detail="Prompt version not found")
@@ -2485,7 +2519,11 @@ async def prompt_diff(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    prompt, _ = await _prompt_for_reader(data_layer, prompt_id, current_user)
+    prompt, is_owner = await _prompt_for_reader(data_layer, prompt_id, current_user)
+    if not is_owner:
+        versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+        if to not in {version["id"] for version in public_versions(prompt, versions)}:
+            raise HTTPException(status_code=404, detail="Prompt version not found")
 
     target = await _dl_prompt(data_layer.get_prompt_version(prompt_id, to))
     if not target:
@@ -2583,7 +2621,13 @@ async def sync_prompt(
             409, "source_unavailable", "The source prompt is no longer available"
         )
 
+    versions = await _dl_prompt(data_layer.list_prompt_versions(source_id))
+    visible = public_versions(source, versions) if isinstance(versions, list) else []
     if payload.versionId:
+        if payload.versionId not in {version["id"] for version in visible}:
+            raise _prompt_error(
+                409, "version_conflict", "That version does not belong to the source"
+            )
         target = await _dl_prompt(
             data_layer.get_prompt_version(source_id, payload.versionId)
         )
@@ -2592,14 +2636,12 @@ async def sync_prompt(
                 409, "version_conflict", "That version does not belong to the source"
             )
     else:
-        versions = await _dl_prompt(data_layer.list_prompt_versions(source_id))
-        if not versions:
+        head = latest_head(visible)
+        if not head:
             raise _prompt_error(
                 409, "source_unavailable", "The source prompt has no versions"
             )
-        target = await _dl_prompt(
-            data_layer.get_prompt_version(source_id, versions[0]["id"])
-        )
+        target = await _dl_prompt(data_layer.get_prompt_version(source_id, head["id"]))
         if not target:
             raise _prompt_error(
                 409, "source_unavailable", "The source prompt has no versions"
@@ -3062,6 +3104,7 @@ async def share_user_skill(
     """Toggle sharing of a skill (owner only). Returns the public URL."""
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
+    _require_authenticated_sharing(current_user)
     user_id = await _get_user_id(current_user, data_layer)
     existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
     if not existing:
@@ -3071,6 +3114,7 @@ async def share_user_skill(
     updated["isShared"] = payload.isShared
     if payload.isShared and not existing.get("isShared"):
         updated["sharedAt"] = utc_now()
+        updated["sharedVersion"] = int(existing.get("version") or 1)
     updated["updatedAt"] = utc_now()
     result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
     return JSONResponse(content={"skill": result, "shareUrl": f"/skill/{skill_id}"})
@@ -3113,10 +3157,12 @@ async def get_shared_skill_versions(
     """List public version metadata for a shared skill, newest first."""
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
-    await _shared_skill_or_404(data_layer, skill_id)
+    skill = await _shared_skill_or_404(data_layer, skill_id)
     versions = await _skill_versions(data_layer, skill_id)
     ordered = sorted(
-        versions, key=lambda version: int(version["version"]), reverse=True
+        public_versions(skill, versions),
+        key=lambda version: int(version["version"]),
+        reverse=True,
     )
     return JSONResponse(
         content=[public_version(version, include_author=False) for version in ordered]
@@ -3132,7 +3178,12 @@ async def get_shared_skill_version(
     """Return one anonymous version snapshot of a shared skill."""
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
-    await _shared_skill_or_404(data_layer, skill_id)
+    skill = await _shared_skill_or_404(data_layer, skill_id)
+    versions = await _skill_versions(data_layer, skill_id)
+    if version_id not in {
+        version["id"] for version in public_versions(skill, versions)
+    }:
+        raise HTTPException(status_code=404, detail="Skill version not found")
     version = await _dl_skill(data_layer.get_prompt_version(skill_id, version_id))
     if not version:
         raise HTTPException(status_code=404, detail="Skill version not found")
@@ -3149,7 +3200,8 @@ async def add_shared_skill(
     """Copy a shared skill as a disabled, pinned copy owned by the caller."""
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
-    await _shared_skill_or_404(data_layer, skill_id)
+    _require_authenticated_sharing(current_user)
+    source = await _shared_skill_or_404(data_layer, skill_id)
     user_id = await _get_user_id(current_user, data_layer)
 
     existing = await _dl_skill(data_layer.list_skills(user_id))
@@ -3159,16 +3211,19 @@ async def add_shared_skill(
         )
 
     versions = await _skill_versions(data_layer, skill_id)
+    visible = public_versions(source, versions)
     target: Optional[Dict[str, Any]] = None
     requested_version = payload.versionId if payload else None
     if requested_version:
+        if requested_version not in {version["id"] for version in visible}:
+            raise HTTPException(status_code=404, detail="Skill version not found")
         target = await _dl_skill(
             data_layer.get_prompt_version(skill_id, requested_version)
         )
         if not target:
             raise HTTPException(status_code=404, detail="Skill version not found")
     else:
-        head = latest_head(versions)
+        head = latest_head(visible)
         if head:
             target = await _dl_skill(
                 data_layer.get_prompt_version(skill_id, head["id"])
@@ -3262,13 +3317,18 @@ async def update_skill_from_source(
             409, "source_unavailable", "The source skill is no longer available"
         )
     source_versions = await _skill_versions(data_layer, source_id)
-    if not source_versions:
+    visible = public_versions(source, source_versions)
+    if not visible:
         raise _prompt_error(
             409, "source_unavailable", "The source skill has no versions"
         )
 
     target: Optional[Dict[str, Any]] = None
     if payload.versionId:
+        if payload.versionId not in {version["id"] for version in visible}:
+            raise _prompt_error(
+                409, "version_conflict", "That version does not belong to the source"
+            )
         target = await _dl_skill(
             data_layer.get_prompt_version(source_id, payload.versionId)
         )
@@ -3277,7 +3337,7 @@ async def update_skill_from_source(
                 409, "version_conflict", "That version does not belong to the source"
             )
     else:
-        head = latest_head(source_versions)
+        head = latest_head(visible)
         if head:
             target = await _dl_skill(
                 data_layer.get_prompt_version(source_id, head["id"])
@@ -3339,6 +3399,12 @@ async def detach_skill(
         raise HTTPException(status_code=404, detail="Skill not found")
     if not skill.get("sourcePromptId"):
         raise _prompt_error(409, "not_pinned", "This skill is not pinned to a source")
+    if not skill.get("enabled"):
+        raise _prompt_error(
+            409,
+            "review_required",
+            "Review and enable this skill before detaching it",
+        )
 
     updated = dict(skill)
     updated["sourcePromptId"] = None

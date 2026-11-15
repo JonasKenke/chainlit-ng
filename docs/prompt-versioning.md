@@ -52,6 +52,14 @@ version routes return `404` when the prompt is unshared, deleted, or the
 version id does not belong to that prompt; version snapshots are sanitized the
 same way as the share payload.
 
+Enabling sharing records the current version as `sharedVersion`. The public
+list, snapshot routes, `add`, and `sync` only expose or accept that version and
+later ones, so drafts written before the link stay private. Re-sharing after an
+unshare moves the baseline to the then-current version. Rows shared by older
+releases have no baseline and keep their historical all-versions behavior.
+Sharing and adding from a link require an authenticated user; a no-auth app
+answers `403` instead of creating links with no distinct recipient.
+
 ### Pinned copies
 
 `add` sets `sourcePromptId`, `pinnedVersionId`, `pinnedContentHash` and

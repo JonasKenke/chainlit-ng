@@ -536,6 +536,8 @@ class PromptDict(TypedDict):
     pinnedContentHash: NotRequired[Optional[str]]
     pinnedAt: NotRequired[Optional[str]]
     sharedAt: NotRequired[Optional[str]]
+    # First version made public by the current share link.
+    sharedVersion: NotRequired[Optional[int]]
     # Highest source version the owner has acknowledged for this pinned skill.
     updateSeenVersionId: NotRequired[Optional[str]]
 

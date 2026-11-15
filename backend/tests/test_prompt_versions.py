@@ -252,6 +252,59 @@ async def test_content_size_cap_rejects_without_writing(
     assert len(await data_layer.list_prompt_versions(created["id"])) == 1
 
 
+async def test_prompt_notices_exclude_skills(data_layer: SQLAlchemyDataLayer):
+    source = await create_row(data_layer, shared=True)
+    source_head = (await data_layer.list_prompt_versions(source["id"]))[0]
+    prompt_payload: Dict[str, Any] = make_row(
+        READER.id, title=source["title"], content=source["content"]
+    )
+    prompt_payload.update(
+        {
+            "sourcePromptId": source["id"],
+            "pinnedVersionId": source_head["id"],
+            "pinnedContentHash": source["contentHash"],
+        }
+    )
+    prompt_copy = await data_layer.create_prompt(cast(PromptDict, prompt_payload))
+
+    skill_template: Dict[str, Any] = {
+        "id": str(uuid.uuid4()),
+        "userId": OWNER.id,
+        "title": "noticed-skill",
+        "content": "skill v1",
+        "description": "skill",
+        "isShared": True,
+        "kind": "skill",
+        "enabled": True,
+        "createdAt": "2024-01-01T00:00:00Z",
+        "updatedAt": "2024-01-01T00:00:00Z",
+    }
+    skill_source = await data_layer.create_skill(cast(PromptDict, skill_template))
+    skill_head = (await data_layer.list_prompt_versions(skill_source["id"]))[0]
+    skill_copy = await data_layer.create_skill(
+        cast(
+            PromptDict,
+            {
+                **skill_template,
+                "id": str(uuid.uuid4()),
+                "userId": READER.id,
+                "isShared": False,
+                "enabled": False,
+                "sourcePromptId": skill_source["id"],
+                "pinnedVersionId": skill_head["id"],
+                "pinnedContentHash": skill_head["contentHash"],
+            },
+        )
+    )
+
+    await update_row(data_layer, source, content="prompt v2")
+    await update_row(data_layer, skill_source, content="skill v2")
+
+    updates = await data_layer.list_prompt_updates(READER.id)
+    assert [item["promptId"] for item in updates] == [prompt_copy["id"]]
+    assert skill_copy["id"] != prompt_copy["id"]
+
+
 async def test_notices_are_clamped_and_raise_only(data_layer: SQLAlchemyDataLayer):
     source = await create_row(data_layer, shared=True)
     source_head = (await data_layer.list_prompt_versions(source["id"]))[0]
@@ -310,6 +363,47 @@ async def test_shared_prompt_metadata_is_public_and_owner_safe(api, data_layer):
     assert after.json()["currentContentHash"] == updated["contentHash"]
 
 
+async def test_share_hides_versions_written_before_the_link(api, data_layer):
+    prompt = await create_row(data_layer, content="secret-draft", shared=False)
+    old = (await data_layer.list_prompt_versions(prompt["id"]))[0]
+    await update_row(data_layer, prompt, content="public-body")
+
+    with acting_as(OWNER):
+        shared = await api.post(
+            f"/project/prompts/{prompt['id']}/share", json={"isShared": True}
+        )
+    assert shared.status_code == 200
+    assert shared.json()["prompt"]["sharedVersion"] == 2
+
+    listing = await api.get(f"/project/prompt/share/{prompt['id']}/versions")
+    assert [item["version"] for item in listing.json()] == [2]
+    assert (
+        await api.get(f"/project/prompt/share/{prompt['id']}/versions/{old['id']}")
+    ).status_code == 404
+
+    await update_row(data_layer, shared.json()["prompt"], content="public-v3")
+    listing = await api.get(f"/project/prompt/share/{prompt['id']}/versions")
+    assert [item["version"] for item in listing.json()] == [3, 2]
+
+    with acting_as(READER):
+        pinned = await api.post(
+            f"/project/prompt/share/{prompt['id']}/add",
+            json={"versionId": old["id"]},
+        )
+        reader_versions = await api.get(f"/project/prompts/{prompt['id']}/versions")
+        reader_old = await api.get(
+            f"/project/prompts/{prompt['id']}/versions/{old['id']}"
+        )
+        reader_diff = await api.get(
+            f"/project/prompts/{prompt['id']}/diff",
+            params={"from": "local", "to": old["id"]},
+        )
+    assert pinned.status_code == 404
+    assert [item["version"] for item in reader_versions.json()] == [3, 2]
+    assert reader_old.status_code == 404
+    assert reader_diff.status_code == 404
+
+
 async def test_public_version_endpoints_work_anonymously(api, data_layer):
     source = await create_row(data_layer, title="Shared", content="v1", shared=True)
     await update_row(data_layer, source, content="v2")
@@ -334,6 +428,43 @@ async def test_public_version_endpoints_work_anonymously(api, data_layer):
     assert body["contentHash"] == head["contentHash"]
     assert "userId" not in body
     assert "createdBy" not in body
+
+
+async def test_stranger_delete_does_not_touch_history(api, data_layer):
+    prompt = await create_row(data_layer, shared=True)
+    await update_row(data_layer, prompt, content="v2")
+    await update_row(data_layer, prompt, content="v3")
+    assert len(await data_layer.list_prompt_versions(prompt["id"])) == 3
+
+    with acting_as(STRANGER):
+        response = await api.delete(f"/project/prompts/{prompt['id']}")
+
+    assert response.status_code == 404
+    assert (await data_layer.get_prompt(prompt["id"])) is not None
+    assert len(await data_layer.list_prompt_versions(prompt["id"])) == 3
+
+
+async def test_prompt_delete_cannot_wipe_skill_history(api, data_layer):
+    skill = {
+        "id": str(uuid.uuid4()),
+        "title": "shared-skill",
+        "content": "skill body",
+        "description": "skill description",
+        "userId": OWNER.id,
+        "isShared": False,
+        "enabled": True,
+        "createdAt": "2024-01-01T00:00:00Z",
+        "updatedAt": "2024-01-01T00:00:00Z",
+    }
+    await data_layer.create_skill(cast(PromptDict, skill))
+    assert len(await data_layer.list_prompt_versions(skill["id"])) == 1
+
+    with acting_as(STRANGER):
+        response = await api.delete(f"/project/prompts/{skill['id']}")
+
+    assert response.status_code == 404
+    assert len(await data_layer.list_prompt_versions(skill["id"])) == 1
+    assert (await data_layer.get_skill(skill["id"], OWNER.id)) is not None
 
 
 async def test_public_version_endpoints_404_for_unshared_or_deleted(api, data_layer):
@@ -428,9 +559,13 @@ async def test_add_shared_prompt_pins_head_and_is_idempotent(api, data_layer):
 
 
 async def test_add_shared_prompt_can_pin_an_older_version(api, data_layer):
-    source = await create_row(data_layer, title="Source", content="v1", shared=True)
+    source = await create_row(data_layer, title="Source", content="v1")
     v1 = (await data_layer.list_prompt_versions(source["id"]))[0]
-    await update_row(data_layer, source, content="v2")
+    with acting_as(OWNER):
+        shared = await api.post(
+            f"/project/prompts/{source['id']}/share", json={"isShared": True}
+        )
+    await update_row(data_layer, shared.json()["prompt"], content="v2")
 
     with acting_as(READER):
         response = await add_copy(api, source["id"], {"versionId": v1["id"]})
@@ -736,3 +871,41 @@ async def test_prompt_versioning_capability_is_exposed(api, data_layer):
     from chainlit.server import _supports_prompt_versioning
 
     assert _supports_prompt_versioning(data_layer) is True
+
+
+async def test_versioning_tolerates_column_added_by_another_process(
+    data_layer: SQLAlchemyDataLayer, monkeypatch
+):
+    """A losing ALTER race must not brick the first request."""
+    await data_layer._ensure_prompts_table()
+    real_execute = data_layer.execute_sql
+    injected = False
+
+    async def execute_sql(query, parameters, *args, **kwargs):
+        nonlocal injected
+        if 'ADD COLUMN "contentHash"' in query and not injected:
+            injected = True
+            await real_execute(query, parameters, *args, **kwargs)
+            return None
+        return await real_execute(query, parameters, *args, **kwargs)
+
+    monkeypatch.setattr(data_layer, "execute_sql", execute_sql)
+
+    await data_layer._ensure_prompt_versioning()
+
+    assert "contentHash" in await data_layer._get_prompts_columns()
+
+
+async def test_share_and_add_are_rejected_without_authentication(api, data_layer):
+    owned = await data_layer.create_prompt(make_row("anonymous"))
+    shared = await data_layer.create_prompt(make_row(OWNER.id, shared=True))
+
+    with acting_as(None):  # type: ignore[arg-type]
+        toggled = await api.post(
+            f"/project/prompts/{owned['id']}/share", json={"isShared": True}
+        )
+        added = await api.post(f"/project/prompt/share/{shared['id']}/add")
+
+    assert toggled.status_code == 403
+    assert added.status_code == 403
+    assert (await data_layer.get_prompt(owned["id"]))["isShared"] is False

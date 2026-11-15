@@ -157,6 +157,13 @@ provenance. They expose `title`, `description`, `content`, `version`,
 `currentVersionId`, `contentHash`, `updatedAt`, `sharedAt`, and a fixed
 non-identifying `authorLabel`. Unsharing hides every public route with `404`.
 
+Sharing records the current version as `sharedVersion`; public lists,
+snapshots, `add`, and `update-from-source` only use that baseline and later
+versions. Drafts written before the link stay private. Sharing and adding from
+a link require an authenticated user (`403` otherwise), and a disabled shared
+copy must be reviewed and enabled before it can be detached. Detaching after
+review clears the source pin while keeping the content and history.
+
 `add` copies the current head unless `{"versionId": "..."}` pins an older
 version, always stores the copy disabled and unshared, and records
 `sourcePromptId`, `pinnedVersionId`, `pinnedContentHash`, `pinnedAt`, and

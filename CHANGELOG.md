@@ -111,6 +111,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 
+- Harden prompt/skill sharing: deleting someone else's prompt now returns `404`
+  without touching their version history or notices; sharing and adding from a
+  link fail closed in no-auth apps (`403`); public and reader version routes
+  only expose versions created at or after the current share link, so drafts
+  written before sharing stay private; and a disabled shared skill must be
+  reviewed before it can be detached. Version migration also tolerates a
+  concurrent first-use column add instead of failing the request.
 - `thread_grants` (opt-in): list rows for a thread the caller does not own drop
   `userId`, `userIdentifier` and the Dynamo internal key fields, so a grantee
   never sees the owner's identity. The strip is gated on the flag like the

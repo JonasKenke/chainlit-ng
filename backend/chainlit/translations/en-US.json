@@ -247,7 +247,6 @@
       "tab": "Prompts",
       "updateAvailable": "Update available v{{version}}",
       "updatesToast": "{{count}} saved prompt has a newer shared version",
-      "updatesToast_plural": "{{count}} saved prompts have a newer shared version",
       "updatesToastAction": "Review",
       "diff": {
         "title": "Compare versions",
@@ -276,7 +275,9 @@
         "updateFallback": "Update",
         "updateError": "Could not update this prompt",
         "loadError": "Could not load the version comparison."
-      }
+      },
+      "updatesToast_one": "{{count}} saved prompt has a newer shared version",
+      "updatesToast_other": "{{count}} saved prompts have a newer shared version"
     },
     "promptScheduling": {
       "button": "Scheduled prompts",
@@ -394,7 +395,6 @@
       "libraryUnavailable": "The skill library is unavailable for this data layer.",
       "updateAvailable": "Update available v{{version}}",
       "updatesToast": "{{count}} shared skill has a newer version",
-      "updatesToast_plural": "{{count}} shared skills have a newer version",
       "updatesToastAction": "Review",
       "sections": {
         "label": "Skill sections",
@@ -502,7 +502,9 @@
         "descriptionTooLarge": "Description is {{size}} bytes; maximum is {{max}}.",
         "bodyTooLarge": "Instructions are {{size}} bytes; maximum is {{max}}.",
         "fileTooLarge": "File is {{size}} bytes; maximum is {{max}}."
-      }
+      },
+      "updatesToast_one": "{{count}} shared skill has a newer version",
+      "updatesToast_other": "{{count}} shared skills have a newer version"
     },
     "question": {
       "title": "Question",

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import ssl
 import uuid
@@ -71,6 +72,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         self._conninfo = conninfo
         self.user_thread_limit = user_thread_limit
         self.show_logger = show_logger
+        # Serialise first-use DDL inside this process. A second process can
+        # still win the ALTER, so the column check below also re-reads after a
+        # failed statement.
+        self._prompt_versioning_lock = asyncio.Lock()
         if connect_args is None:
             connect_args = {}
         if ssl_require:
@@ -1484,6 +1489,12 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         """Add version columns and tables in place, then backfill v1 lazily."""
         if self._prompt_versioning_checked:
             return
+        async with self._prompt_versioning_lock:
+            if self._prompt_versioning_checked:
+                return
+            await self._ensure_prompt_versioning_locked()
+
+    async def _ensure_prompt_versioning_locked(self) -> None:
         await self._ensure_prompts_table()
         existing = await self._get_prompts_columns()
 
@@ -1497,6 +1508,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             ("pinnedContentHash", "TEXT"),
             ("pinnedAt", "TEXT"),
             ("sharedAt", "TEXT"),
+            ("sharedVersion", "INTEGER"),
             ("updateSeenVersionId", "TEXT"),
         ):
             if name not in existing:
@@ -1504,7 +1516,15 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     f'ALTER TABLE prompts ADD COLUMN "{name}" {ddl}', {}
                 )
                 if result is None:
-                    raise RuntimeError("Could not add versioning columns to prompts")
+                    # Another process may have added the column between our
+                    # inspection and this ALTER. Accept that race only when
+                    # the column is now actually present.
+                    refreshed = await self._get_prompts_columns()
+                    if name not in refreshed:
+                        raise RuntimeError(
+                            "Could not add versioning columns to prompts"
+                        )
+                    existing = refreshed
 
         result = await self.execute_sql(
             """
@@ -1665,6 +1685,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             pinnedContentHash=row.get("pinnedContentHash"),
             pinnedAt=row.get("pinnedAt"),
             sharedAt=row.get("sharedAt"),
+            sharedVersion=row.get("sharedVersion"),
             updateSeenVersionId=row.get("updateSeenVersionId"),
         )
 
@@ -1696,10 +1717,12 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         INSERT INTO prompts
                         ("id", "userId", "title", "content", "isShared", "createdAt",
                          "updatedAt", "contentHash", "version", "sourcePromptId",
-                         "pinnedVersionId", "pinnedContentHash", "pinnedAt", "sharedAt")
+                         "pinnedVersionId", "pinnedContentHash", "pinnedAt", "sharedAt",
+                         "sharedVersion")
                         VALUES (:id, :userId, :title, :content, :isShared, :createdAt,
                                 :updatedAt, :contentHash, 1, :sourcePromptId,
-                                :pinnedVersionId, :pinnedContentHash, :pinnedAt, :sharedAt)
+                                :pinnedVersionId, :pinnedContentHash, :pinnedAt, :sharedAt,
+                                :sharedVersion)
                         """,
                         {
                             "id": prompt["id"],
@@ -1715,6 +1738,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "pinnedContentHash": prompt.get("pinnedContentHash"),
                             "pinnedAt": prompt.get("pinnedAt"),
                             "sharedAt": prompt.get("sharedAt"),
+                            "sharedVersion": prompt.get("sharedVersion"),
                         },
                     ),
                     (
@@ -1742,6 +1766,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "pinnedContentHash": prompt.get("pinnedContentHash"),
                 "pinnedAt": prompt.get("pinnedAt"),
                 "sharedAt": prompt.get("sharedAt"),
+                "sharedVersion": prompt.get("sharedVersion"),
             }
         )
         return cast(PromptDict, result)
@@ -1869,7 +1894,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "pinnedVersionId" = :pinnedVersionId,
                             "pinnedContentHash" = :pinnedContentHash,
                             "pinnedAt" = :pinnedAt,
-                            "sharedAt" = COALESCE(:sharedAt, "sharedAt")
+                            "sharedAt" = COALESCE(:sharedAt, "sharedAt"),
+                            "sharedVersion" = COALESCE(:sharedVersion, "sharedVersion")
                         WHERE "id" = :id AND "userId" = :userId
                         """
                     ),
@@ -1887,6 +1913,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         "pinnedContentHash": prompt.get("pinnedContentHash"),
                         "pinnedAt": prompt.get("pinnedAt"),
                         "sharedAt": prompt.get("sharedAt"),
+                        "sharedVersion": prompt.get("sharedVersion"),
                     },
                 )
 
@@ -1935,6 +1962,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "pinnedContentHash": prompt.get("pinnedContentHash"),
                 "pinnedAt": prompt.get("pinnedAt"),
                 "sharedAt": prompt.get("sharedAt"),
+                "sharedVersion": prompt.get("sharedVersion"),
             }
         )
         return cast(PromptDict, result)
@@ -1943,18 +1971,29 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if self.show_logger:
             logger.info(f"SQLAlchemy: delete_prompt, id={prompt_id}")
         await self._ensure_prompt_versioning()
+        columns = await self._get_prompts_columns()
+        kind_filter = (
+            ' AND ("kind" IS NULL OR "kind" = \'prompt\')' if "kind" in columns else ""
+        )
+        owned = (
+            'EXISTS (SELECT 1 FROM prompts WHERE "id" = :id '
+            f'AND "userId" = :user_id{kind_filter})'
+        )
         results = await self._run_transaction(
             [
                 (
-                    'DELETE FROM prompt_update_notices WHERE "promptId" = :id',
-                    {"id": prompt_id},
+                    f'DELETE FROM prompt_update_notices WHERE "promptId" = :id AND {owned}',
+                    {"id": prompt_id, "user_id": user_id},
                 ),
                 (
-                    'DELETE FROM prompt_versions WHERE "promptId" = :id',
-                    {"id": prompt_id},
+                    f'DELETE FROM prompt_versions WHERE "promptId" = :id AND {owned}',
+                    {"id": prompt_id, "user_id": user_id},
                 ),
                 (
-                    'DELETE FROM prompts WHERE "id" = :id AND "userId" = :user_id',
+                    (
+                        'DELETE FROM prompts WHERE "id" = :id '
+                        f'AND "userId" = :user_id{kind_filter}'
+                    ),
                     {"id": prompt_id, "user_id": user_id},
                 ),
             ]
@@ -2032,10 +2071,15 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if self.show_logger:
             logger.info(f"SQLAlchemy: list_prompt_updates, user_id={user_id}")
         await self._ensure_prompt_versioning()
+        columns = await self._get_prompts_columns()
+        kind_filter = (
+            ' AND ("kind" IS NULL OR "kind" = \'prompt\')' if "kind" in columns else ""
+        )
         owned = await self.execute_sql(
-            """
+            f"""
             SELECT * FROM prompts
             WHERE "userId" = :user_id AND "sourcePromptId" IS NOT NULL
+            {kind_filter}
             """,
             {"user_id": user_id},
         )
@@ -2268,6 +2312,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             pinnedContentHash=row.get("pinnedContentHash"),
             pinnedAt=row.get("pinnedAt"),
             sharedAt=row.get("sharedAt"),
+            sharedVersion=row.get("sharedVersion"),
             updateSeenVersionId=row.get("updateSeenVersionId"),
         )
 
@@ -2290,12 +2335,12 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                          "description", "enabled", "importedFrom", "importedAt",
                          "contentHash", "createdAt", "updatedAt", "version",
                          "sourcePromptId", "pinnedVersionId", "pinnedContentHash",
-                         "pinnedAt", "sharedAt", "updateSeenVersionId")
+                         "pinnedAt", "sharedAt", "sharedVersion", "updateSeenVersionId")
                         VALUES (:id, :userId, :title, :content, :isShared, 'skill',
                                 :description, :enabled, :importedFrom, :importedAt,
                                 :contentHash, :createdAt, :updatedAt, 1,
                                 :sourcePromptId, :pinnedVersionId, :pinnedContentHash,
-                                :pinnedAt, :sharedAt, :updateSeenVersionId)
+                                :pinnedAt, :sharedAt, :sharedVersion, :updateSeenVersionId)
                         """,
                         {
                             "id": skill["id"],
@@ -2315,6 +2360,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "pinnedContentHash": skill.get("pinnedContentHash"),
                             "pinnedAt": skill.get("pinnedAt"),
                             "sharedAt": skill.get("sharedAt"),
+                            "sharedVersion": skill.get("sharedVersion"),
                             "updateSeenVersionId": skill.get("updateSeenVersionId"),
                         },
                     ),
@@ -2353,6 +2399,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "pinnedContentHash": skill.get("pinnedContentHash"),
                 "pinnedAt": skill.get("pinnedAt"),
                 "sharedAt": skill.get("sharedAt"),
+                "sharedVersion": skill.get("sharedVersion"),
                 "updateSeenVersionId": skill.get("updateSeenVersionId"),
             }
         )
@@ -2513,6 +2560,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "pinnedContentHash" = :pinnedContentHash,
                             "pinnedAt" = :pinnedAt,
                             "sharedAt" = COALESCE(:sharedAt, "sharedAt"),
+                            "sharedVersion" = COALESCE(:sharedVersion, "sharedVersion"),
                             "updateSeenVersionId" = :updateSeenVersionId
                         WHERE "id" = :id AND "userId" = :userId
                           AND "kind" = 'skill'
@@ -2534,6 +2582,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         "pinnedContentHash": skill.get("pinnedContentHash"),
                         "pinnedAt": skill.get("pinnedAt"),
                         "sharedAt": skill.get("sharedAt"),
+                        "sharedVersion": skill.get("sharedVersion"),
                         "updateSeenVersionId": skill.get("updateSeenVersionId"),
                     },
                 )
@@ -2583,6 +2632,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "pinnedContentHash": skill.get("pinnedContentHash"),
                 "pinnedAt": skill.get("pinnedAt"),
                 "sharedAt": skill.get("sharedAt"),
+                "sharedVersion": skill.get("sharedVersion"),
                 "updateSeenVersionId": skill.get("updateSeenVersionId"),
             }
         )
@@ -2658,7 +2708,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             pinned_version = by_id.get(skill.get("pinnedVersionId"))
             seen_version_id = skill.get("updateSeenVersionId")
             seen_version = by_id.get(seen_version_id)
-            baseline = max(pinned_version or 0, seen_version or 0)
+            # Acknowledging dismisses the toast but keeps the quiet row marker.
+            baseline = pinned_version or 0
             latest_version = int(head["version"])
             if latest_version <= baseline:
                 continue
@@ -2740,12 +2791,22 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         SET "updateSeenVersionId" = :version_id
                         WHERE "id" = :id AND "userId" = :user_id
                           AND "kind" = 'skill'
+                          AND (
+                            "updateSeenVersionId" IS NULL
+                            OR COALESCE((
+                              SELECT pv."version" FROM prompt_versions pv
+                              WHERE pv."promptId" = :source_id
+                                AND pv."id" = prompts."updateSeenVersionId"
+                            ), 0) < :clamped
+                          )
                         """
                     ),
                     {
                         "version_id": target["id"],
                         "id": skill_id,
                         "user_id": user_id,
+                        "source_id": source_id,
+                        "clamped": clamped,
                     },
                 )
                 await session.commit()

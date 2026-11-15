@@ -325,6 +325,35 @@ async def test_public_skill_routes_404_for_unknown_unshared_and_foreign_versions
 # ---- adding a shared skill ----
 
 
+async def test_public_skill_share_hides_pre_share_versions(
+    api: AsyncClient, data_layer: SQLAlchemyDataLayer
+):
+    skill = await create_skill(data_layer, content="secret-skill")
+    old = (await data_layer.list_prompt_versions(skill["id"]))[0]
+    await update_row(data_layer, skill, content="public-skill")
+
+    shared = await share_skill(api, skill["id"], True)
+    assert shared.status_code == 200
+    assert shared.json()["skill"]["sharedVersion"] == 2
+
+    listing = await api.get(f"/project/skill/share/{skill['id']}/versions")
+    assert [item["version"] for item in listing.json()] == [2]
+    assert (
+        await api.get(f"/project/skill/share/{skill['id']}/versions/{old['id']}")
+    ).status_code == 404
+
+    await update_row(data_layer, skill, content="public-v3")
+    listing = await api.get(f"/project/skill/share/{skill['id']}/versions")
+    assert [item["version"] for item in listing.json()] == [3, 2]
+
+    with acting_as(READER):
+        pinned = await api.post(
+            f"/project/skill/share/{skill['id']}/add",
+            json={"versionId": old["id"]},
+        )
+    assert pinned.status_code == 404
+
+
 async def test_add_shared_skill_creates_a_disabled_pinned_copy(
     api: AsyncClient, data_layer: SQLAlchemyDataLayer
 ):
@@ -356,8 +385,8 @@ async def test_add_shared_skill_can_pin_an_older_version_and_rejects_name_confli
 ):
     source = await create_skill(data_layer, content="v1")
     v1 = (await data_layer.list_prompt_versions(source["id"]))[0]
-    await update_row(data_layer, source, content="v2")
     await share_skill(api, source["id"], True)
+    await update_row(data_layer, source, content="v2")
 
     older = await add_copy(api, source["id"], {"versionId": v1["id"]})
     assert older.status_code == 200
@@ -400,7 +429,9 @@ async def test_skill_updates_notice_fires_once_and_seen_never_lowers(
         assert acked.json()["version"] == 2
         seen_id = acked.json()["updateSeenVersionId"]
         assert seen_id == first.json()[0]["latestVersionId"]
-        assert (await api.get("/project/skills/updates")).json() == []
+        marker = (await api.get("/project/skills/updates")).json()
+        assert [item["latestVersion"] for item in marker] == [2]
+        assert marker[0]["seenVersion"] == 2
 
         lowered = await api.post(
             f"/project/skills/{copy['id']}/updates/seen", json={"version": 1}
@@ -562,6 +593,10 @@ async def test_detach_clears_the_pin_and_keeps_history(
     copy = (await add_copy(api, source["id"])).json()
 
     with acting_as(READER):
+        enabled = await api.put(
+            f"/project/skills/{copy['id']}",
+            json={"enabled": True, "reviewedContentHash": copy["contentHash"]},
+        )
         detached = await api.post(f"/project/skills/{copy['id']}/detach")
         again = await api.post(f"/project/skills/{copy['id']}/detach")
         versions = await owner_versions(api, copy["id"], user=READER)
@@ -570,6 +605,7 @@ async def test_detach_clears_the_pin_and_keeps_history(
         )
 
     assert detached.status_code == 200
+    assert enabled.status_code == 200
     body = detached.json()
     assert body["sourcePromptId"] is None
     assert body["pinnedVersionId"] is None
@@ -583,6 +619,23 @@ async def test_detach_clears_the_pin_and_keeps_history(
     assert again.json()["detail"]["code"] == "not_pinned"
     assert update.status_code == 409
     assert update.json()["detail"]["code"] == "not_pinned"
+
+
+async def test_detach_requires_review_first(
+    api: AsyncClient, data_layer: SQLAlchemyDataLayer
+):
+    source = await create_skill(data_layer)
+    await share_skill(api, source["id"], True)
+    copy = (await add_copy(api, source["id"])).json()
+
+    with acting_as(READER):
+        detached = await api.post(f"/project/skills/{copy['id']}/detach")
+
+    assert detached.status_code == 409
+    assert detached.json()["detail"]["code"] == "review_required"
+    still_pinned = await data_layer.get_skill(copy["id"], READER.id)
+    assert still_pinned is not None
+    assert still_pinned["sourcePromptId"] == source["id"]
 
 
 async def test_detach_is_owner_only(api: AsyncClient, data_layer: SQLAlchemyDataLayer):
@@ -778,3 +831,19 @@ async def test_deleting_a_shared_skill_removes_versions_and_notices(
 
     with acting_as(READER):
         assert (await api.get("/project/skills/updates")).json() == []
+
+
+async def test_skill_share_and_add_are_rejected_without_authentication(
+    api: AsyncClient, data_layer: SQLAlchemyDataLayer
+):
+    source = await create_skill(data_layer)
+    with acting_as(None):  # type: ignore[arg-type]
+        shared = await api.post(
+            f"/project/skills/{source['id']}/share", json={"isShared": True}
+        )
+        added = await api.post(f"/project/skill/share/{source['id']}/add")
+    assert shared.status_code == 403
+    assert added.status_code == 403
+    stored = await data_layer.get_skill(source["id"], OWNER.id)
+    assert stored is not None
+    assert stored["isShared"] is False
