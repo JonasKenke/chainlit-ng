@@ -1,4 +1,3 @@
-import { cn } from '@/lib/utils';
 import {
   IPrompt,
   IPromptDiff,
@@ -10,6 +9,10 @@ import { AlertTriangle, GitCompare, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import {
+  VersionDiffRows,
+  VersionDiffViewMode
+} from '@/components/VersionDiffRows';
 import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 import {
@@ -31,7 +34,7 @@ export interface PromptVersionDiffProps {
   onUpdated?: (prompt: IPrompt) => void;
 }
 
-type ViewMode = 'unified' | 'split';
+type ViewMode = VersionDiffViewMode;
 
 function shortHash(hash?: string | null): string {
   if (!hash) return '—';
@@ -394,92 +397,8 @@ export function PromptVersionDiff({
                 <p className="p-3 text-sm text-muted-foreground">
                   {t('chat.promptGallery.diff.noChanges')}
                 </p>
-              ) : viewMode === 'unified' ? (
-                <table className="w-full border-collapse text-xs font-mono">
-                  <tbody>
-                    {rows.map((row, index) => (
-                      <tr
-                        key={index}
-                        data-testid="prompt-diff-row"
-                        data-op={row.op}
-                        className={cn(
-                          row.op === 'insert' && 'bg-emerald-500/10',
-                          row.op === 'delete' && 'bg-destructive/10',
-                          row.op === 'replace' && 'bg-amber-500/10'
-                        )}
-                      >
-                        <td className="w-10 select-none border-r px-2 text-right text-muted-foreground">
-                          {row.oldLine ?? ''}
-                        </td>
-                        <td className="w-10 select-none border-r px-2 text-right text-muted-foreground">
-                          {row.newLine ?? ''}
-                        </td>
-                        <td className="whitespace-pre-wrap px-2 py-0.5">
-                          {row.op === 'equal' ? (
-                            <span>{row.oldText ?? ''}</span>
-                          ) : row.op === 'replace' ? (
-                            <span>
-                              <span className="block text-destructive line-through decoration-destructive/60">
-                                {row.oldText ?? ''}
-                              </span>
-                              <span className="block text-emerald-600 dark:text-emerald-400">
-                                {row.newText ?? ''}
-                              </span>
-                            </span>
-                          ) : (
-                            <span
-                              className={
-                                row.op === 'insert'
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-destructive'
-                              }
-                            >
-                              {row.op === 'insert'
-                                ? (row.newText ?? '')
-                                : (row.oldText ?? '')}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               ) : (
-                <table className="w-full border-collapse text-xs font-mono">
-                  <tbody>
-                    {rows.map((row, index) => (
-                      <tr
-                        key={index}
-                        data-testid="prompt-diff-row"
-                        data-op={row.op}
-                        className={cn(
-                          row.op === 'insert' && 'bg-emerald-500/10',
-                          row.op === 'delete' && 'bg-destructive/10',
-                          row.op === 'replace' && 'bg-amber-500/10'
-                        )}
-                      >
-                        <td className="w-10 select-none border-r px-2 text-right text-muted-foreground">
-                          {row.oldLine ?? ''}
-                        </td>
-                        <td
-                          className="w-1/2 whitespace-pre-wrap border-r px-2 py-0.5"
-                          data-side="old"
-                        >
-                          {row.oldText ?? ''}
-                        </td>
-                        <td className="w-10 select-none border-r px-2 text-right text-muted-foreground">
-                          {row.newLine ?? ''}
-                        </td>
-                        <td
-                          className="w-1/2 whitespace-pre-wrap px-2 py-0.5"
-                          data-side="new"
-                        >
-                          {row.newText ?? ''}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <VersionDiffRows rows={rows} viewMode={viewMode} />
               )}
             </div>
 

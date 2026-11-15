@@ -1,4 +1,8 @@
-import type { IPrompt, IPromptUpdate } from '@chainlit-ng/react-client';
+import type {
+  IPrompt,
+  IPromptUpdate,
+  ISkillUpdateNotice
+} from '@chainlit-ng/react-client';
 import { useConfig } from '@chainlit-ng/react-client';
 import {
   act,
@@ -17,6 +21,13 @@ const removePromptMock = vi.fn().mockResolvedValue(undefined);
 const sharePromptMock = vi.fn().mockResolvedValue('/prompt/some-id');
 const fetchPromptUpdatesMock = vi.fn().mockResolvedValue([]);
 const ackPromptUpdateMock = vi.fn().mockResolvedValue(2);
+const fetchSkillUpdatesMock = vi.fn().mockResolvedValue([]);
+const ackSkillUpdateMock = vi.fn().mockResolvedValue(2);
+const clientState = vi.hoisted(() => ({
+  prompts: [] as IPrompt[],
+  promptUpdates: [] as IPromptUpdate[],
+  skillUpdates: [] as ISkillUpdateNotice[]
+}));
 const fetchPromptVersionsMock = vi.fn().mockResolvedValue([
   {
     id: 'v2',
@@ -62,10 +73,6 @@ const editPromptMock = vi.fn().mockResolvedValue({
   createdAt: '',
   updatedAt: ''
 });
-const clientState = vi.hoisted(() => ({
-  prompts: [] as any[],
-  promptUpdates: [] as any[]
-}));
 
 const savePromptMock = vi.fn().mockResolvedValue({
   id: 'p2',
@@ -111,12 +118,20 @@ vi.mock('@chainlit-ng/react-client', () => ({
   }),
   useSkills: () => ({
     skills: [],
+    skillUpdates: clientState.skillUpdates,
     fetchSkills: fetchSkillsMock,
+    fetchSkillUpdates: fetchSkillUpdatesMock,
+    ackSkillUpdate: ackSkillUpdateMock,
     createSkill: vi.fn(),
     updateSkill: vi.fn(),
     deleteSkill: vi.fn(),
     importSkill: vi.fn(),
-    exportSkill: vi.fn()
+    exportSkill: vi.fn(),
+    fetchSkillVersions: vi.fn().mockResolvedValue([]),
+    fetchSkillVersion: vi.fn(),
+    detachSkill: vi.fn(),
+    updateSkillFromSource: vi.fn(),
+    shareSkill: vi.fn()
   }),
   useChainlitStore: (selector: (state: typeof clientState) => unknown) =>
     selector(clientState)
@@ -156,10 +171,12 @@ describe('PromptGalleryButton', () => {
   const renderComponent = (
     prompts = samplePrompts,
     props = {},
-    updates: IPromptUpdate[] = []
+    updates: IPromptUpdate[] = [],
+    skillNotices: ISkillUpdateNotice[] = []
   ) => {
     clientState.prompts = prompts;
     clientState.promptUpdates = updates;
+    clientState.skillUpdates = skillNotices;
     return render(<PromptGalleryButton onSelect={mockOnSelect} {...props} />);
   };
 
@@ -411,6 +428,111 @@ describe('PromptGalleryButton', () => {
         await screen.findByTestId('prompt-diff-dialog')
       ).toBeInTheDocument();
       expect(await screen.findByText('new line')).toBeInTheDocument();
+    });
+  });
+
+  describe('library shell', () => {
+    const libraryConfig = {
+      config: {
+        promptGallery: true,
+        promptVersioning: true,
+        features: { skills: true },
+        skillsSharing: true
+      }
+    };
+    const skillNotice: ISkillUpdateNotice = {
+      skillId: 's1',
+      title: 'linked-skill',
+      sourcePromptId: 'source-1',
+      pinnedVersionId: 'sv1',
+      pinnedVersion: 1,
+      localVersion: 1,
+      latestVersionId: 'sv2',
+      latestVersion: 2,
+      seenVersionId: 'sv1',
+      seenVersion: 1
+    };
+
+    it('presents one Library dialog with Prompts and Skills tabs', async () => {
+      (useConfig as any).mockReturnValue(libraryConfig);
+      renderComponent();
+      fireEvent.click(getGalleryBtn());
+
+      expect(
+        await screen.findByText('chat.promptGallery.title')
+      ).toBeInTheDocument();
+      expect(screen.getByText('chat.promptGallery.tab')).toBeInTheDocument();
+      expect(screen.getByText('chat.skills.tab')).toBeInTheDocument();
+      expect(document.querySelectorAll('#prompt-gallery-open')).toHaveLength(1);
+      expect(screen.queryByTestId('skill-gallery-open')).toBeNull();
+    });
+
+    it('keeps the single quiet dot when only a skill update is available', async () => {
+      (useConfig as any).mockReturnValue(libraryConfig);
+      renderComponent(samplePrompts, {}, [], [skillNotice]);
+
+      expect(
+        screen.getByTestId('prompt-gallery-update-dot')
+      ).toBeInTheDocument();
+    });
+
+    it('fetches skill updates on mount and again when the library opens', async () => {
+      (useConfig as any).mockReturnValue(libraryConfig);
+      renderComponent(samplePrompts, {}, [], []);
+
+      await waitFor(() =>
+        expect(fetchSkillUpdatesMock).toHaveBeenCalledTimes(1)
+      );
+      fireEvent.click(getGalleryBtn());
+      await waitFor(() =>
+        expect(fetchSkillUpdatesMock).toHaveBeenCalledTimes(2)
+      );
+    });
+
+    it('notifies once for a skill version and acknowledges it', async () => {
+      (useConfig as any).mockReturnValue(libraryConfig);
+      renderComponent(samplePrompts, {}, [], [skillNotice]);
+
+      await waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1));
+      const [message, options] = toastMock.mock.calls[0];
+      expect(message).toBe('chat.skills.updatesToast');
+      expect(options.id).toBe('skill-updates');
+      expect(options.action.label).toBe('chat.skills.updatesToastAction');
+      await waitFor(() =>
+        expect(ackSkillUpdateMock).toHaveBeenCalledWith('s1', 2)
+      );
+      expect(toastMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not repeat the skill toast for an already seen version', async () => {
+      (useConfig as any).mockReturnValue(libraryConfig);
+      renderComponent(
+        samplePrompts,
+        {},
+        [],
+        [{ ...skillNotice, seenVersion: 2, seenVersionId: 'sv2' }]
+      );
+
+      await act(() => Promise.resolve());
+      expect(toastMock).not.toHaveBeenCalled();
+      expect(ackSkillUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to prompts only when skillsLibrary is false', async () => {
+      (useConfig as any).mockReturnValue({
+        config: {
+          promptGallery: true,
+          features: { skills: true },
+          skillsLibrary: false
+        }
+      });
+      renderComponent();
+      fireEvent.click(getGalleryBtn());
+      expect(
+        await screen.findByText('chat.promptGallery.title')
+      ).toBeInTheDocument();
+      expect(screen.queryByText('chat.skills.tab')).toBeNull();
+      expect(fetchSkillUpdatesMock).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,10 +1,12 @@
+import { copyToClipboard } from '@/lib/clipboard';
 import getRouterBasename from '@/lib/router';
 import { cn } from '@/lib/utils';
 import {
   IPrompt,
   useChainlitStore,
   useConfig,
-  usePromptGallery
+  usePromptGallery,
+  useSkills
 } from '@chainlit-ng/react-client';
 import {
   BookMarked,
@@ -50,29 +52,6 @@ interface Props {
   onSelect: (content: string) => void;
 }
 
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.select();
-
-  try {
-    if (!document.execCommand('copy')) {
-      throw new Error('Clipboard is unavailable');
-    }
-  } finally {
-    textarea.remove();
-  }
-}
-
 export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
   const { config } = useConfig();
   const { t } = useTranslation();
@@ -87,6 +66,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
     fetchPromptUpdates,
     ackPromptUpdate
   } = usePromptGallery();
+  const { skillUpdates, fetchSkillUpdates, ackSkillUpdate } = useSkills();
 
   const [open, setOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<IPrompt | null>(null);
@@ -96,8 +76,10 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
     versionId: string | null;
   } | null>(null);
   const promptsEnabled = config?.promptGallery === true;
-  const skillsEnabled = config?.features?.skills === true;
+  const skillsEnabled =
+    config?.features?.skills === true && config?.skillsLibrary !== false;
   const versioningEnabled = promptsEnabled && config?.promptVersioning === true;
+  const skillSharingEnabled = skillsEnabled && config?.skillsSharing === true;
   const [tab, setTab] = useState<'prompts' | 'skills'>(
     promptsEnabled ? 'prompts' : 'skills'
   );
@@ -146,6 +128,20 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
     }
   }, [open, promptsEnabled]);
 
+  const hasFetchedSkillUpdatesRef = useRef(false);
+  useEffect(() => {
+    if (!skillSharingEnabled || hasFetchedSkillUpdatesRef.current) return;
+    hasFetchedSkillUpdatesRef.current = true;
+    Promise.resolve(fetchSkillUpdates()).catch(() => {
+      hasFetchedSkillUpdatesRef.current = false;
+    });
+  }, [skillSharingEnabled, fetchSkillUpdates]);
+
+  useEffect(() => {
+    if (!open || !skillSharingEnabled) return;
+    Promise.resolve(fetchSkillUpdates()).catch(() => null);
+  }, [open, skillSharingEnabled, fetchSkillUpdates]);
+
   // One grouped, dismissible toast per newly seen source version. The quiet
   // per-row marker stays; only the toast is dismissed by acknowledging.
   const toastedVersionsRef = useRef<Record<string, number>>({});
@@ -180,10 +176,50 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
     }
   }, [promptUpdates, versioningEnabled, ackPromptUpdate, t]);
 
+  // Skills reuse the one-notice-per-source-version contract. The row chip and
+  // the library dot stay after the toast is acknowledged.
+  const toastedSkillVersionsRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!skillSharingEnabled) return;
+    const pending = skillUpdates.filter(
+      (update) =>
+        update.latestVersion >
+        Math.max(
+          update.seenVersion ?? 0,
+          toastedSkillVersionsRef.current[update.skillId] ?? 0
+        )
+    );
+    if (pending.length === 0) return;
+    for (const update of pending) {
+      toastedSkillVersionsRef.current[update.skillId] = update.latestVersion;
+    }
+    const count = pending.length;
+    toast(t('chat.skills.updatesToast', { count }), {
+      id: 'skill-updates',
+      description:
+        count === 1
+          ? `${pending[0].title} → v${pending[0].latestVersion}`
+          : undefined,
+      action: {
+        label: t('chat.skills.updatesToastAction'),
+        onClick: () => {
+          setTab('skills');
+          setOpen(true);
+        }
+      },
+      duration: 8000
+    });
+    for (const update of pending) {
+      ackSkillUpdate(update.skillId, update.latestVersion).catch(() => null);
+    }
+  }, [skillUpdates, skillSharingEnabled, ackSkillUpdate, t]);
+
   const updatesByPrompt = new Map(
     promptUpdates.map((update) => [update.promptId, update])
   );
-  const hasUpdates = promptUpdates.length > 0;
+  const hasUpdates =
+    promptUpdates.length > 0 ||
+    (skillSharingEnabled && skillUpdates.length > 0);
 
   const handleShare = useCallback(
     async (prompt: IPrompt) => {
@@ -246,11 +282,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
           aria-describedby={undefined}
         >
           <DialogHeader className="flex flex-row items-center justify-between pr-8">
-            <DialogTitle>
-              {tab === 'skills'
-                ? t('chat.skills.title')
-                : t('chat.promptGallery.title')}
-            </DialogTitle>
+            <DialogTitle>{t('chat.promptGallery.title')}</DialogTitle>
             {tab === 'prompts' && promptsEnabled && (
               <Button
                 id="prompt-gallery-new"

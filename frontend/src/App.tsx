@@ -26,10 +26,11 @@ declare global {
 function App() {
   const { config } = useConfig();
   const routerBasename = getRouterBasename().replace(/\/$/, '');
-  // Shared prompts are public, so their standalone page must not wait for login.
-  const isPublicPromptShare = window.location.pathname.startsWith(
-    `${routerBasename}/prompt/`
-  );
+  // Shared prompts and skills are public, so their standalone pages must not
+  // wait for login.
+  const isPublicShare =
+    window.location.pathname.startsWith(`${routerBasename}/prompt/`) ||
+    window.location.pathname.startsWith(`${routerBasename}/skill/`);
 
   const { isAuthenticated, data, isReady } = useAuth();
   const userEnv = useAppStore((state) => state.userEnv);
@@ -85,7 +86,7 @@ function App() {
     }
   }, [configLoaded, config, chatProfile, setChatProfile]);
 
-  if (!configLoaded && isAuthenticated && !isPublicPromptShare) return null;
+  if (!configLoaded && isAuthenticated && !isPublicShare) return null;
 
   return (
     <ThemeProvider
@@ -100,7 +101,7 @@ function App() {
       <div
         className={cn(
           'bg-[hsl(var(--background))] flex items-center justify-center fixed size-full p-2 top-0',
-          (isReady || isPublicPromptShare) && 'hidden'
+          (isReady || isPublicShare) && 'hidden'
         )}
       >
         <Loader className="!size-6" />

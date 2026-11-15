@@ -5,41 +5,89 @@ import {
   formatSkillTimestamp,
   skillErrorDetail
 } from '@/lib/skills';
-import { ISkill, useSkills } from '@chainlit-ng/react-client';
-import { Download, Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import {
+  ISkill,
+  promptErrorCode,
+  useConfig,
+  useSkills
+} from '@chainlit-ng/react-client';
+import {
+  Download,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Share2,
+  ShieldCheck,
+  Trash2,
+  Upload
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { SkillEditorDialog } from '@/components/SkillEditorDialog';
+import { SkillReviewDialog } from '@/components/SkillReviewDialog';
+import { SkillShareDialog } from '@/components/SkillShareDialog';
+import { SkillUpdateDialog } from '@/components/SkillUpdateDialog';
 import { useTranslation } from '@/components/i18n/Translator';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 
 type EditTarget = ISkill | 'new' | undefined;
+type Section = 'all' | 'active' | 'review' | 'updates';
+
+interface UpdateTarget {
+  skill: ISkill;
+  versionId: string | null;
+}
+
+/** Imported and linked copies must be reviewed before reaching a model. */
+function needsReview(skill: ISkill): boolean {
+  return !!skill.importedFrom || !!skill.sourcePromptId;
+}
 
 export function SkillsPanel() {
   const { t } = useTranslation();
+  const { config } = useConfig();
   const {
     skills,
+    skillUpdates,
     fetchSkills,
     createSkill,
     updateSkill,
     deleteSkill,
     importSkill,
-    exportSkill
+    exportSkill,
+    fetchSkillUpdates,
+    fetchSkillVersions,
+    detachSkill
   } = useSkills();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<EditTarget>();
+  const [reviewing, setReviewing] = useState<ISkill | null>(null);
+  const [reviewNonce, setReviewNonce] = useState(0);
+  const [sharing, setSharing] = useState<ISkill | null>(null);
+  const [updateTarget, setUpdateTarget] = useState<UpdateTarget | null>(null);
+  const [section, setSection] = useState<Section>('all');
   const [importing, setImporting] = useState(false);
+  const [versionNumbers, setVersionNumbers] = useState<Record<string, number>>(
+    {}
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadedSourcesRef = useRef<Set<string>>(new Set());
   const fallbackError = t('common.status.error.default');
+
+  const sharingEnabled = config?.skillsSharing === true;
+  const libraryEnabled = config?.skillsLibrary !== false;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchSkills()
+    Promise.all([
+      fetchSkills(),
+      sharingEnabled ? fetchSkillUpdates().catch(() => []) : Promise.resolve([])
+    ])
       .catch((reason) => {
         if (!cancelled) {
           setError(skillErrorDetail(reason) || fallbackError);
@@ -51,14 +99,70 @@ export function SkillsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [fetchSkills, fallbackError]);
+  }, [fetchSkills, fetchSkillUpdates, sharingEnabled, fallbackError]);
+
+  // "From link · pinned vN" needs the source's version number; the pin stores
+  // only an id. One lookup per shared source is cached for the panel lifetime.
+  useEffect(() => {
+    if (!sharingEnabled) return;
+    let cancelled = false;
+    const sources = new Map<string, string>();
+    for (const skill of skills) {
+      if (!skill.sourcePromptId || !skill.pinnedVersionId) continue;
+      if (loadedSourcesRef.current.has(skill.sourcePromptId)) continue;
+      sources.set(skill.sourcePromptId, skill.pinnedVersionId);
+    }
+    sources.forEach((pinnedVersionId, sourceId) => {
+      loadedSourcesRef.current.add(sourceId);
+      fetchSkillVersions(sourceId, { shared: true })
+        .then((versions) => {
+          if (cancelled) return;
+          const version = versions.find((item) => item.id === pinnedVersionId);
+          if (!version) return;
+          setVersionNumbers((previous) => ({
+            ...previous,
+            [pinnedVersionId]: version.version
+          }));
+        })
+        .catch(() => {
+          loadedSourcesRef.current.delete(sourceId);
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [skills, sharingEnabled, fetchSkillVersions]);
 
   const handleToggle = async (skill: ISkill, enabled: boolean) => {
     setError(undefined);
+    if (enabled && needsReview(skill)) {
+      setReviewing(skill);
+      return;
+    }
     try {
       await updateSkill(skill.id, { enabled });
     } catch (reason) {
       setError(skillErrorDetail(reason) || t('common.status.error.default'));
+    }
+  };
+
+  const handleReviewEnable = async (reviewedContentHash: string) => {
+    if (!reviewing) return;
+    try {
+      await updateSkill(reviewing.id, {
+        enabled: true,
+        reviewedContentHash
+      });
+      toast.success(t('chat.skills.review.enabled'));
+      setReviewing(null);
+    } catch (reason) {
+      if (promptErrorCode(reason) === 'content_changed') {
+        toast.error(t('chat.skills.review.changed'));
+        setReviewNonce((value) => value + 1);
+        await fetchSkills().catch(() => null);
+        throw reason;
+      }
+      throw reason;
     }
   };
 
@@ -76,6 +180,16 @@ export function SkillsPanel() {
     try {
       const exported = await exportSkill(skill.id);
       downloadMarkdown(exported.markdown, exported.filename);
+    } catch (reason) {
+      setError(skillErrorDetail(reason) || t('common.status.error.default'));
+    }
+  };
+
+  const handleDetach = async (skill: ISkill) => {
+    setError(undefined);
+    try {
+      await detachSkill(skill.id);
+      toast.success(t('chat.skills.detached'));
     } catch (reason) {
       setError(skillErrorDetail(reason) || t('common.status.error.default'));
     }
@@ -116,6 +230,38 @@ export function SkillsPanel() {
     }
   };
 
+  const updatesById = new Map(
+    skillUpdates.map((update) => [update.skillId, update])
+  );
+  const reviewCount = skills.filter(
+    (skill) => needsReview(skill) && !skill.enabled
+  ).length;
+  const activeCount = skills.filter((skill) => skill.enabled).length;
+  const visibleSkills = skills.filter((skill) => {
+    if (section === 'active') return !!skill.enabled;
+    if (section === 'review') return needsReview(skill) && !skill.enabled;
+    if (section === 'updates') return updatesById.has(skill.id);
+    return true;
+  });
+  const sections: { id: Section; label: string; count: number }[] = [
+    { id: 'all', label: t('chat.skills.sections.all'), count: skills.length },
+    {
+      id: 'active',
+      label: t('chat.skills.sections.active'),
+      count: activeCount
+    },
+    {
+      id: 'review',
+      label: t('chat.skills.sections.review'),
+      count: reviewCount
+    },
+    {
+      id: 'updates',
+      label: t('chat.skills.sections.updates'),
+      count: skillUpdates.length
+    }
+  ];
+
   return (
     <>
       <div className="flex flex-col gap-3 min-h-0">
@@ -144,6 +290,12 @@ export function SkillsPanel() {
           />
         </div>
 
+        {!libraryEnabled ? (
+          <p className="text-xs text-muted-foreground">
+            {t('chat.skills.libraryUnavailable')}
+          </p>
+        ) : null}
+
         {error && (
           <p
             id="skill-error"
@@ -153,6 +305,28 @@ export function SkillsPanel() {
             {error}
           </p>
         )}
+
+        <div
+          role="group"
+          aria-label={t('chat.skills.sections.label')}
+          className="flex flex-wrap items-center gap-1"
+          data-testid="skill-sections"
+        >
+          {sections.map((item) => (
+            <Button
+              key={item.id}
+              type="button"
+              size="sm"
+              variant={section === item.id ? 'default' : 'outline'}
+              aria-pressed={section === item.id}
+              data-testid={`skill-section-${item.id}`}
+              onClick={() => setSection(item.id)}
+            >
+              {item.label}
+              <span className="ml-1 text-xs opacity-70">{item.count}</span>
+            </Button>
+          ))}
+        </div>
 
         <div className="max-h-[50vh] overflow-y-auto custom-scrollbar px-1">
           {loading ? (
@@ -168,98 +342,200 @@ export function SkillsPanel() {
                 {t('chat.skills.empty.description')}
               </p>
             </div>
+          ) : visibleSkills.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              {t('chat.skills.sections.empty')}
+            </p>
           ) : (
             <div className="divide-y">
-              {skills.map((skill) => (
-                <div
-                  key={skill.id}
-                  data-testid="skill-row"
-                  className="flex items-start gap-3 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="break-all text-sm font-medium">
-                        {skill.title}
-                      </span>
+              {visibleSkills.map((skill) => {
+                const update = updatesById.get(skill.id);
+                const pinnedNumber = skill.pinnedVersionId
+                  ? versionNumbers[skill.pinnedVersionId]
+                  : undefined;
+                const gated = needsReview(skill);
+                return (
+                  <div
+                    key={skill.id}
+                    data-testid="skill-row"
+                    data-skill-id={skill.id}
+                    className="flex items-start gap-3 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="break-all text-sm font-medium">
+                          {skill.title}
+                        </span>
+                        {skill.importedFrom && (
+                          <Badge
+                            variant="outline"
+                            title={t('chat.skills.importedBadgeTitle')}
+                          >
+                            {t('chat.skills.importedBadge')}
+                          </Badge>
+                        )}
+                        {skill.sourcePromptId && (
+                          <Badge variant="outline">
+                            {t('chat.skills.fromLinkBadge')}
+                          </Badge>
+                        )}
+                        {skill.isShared && (
+                          <Badge>{t('chat.skills.sharedBadge')}</Badge>
+                        )}
+                        {skill.enabled && (
+                          <Badge variant="secondary">
+                            {t('chat.skills.activeBadge')}
+                          </Badge>
+                        )}
+                        {update ? (
+                          <button
+                            type="button"
+                            data-testid={`skill-update-chip-${skill.id}`}
+                            className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20"
+                            onClick={() =>
+                              setUpdateTarget({
+                                skill,
+                                versionId: update.latestVersionId
+                              })
+                            }
+                          >
+                            {t('chat.skills.updateAvailable', {
+                              version: update.latestVersion
+                            })}
+                          </button>
+                        ) : null}
+                      </div>
+                      <p className="line-clamp-2 text-xs text-muted-foreground whitespace-pre-wrap">
+                        {skill.description}
+                      </p>
                       {skill.importedFrom && (
-                        <Badge
-                          variant="outline"
-                          title={t('chat.skills.importedBadgeTitle')}
+                        <p
+                          className="break-all text-xs text-muted-foreground"
+                          title={
+                            skill.contentHash
+                              ? `sha256:${skill.contentHash}`
+                              : undefined
+                          }
                         >
-                          {t('chat.skills.importedBadge')}
-                        </Badge>
+                          {t('chat.skills.provenance', {
+                            source: skill.importedFrom,
+                            date: formatSkillTimestamp(skill.importedAt),
+                            hash: skill.contentHash
+                              ? `${skill.contentHash.slice(0, 12)}…`
+                              : '—'
+                          })}
+                        </p>
+                      )}
+                      {skill.sourcePromptId && (
+                        <p
+                          className="break-all text-xs text-muted-foreground"
+                          data-testid={`skill-pin-${skill.id}`}
+                        >
+                          {t('chat.skills.pinnedProvenance', {
+                            version: pinnedNumber ?? '—',
+                            hash: skill.pinnedContentHash
+                              ? `${skill.pinnedContentHash.slice(0, 12)}…`
+                              : '—'
+                          })}
+                        </p>
+                      )}
+                      {gated && !skill.enabled && (
+                        <p className="text-xs text-amber-600">
+                          {t('chat.skills.reviewBeforeEnabling')}
+                        </p>
                       )}
                     </div>
-                    <p className="line-clamp-2 text-xs text-muted-foreground whitespace-pre-wrap">
-                      {skill.description}
-                    </p>
-                    {skill.importedFrom && (
-                      <p
-                        className="break-all text-xs text-muted-foreground"
-                        title={
-                          skill.contentHash
-                            ? `sha256:${skill.contentHash}`
-                            : undefined
-                        }
-                      >
-                        {t('chat.skills.provenance', {
-                          source: skill.importedFrom,
-                          date: formatSkillTimestamp(skill.importedAt),
-                          hash: skill.contentHash
-                            ? `${skill.contentHash.slice(0, 12)}…`
-                            : '—'
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Switch
+                        checked={!!skill.enabled}
+                        aria-label={t('chat.skills.toggle', {
+                          name: skill.title
                         })}
-                      </p>
-                    )}
-                    {skill.importedFrom && !skill.enabled && (
-                      <p className="text-xs text-amber-600">
-                        {t('chat.skills.reviewBeforeEnabling')}
-                      </p>
-                    )}
+                        onCheckedChange={(enabled) =>
+                          handleToggle(skill, enabled)
+                        }
+                      />
+                      {gated && !skill.enabled ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-amber-600 hover:text-amber-700"
+                          aria-label={t('chat.skills.review.open', {
+                            name: skill.title
+                          })}
+                          data-testid={`skill-review-${skill.id}`}
+                          onClick={() => setReviewing(skill)}
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        aria-label={t('chat.skills.edit')}
+                        onClick={() => setEditing(skill)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      {sharingEnabled && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={
+                            skill.isShared
+                              ? 'h-7 w-7 text-blue-500 hover:text-blue-600'
+                              : 'h-7 w-7 text-muted-foreground hover:text-foreground'
+                          }
+                          aria-label={t('chat.skills.share.open', {
+                            name: skill.title
+                          })}
+                          data-testid={`skill-share-${skill.id}`}
+                          onClick={() => setSharing(skill)}
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        aria-label={t('chat.skills.export')}
+                        onClick={() => handleExport(skill)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                      {sharingEnabled && skill.sourcePromptId && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          aria-label={t('chat.skills.detach')}
+                          data-testid={`skill-detach-${skill.id}`}
+                          onClick={() => handleDetach(skill)}
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        aria-label={t('chat.skills.delete')}
+                        onClick={() => handleDelete(skill)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Switch
-                      checked={!!skill.enabled}
-                      aria-label={t('chat.skills.toggle', {
-                        name: skill.title
-                      })}
-                      onCheckedChange={(enabled) =>
-                        handleToggle(skill, enabled)
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                      aria-label={t('chat.skills.edit')}
-                      onClick={() => setEditing(skill)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                      aria-label={t('chat.skills.export')}
-                      onClick={() => handleExport(skill)}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                      aria-label={t('chat.skills.delete')}
-                      onClick={() => handleDelete(skill)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -271,6 +547,37 @@ export function SkillsPanel() {
         onSave={handleSave}
         onClose={() => setEditing(undefined)}
       />
+
+      <SkillReviewDialog
+        key={`${reviewing?.id ?? 'none'}-${reviewNonce}`}
+        open={!!reviewing}
+        skill={reviewing}
+        onEnable={handleReviewEnable}
+        onClose={() => setReviewing(null)}
+      />
+
+      <SkillShareDialog
+        open={!!sharing}
+        skill={sharing}
+        onClose={() => setSharing(null)}
+        onChanged={(updated) => {
+          setSharing(updated);
+        }}
+      />
+
+      <SkillUpdateDialog
+        open={!!updateTarget}
+        skill={updateTarget?.skill ?? null}
+        initialVersionId={updateTarget?.versionId ?? null}
+        onOpenChange={(next) => {
+          if (!next) setUpdateTarget(null);
+        }}
+        onUpdated={() => {
+          setUpdateTarget(null);
+        }}
+      />
     </>
   );
 }
+
+export default SkillsPanel;

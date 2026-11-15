@@ -34,10 +34,18 @@ import {
   IScheduledTaskUpdate
 } from 'src/types/scheduledTask';
 import {
+  ISharedSkill,
   ISkill,
   ISkillExport,
   ISkillPayload,
-  ISkillUpdate
+  ISkillSeenAck,
+  ISkillShareResult,
+  ISkillUpdate,
+  ISkillUpdateNotice,
+  ISkillVersion,
+  ISkillVersionSummary,
+  SkillUpdatePayload,
+  SkillVersionQuery
 } from 'src/types/skill';
 
 export * from './hooks/auth';
@@ -693,5 +701,92 @@ export class ChainlitAPI extends APIBase {
       filename: match?.[1] || `${id}.md`,
       contentHash: res.headers.get('X-Skill-Content-Hash') || undefined
     };
+  }
+
+  // ---- Skill sharing and versioning ----
+
+  async shareSkill(id: string, isShared: boolean): Promise<ISkillShareResult> {
+    const res = await this.post(`/project/skills/${id}/share`, { isShared });
+    return res.json();
+  }
+
+  /** Anonymous sanitized preview of a shared skill. */
+  async getSharedSkill(id: string): Promise<ISharedSkill> {
+    const res = await this.get(`/project/skill/share/${id}`);
+    return res.json();
+  }
+
+  /**
+   * Version summaries, newest first. No content.
+   *
+   * `shared` switches to the anonymous share routes, which never include the
+   * author identity.
+   */
+  async fetchSkillVersions(
+    id: string,
+    options: SkillVersionQuery = {}
+  ): Promise<ISkillVersionSummary[]> {
+    const path = options.shared
+      ? `/project/skill/share/${id}/versions`
+      : `/project/skills/${id}/versions`;
+    const res = await this.get(path);
+    return res.json();
+  }
+
+  /** One immutable skill version snapshot including its content. */
+  async fetchSkillVersion(
+    id: string,
+    versionId: string,
+    options: SkillVersionQuery = {}
+  ): Promise<ISkillVersion> {
+    const path = options.shared
+      ? `/project/skill/share/${id}/versions/${versionId}`
+      : `/project/skills/${id}/versions/${versionId}`;
+    const res = await this.get(path);
+    return res.json();
+  }
+
+  /** Copy a shared skill as a disabled, pinned skill. */
+  async addSharedSkill(id: string, versionId?: string): Promise<ISkill> {
+    const res = await this.post(
+      `/project/skill/share/${id}/add`,
+      versionId ? { versionId } : {}
+    );
+    return res.json();
+  }
+
+  /** Pinned skills whose shared source has a newer, unseen version. */
+  async fetchSkillUpdates(): Promise<ISkillUpdateNotice[]> {
+    const res = await this.get(`/project/skills/updates`);
+    return res.json();
+  }
+
+  /** Acknowledge one source version; the notice version only moves forward. */
+  async ackSkillUpdate(
+    skillId: string,
+    version: number
+  ): Promise<ISkillSeenAck> {
+    const res = await this.post(`/project/skills/${skillId}/updates/seen`, {
+      version
+    });
+    return res.json();
+  }
+
+  /** Apply a source version; the server copies it in disabled for review. */
+  async updateSkillFromSource(
+    id: string,
+    payload: SkillUpdatePayload
+  ): Promise<ISkill> {
+    const res = await this.post(
+      `/project/skills/${id}/update-from-source`,
+      payload
+    );
+    return res.json();
+  }
+
+  /** Clear the source pin, keeping content and history. */
+  async detachSkill(id: string): Promise<ISkill> {
+    const res = await this.post(`/project/skills/${id}/detach`, {});
+    return res.json();
   }
 }

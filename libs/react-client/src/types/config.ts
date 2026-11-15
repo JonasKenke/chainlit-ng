@@ -105,6 +105,13 @@ export interface IChainlitConfig {
   promptGallery?: boolean;
   /** Prompt history, pinned copies and update notices are available. */
   promptVersioning?: boolean;
+  /**
+   * Skill CRUD is enabled and the data layer implements it. `undefined` keeps
+   * older servers working; only `false` hides the library tab.
+   */
+  skillsLibrary?: boolean;
+  /** Skill sharing, history, pins and update notices are available. */
+  skillsSharing?: boolean;
   promptScheduling?: boolean;
   scheduledTaskAfterHooks?: { name: string; default: boolean }[];
   scheduledTaskModels?: string[];

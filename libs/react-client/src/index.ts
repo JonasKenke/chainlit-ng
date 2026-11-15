@@ -17,6 +17,7 @@ export {
   promptErrorCode,
   promptVersionLabel
 } from './utils/prompt';
+export { mergeSkillUpdates } from './utils/skill';
 export * from './utils/message';
 
 export { Socket } from 'socket.io-client';
