@@ -165,9 +165,8 @@ describe('PromptVersionDiff', () => {
     renderDialog();
     await screen.findByText('new line');
 
-    fireEvent.change(screen.getByTestId('prompt-diff-version'), {
-      target: { value: 'v2' }
-    });
+    fireEvent.pointerDown(screen.getByTestId('prompt-diff-version'));
+    fireEvent.click(await screen.findByTestId('prompt-diff-version-option-v2'));
 
     await waitFor(() =>
       expect(mocks.fetchPromptVersion).toHaveBeenLastCalledWith(
@@ -295,7 +294,7 @@ describe('PromptVersionDiff', () => {
         shared: false
       })
     );
-    expect(screen.getByTestId('prompt-diff-version')).toHaveValue('lv2');
+    expect(screen.getByTestId('prompt-diff-version')).toHaveTextContent('v2');
     expect(screen.queryByTestId('prompt-diff-update')).toBeNull();
   });
 

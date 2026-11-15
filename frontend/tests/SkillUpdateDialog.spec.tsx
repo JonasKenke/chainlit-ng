@@ -132,8 +132,8 @@ describe('SkillUpdateDialog', () => {
   it('loads shared versions, shows metadata and diffs the local body', async () => {
     renderDialog();
 
-    expect(await screen.findByTestId('skill-update-version')).toHaveValue(
-      'sv2'
+    expect(await screen.findByTestId('skill-update-version')).toHaveTextContent(
+      'v2'
     );
     expect(fetchSkillVersionsMock).toHaveBeenCalledWith('source-1', {
       shared: true
@@ -188,9 +188,10 @@ describe('SkillUpdateDialog', () => {
       ...versions[1],
       content: '# Skill\nfirst line'
     });
-    fireEvent.change(screen.getByTestId('skill-update-version'), {
-      target: { value: 'sv1' }
-    });
+    fireEvent.pointerDown(screen.getByTestId('skill-update-version'));
+    fireEvent.click(
+      await screen.findByTestId('skill-update-version-option-sv1')
+    );
     await waitFor(() =>
       expect(fetchSkillVersionMock).toHaveBeenCalledWith('source-1', 'sv1', {
         shared: true
@@ -291,8 +292,8 @@ describe('SkillUpdateDialog', () => {
   it('preselects the version named by an update notice', async () => {
     renderDialog({ initialVersionId: 'sv1' });
 
-    expect(await screen.findByTestId('skill-update-version')).toHaveValue(
-      'sv1'
+    expect(await screen.findByTestId('skill-update-version')).toHaveTextContent(
+      'v1'
     );
     expect(fetchSkillVersionMock).toHaveBeenCalledWith('source-1', 'sv1', {
       shared: true

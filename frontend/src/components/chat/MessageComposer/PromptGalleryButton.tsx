@@ -11,6 +11,7 @@ import {
 } from '@chainlit-ng/react-client';
 import {
   BookMarked,
+  ChevronDown,
   Globe,
   GlobeLock,
   Pencil,
@@ -380,7 +381,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                                     <button
                                       type="button"
                                       data-testid={`prompt-versions-${prompt.id}`}
-                                      className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-primary/50 hover:text-primary"
+                                      className="inline-flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-primary/50 hover:text-primary"
                                       aria-label={t(
                                         'chat.promptGallery.versions',
                                         { version: prompt.version ?? 1 }
@@ -396,6 +397,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                                       }}
                                     >
                                       v{prompt.version ?? 1}
+                                      <ChevronDown className="h-2.5 w-2.5" />
                                     </button>
                                   ) : null}
                                 </div>

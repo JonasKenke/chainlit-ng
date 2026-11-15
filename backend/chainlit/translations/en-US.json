@@ -9,6 +9,7 @@
       "reset": "Reset",
       "submit": "Submit"
     },
+    "latest": "Latest",
     "status": {
       "loading": "Loading...",
       "error": {

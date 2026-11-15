@@ -14,6 +14,7 @@ import {
   VersionDiffRows,
   VersionDiffViewMode
 } from '@/components/VersionDiffRows';
+import { VersionPicker } from '@/components/VersionPicker';
 import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 import {
@@ -282,20 +283,14 @@ export function PromptVersionDiff({
         ) : (
           <>
             <div className="flex items-center justify-between gap-2">
-              <select
-                id="prompt-diff-version"
-                data-testid="prompt-diff-version"
-                aria-label={t('chat.promptGallery.diff.version')}
+              <VersionPicker
                 value={targetId ?? ''}
-                onChange={(event) => setTargetId(event.target.value)}
-                className="h-8 min-w-20 rounded-md border bg-background px-2 text-xs"
-              >
-                {versions.map((version) => (
-                  <option key={version.id} value={version.id}>
-                    {`v${version.version}`}
-                  </option>
-                ))}
-              </select>
+                options={versions}
+                onChange={setTargetId}
+                label={t('chat.promptGallery.diff.version')}
+                latestId={versions[0]?.id}
+                testId="prompt-diff-version"
+              />
               <div className="flex items-center gap-1" role="group">
                 <Button
                   type="button"
