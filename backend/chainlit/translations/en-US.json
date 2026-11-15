@@ -16,7 +16,8 @@
         "default": "An error occurred",
         "serverConnection": "Could not reach the server"
       }
-    }
+    },
+    "current": "Current"
   },
   "auth": {
     "login": {
@@ -274,7 +275,9 @@
         "update": "Update to v{{version}}",
         "updateFallback": "Update",
         "updateError": "Could not update this prompt",
-        "loadError": "Could not load the version comparison."
+        "loadError": "Could not load the version comparison.",
+        "currentVersion": "This is your current version.",
+        "noVersions": "No other versions are available."
       },
       "updatesToast_one": "{{count}} saved prompt has a newer shared version",
       "updatesToast_other": "{{count}} saved prompts have a newer shared version"
@@ -472,8 +475,8 @@
         "versionConflict": "That version does not belong to the shared source.",
         "historyTitle": "Version history",
         "historyDescription": "Choose a version to see what changed.",
-        "upToDate": "You already have the latest version.",
-        "noEarlierVersions": "No earlier versions yet."
+        "currentVersion": "This is your current version.",
+        "noVersions": "No other versions are available."
       },
       "empty": {
         "title": "No skills yet",

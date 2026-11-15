@@ -295,6 +295,41 @@ describe('PromptVersionDiff', () => {
     expect(screen.queryByTestId('prompt-diff-update')).toBeNull();
   });
 
+  it('keeps a single prompt version visible and explains it is current', async () => {
+    const localPrompt: IPrompt = {
+      ...prompt,
+      id: 'only-prompt',
+      sourcePromptId: null,
+      pinnedVersionId: null,
+      pinnedContentHash: null,
+      pinnedAt: null,
+      contentHash: 'sha256:current'
+    };
+    mocks.fetchPromptVersions.mockResolvedValue([
+      {
+        ...versions[0],
+        id: 'only-v1',
+        promptId: 'only-prompt',
+        version: 1,
+        contentHash: 'sha256:current'
+      }
+    ]);
+    mocks.fetchPromptVersion.mockResolvedValue({
+      id: 'only-v1',
+      content: prompt.content
+    });
+
+    renderDialog({ prompt: localPrompt });
+
+    expect(await screen.findByTestId('prompt-diff-version')).toHaveTextContent(
+      'v1'
+    );
+    expect(
+      await screen.findByText('chat.promptGallery.diff.currentVersion')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('prompt-diff-update')).toBeNull();
+  });
+
   it('renders untrusted diff text as text, never as HTML', async () => {
     const payload = '<script>alert("x")</script>';
     mocks.fetchPromptVersion.mockResolvedValue({
@@ -305,7 +340,7 @@ describe('PromptVersionDiff', () => {
     renderDialog();
 
     const cell = await screen.findByText(payload);
-    expect(cell.tagName).toBe('SPAN');
+    expect(cell.tagName).toBe('TD');
     expect(
       document.querySelector('[data-testid="prompt-diff-row"] script')
     ).toBeNull();

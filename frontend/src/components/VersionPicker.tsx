@@ -22,6 +22,7 @@ interface Props {
   onChange: (id: string) => void;
   label: string;
   latestId?: string;
+  currentId?: string;
   testId?: string;
 }
 
@@ -38,6 +39,7 @@ export function VersionPicker({
   onChange,
   label,
   latestId,
+  currentId,
   testId = 'version-picker'
 }: Props) {
   const { t } = useTranslation();
@@ -75,8 +77,12 @@ export function VersionPicker({
             >
               <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                 <span className="font-medium">v{option.version}</span>
-                {option.id === latestId ? (
+                {option.id === currentId ? (
                   <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                    {t('common.current')}
+                  </span>
+                ) : option.id === latestId ? (
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                     {t('common.latest')}
                   </span>
                 ) : null}

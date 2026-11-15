@@ -118,18 +118,14 @@ export function PromptVersionDiff({
       const list = await fetchPromptVersions(versionSourceId, {
         shared: isPinned
       });
-      const sorted = [...list]
-        .filter(
-          (version) =>
-            !prompt?.contentHash || version.contentHash !== prompt.contentHash
-        )
-        .sort((a, b) => b.version - a.version);
+      const sorted = [...list].sort((a, b) => b.version - a.version);
       setVersions(sorted);
       const preferred = sorted.some(
         (version) => version.id === initialVersionId
       )
         ? initialVersionId
-        : sorted[0]?.id;
+        : (sorted.find((version) => version.contentHash !== prompt?.contentHash)
+            ?.id ?? sorted[0]?.id);
       setTargetId(preferred ?? null);
     } catch (error) {
       const code = promptErrorCode(error);
@@ -176,6 +172,17 @@ export function PromptVersionDiff({
   const targetVersion = useMemo(
     () => versions.find((version) => version.id === targetId) ?? null,
     [versions, targetId]
+  );
+  const currentId = useMemo(
+    () =>
+      versions.find((version) => version.contentHash === prompt?.contentHash)
+        ?.id,
+    [versions, prompt?.contentHash]
+  );
+  const targetIsCurrent = Boolean(
+    targetVersion &&
+    prompt?.contentHash &&
+    targetVersion.contentHash === prompt.contentHash
   );
 
   const handleUpdate = async (confirm: boolean) => {
@@ -283,6 +290,10 @@ export function PromptVersionDiff({
           <p className="text-sm text-destructive">
             {t('chat.promptGallery.diff.loadError')}
           </p>
+        ) : versions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t('chat.promptGallery.diff.noVersions')}
+          </p>
         ) : (
           <>
             <div className="flex items-center justify-between gap-2">
@@ -292,9 +303,14 @@ export function PromptVersionDiff({
                 onChange={setTargetId}
                 label={t('chat.promptGallery.diff.version')}
                 latestId={versions[0]?.id}
+                currentId={currentId}
                 testId="prompt-diff-version"
               />
-              <div className="flex items-center gap-1" role="group">
+              <div
+                className="flex items-center gap-1"
+                role="group"
+                hidden={targetIsCurrent}
+              >
                 <Button
                   type="button"
                   size="sm"
@@ -318,7 +334,13 @@ export function PromptVersionDiff({
               </div>
             </div>
 
-            {stale ? (
+            {targetIsCurrent ? (
+              <p className="text-sm text-muted-foreground">
+                {t('chat.promptGallery.diff.currentVersion')}
+              </p>
+            ) : null}
+
+            {!targetIsCurrent && stale ? (
               <p
                 className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400"
                 data-testid="prompt-diff-stale"
@@ -378,27 +400,29 @@ export function PromptVersionDiff({
               </p>
             ) : null}
 
-            <div className="flex-1 overflow-auto rounded-md border custom-scrollbar">
-              {loadingDiff ? (
-                <p className="p-3 text-sm text-muted-foreground">
-                  {t('common.status.loading')}
-                </p>
-              ) : rows.length === 0 && diff ? (
-                <p className="p-3 text-sm text-muted-foreground">
-                  {t('chat.promptGallery.diff.noChanges')}
-                </p>
-              ) : (
-                <VersionDiffRows rows={rows} viewMode={viewMode} />
-              )}
-            </div>
+            {!targetIsCurrent ? (
+              <div className="flex-1 overflow-auto rounded-md border custom-scrollbar">
+                {loadingDiff ? (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {t('common.status.loading')}
+                  </p>
+                ) : rows.length === 0 && diff ? (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {t('chat.promptGallery.diff.noChanges')}
+                  </p>
+                ) : (
+                  <VersionDiffRows rows={rows} viewMode={viewMode} />
+                )}
+              </div>
+            ) : null}
 
-            {diff?.truncated ? (
+            {!targetIsCurrent && diff?.truncated ? (
               <p className="text-xs text-muted-foreground">
                 {t('chat.promptGallery.diff.truncated')}
               </p>
             ) : null}
 
-            {isPinned ? (
+            {isPinned && !targetIsCurrent ? (
               <div className="flex items-center justify-end">
                 <Button
                   type="button"

@@ -84,18 +84,14 @@ export function SkillUpdateDialog({
       const list = await fetchSkillVersions(versionSourceId, {
         shared: isPinned
       });
-      const sorted = [...list]
-        .filter(
-          (version) =>
-            !skill?.contentHash || version.contentHash !== skill.contentHash
-        )
-        .sort((a, b) => b.version - a.version);
+      const sorted = [...list].sort((a, b) => b.version - a.version);
       setVersions(sorted);
       const preferred = sorted.some(
         (version) => version.id === initialVersionId
       )
         ? initialVersionId
-        : sorted[0]?.id;
+        : (sorted.find((version) => version.contentHash !== skill?.contentHash)
+            ?.id ?? sorted[0]?.id);
       setTargetId(preferred ?? null);
     } catch {
       setVersions([]);
@@ -185,6 +181,12 @@ export function SkillUpdateDialog({
   const alreadyCurrent = Boolean(
     target && skill?.contentHash && target.contentHash === skill.contentHash
   );
+  const currentId = useMemo(
+    () =>
+      versions.find((version) => version.contentHash === skill?.contentHash)
+        ?.id,
+    [versions, skill?.contentHash]
+  );
 
   const handleUpdate = async (confirm: boolean) => {
     if (!skillId) return;
@@ -271,11 +273,7 @@ export function SkillUpdateDialog({
           </p>
         ) : versions.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {t(
-              isPinned
-                ? 'chat.skills.update.upToDate'
-                : 'chat.skills.update.noEarlierVersions'
-            )}
+            {t('chat.skills.update.noVersions')}
           </p>
         ) : (
           <>
@@ -286,9 +284,14 @@ export function SkillUpdateDialog({
                 onChange={setTargetId}
                 label={t('chat.skills.update.version')}
                 latestId={versions[0]?.id}
+                currentId={currentId}
                 testId="skill-update-version"
               />
-              <div className="flex items-center gap-1" role="group">
+              <div
+                className="flex items-center gap-1"
+                role="group"
+                hidden={alreadyCurrent}
+              >
                 <Button
                   type="button"
                   size="sm"
@@ -392,7 +395,7 @@ export function SkillUpdateDialog({
                 className="text-xs text-muted-foreground"
                 data-testid="skill-update-already-current"
               >
-                {t('chat.skills.update.alreadyCurrent')}
+                {t('chat.skills.update.currentVersion')}
               </p>
             ) : null}
 
@@ -402,31 +405,33 @@ export function SkillUpdateDialog({
               </p>
             ) : null}
 
-            <div className="flex-1 overflow-auto rounded-md border custom-scrollbar">
-              {loadingTarget ? (
-                <p className="p-3 text-sm text-muted-foreground">
-                  {t('common.status.loading')}
-                </p>
-              ) : diff.rows.length === 0 && target ? (
-                <p className="p-3 text-sm text-muted-foreground">
-                  {t('chat.skills.update.noChanges')}
-                </p>
-              ) : (
-                <VersionDiffRows
-                  rows={diff.rows}
-                  viewMode={viewMode}
-                  testId="skill-update-row"
-                />
-              )}
-            </div>
+            {!alreadyCurrent ? (
+              <div className="flex-1 overflow-auto rounded-md border custom-scrollbar">
+                {loadingTarget ? (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {t('common.status.loading')}
+                  </p>
+                ) : diff.rows.length === 0 && target ? (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {t('chat.skills.update.noChanges')}
+                  </p>
+                ) : (
+                  <VersionDiffRows
+                    rows={diff.rows}
+                    viewMode={viewMode}
+                    testId="skill-update-row"
+                  />
+                )}
+              </div>
+            ) : null}
 
-            {diff.truncated ? (
+            {!alreadyCurrent && diff.truncated ? (
               <p className="text-xs text-muted-foreground">
                 {t('chat.skills.update.truncated')}
               </p>
             ) : null}
 
-            {isPinned ? (
+            {isPinned && !alreadyCurrent ? (
               <div className="flex items-center justify-end">
                 <Button
                   type="button"
