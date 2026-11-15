@@ -13,7 +13,17 @@ import {
   IApprovalDecisionResponse
 } from 'src/types/approval';
 import { IFeedback } from 'src/types/feedback';
-import { IPrompt } from 'src/types/prompt';
+import {
+  IPrompt,
+  IPromptDiff,
+  IPromptUpdate,
+  IPromptUpdateAck,
+  IPromptVersion,
+  IPromptVersionSummary,
+  ISharedPrompt,
+  PromptSyncPayload,
+  PromptVersionQuery
+} from 'src/types/prompt';
 import {
   IQuestionAnswerPayload,
   IQuestionAnswerResponse
@@ -558,13 +568,88 @@ export class ChainlitAPI extends APIBase {
     return res.json();
   }
 
-  async getSharedPrompt(id: string): Promise<IPrompt> {
+  async getSharedPrompt(id: string): Promise<ISharedPrompt> {
     const res = await this.get(`/project/prompt/share/${id}`);
     return res.json();
   }
 
-  async addSharedPrompt(id: string): Promise<IPrompt> {
-    const res = await this.post(`/project/prompt/share/${id}/add`, {});
+  async addSharedPrompt(id: string, versionId?: string): Promise<IPrompt> {
+    const res = await this.post(
+      `/project/prompt/share/${id}/add`,
+      versionId ? { versionId } : {}
+    );
+    return res.json();
+  }
+
+  /**
+   * Version summaries, newest first. No content.
+   *
+   * `shared` switches to the anonymous share routes, which never include the
+   * author identity.
+   */
+  async fetchPromptVersions(
+    id: string,
+    options: PromptVersionQuery = {}
+  ): Promise<IPromptVersionSummary[]> {
+    const path = options.shared
+      ? `/project/prompt/share/${id}/versions`
+      : `/project/prompts/${id}/versions`;
+    const res = await this.get(path);
+    return res.json();
+  }
+
+  /** One immutable version snapshot including its content. */
+  async fetchPromptVersion(
+    id: string,
+    versionId: string,
+    options: PromptVersionQuery = {}
+  ): Promise<IPromptVersion> {
+    const path = options.shared
+      ? `/project/prompt/share/${id}/versions/${versionId}`
+      : `/project/prompts/${id}/versions/${versionId}`;
+    const res = await this.get(path);
+    return res.json();
+  }
+
+  /** Pinned copies whose source is ahead and not yet acknowledged. */
+  async fetchPromptUpdates(): Promise<IPromptUpdate[]> {
+    const res = await this.get(`/project/prompts/updates`);
+    return res.json();
+  }
+
+  /** Acknowledge one source version; the notice version only moves forward. */
+  async ackPromptUpdates(
+    promptId: string,
+    version: number
+  ): Promise<IPromptUpdateAck> {
+    const res = await this.post(`/project/prompts/updates/ack`, {
+      promptId,
+      version
+    });
+    return res.json();
+  }
+
+  /** Structured line rows; the server never renders HTML. */
+  async fetchPromptDiff(
+    id: string,
+    to: string,
+    from: 'pinned' | 'local' = 'pinned'
+  ): Promise<IPromptDiff> {
+    const res = await this.get(
+      `/project/prompts/${id}/diff?from=${from}&to=${encodeURIComponent(to)}`
+    );
+    return res.json();
+  }
+
+  /** Copy a source version into a pinned prompt, appending one local version. */
+  async syncPrompt(id: string, payload: PromptSyncPayload): Promise<IPrompt> {
+    const res = await this.post(`/project/prompts/${id}/sync`, payload);
+    return res.json();
+  }
+
+  /** Clear the source pin, keeping content and history. */
+  async detachPrompt(id: string): Promise<IPrompt> {
+    const res = await this.post(`/project/prompts/${id}/detach`, {});
     return res.json();
   }
 

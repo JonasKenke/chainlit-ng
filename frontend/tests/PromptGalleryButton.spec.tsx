@@ -1,4 +1,5 @@
-import { IPrompt, useConfig } from '@chainlit-ng/react-client';
+import type { IPrompt, IPromptUpdate } from '@chainlit-ng/react-client';
+import { useConfig } from '@chainlit-ng/react-client';
 import {
   act,
   fireEvent,
@@ -14,6 +15,44 @@ const fetchPromptsMock = vi.fn().mockResolvedValue(undefined);
 const fetchSkillsMock = vi.fn().mockResolvedValue([]);
 const removePromptMock = vi.fn().mockResolvedValue(undefined);
 const sharePromptMock = vi.fn().mockResolvedValue('/prompt/some-id');
+const fetchPromptUpdatesMock = vi.fn().mockResolvedValue([]);
+const ackPromptUpdateMock = vi.fn().mockResolvedValue(2);
+const fetchPromptVersionsMock = vi.fn().mockResolvedValue([
+  {
+    id: 'v2',
+    promptId: 'p1',
+    kind: 'prompt',
+    version: 2,
+    title: 'Summarise',
+    description: '',
+    contentHash: 'sha256:new',
+    createdAt: '2024-02-01T00:00:00Z'
+  }
+]);
+const fetchPromptDiffMock = vi.fn().mockResolvedValue({
+  promptId: 'p1',
+  from: 'pinned',
+  to: 'v2',
+  fromVersionId: 'v1',
+  toVersionId: 'v2',
+  fromVersion: 1,
+  toVersion: 2,
+  fromContentHash: 'sha256:old',
+  toContentHash: 'sha256:new',
+  rows: [
+    {
+      op: 'replace',
+      oldLine: 1,
+      newLine: 1,
+      oldText: 'old line',
+      newText: 'new line'
+    }
+  ],
+  truncated: false,
+  maxRows: 2000,
+  maxBytes: 262144
+});
+const toastMock = vi.hoisted(() => vi.fn());
 const editPromptMock = vi.fn().mockResolvedValue({
   id: 'p1',
   title: 'Updated',
@@ -23,7 +62,10 @@ const editPromptMock = vi.fn().mockResolvedValue({
   createdAt: '',
   updatedAt: ''
 });
-const clientState = vi.hoisted(() => ({ prompts: [] as any[] }));
+const clientState = vi.hoisted(() => ({
+  prompts: [] as any[],
+  promptUpdates: [] as any[]
+}));
 
 const savePromptMock = vi.fn().mockResolvedValue({
   id: 'p2',
@@ -42,14 +84,30 @@ vi.mock('@/components/i18n/Translator', () => ({
   })
 }));
 
+vi.mock('sonner', () => ({ toast: toastMock }));
+
 vi.mock('@chainlit-ng/react-client', () => ({
   useConfig: vi.fn(),
+  promptErrorCode: (error: unknown) => {
+    if (!error || typeof error !== 'object' || !('detail' in error)) {
+      return undefined;
+    }
+    const detail = error.detail;
+    if (!detail || typeof detail !== 'object' || !('code' in detail)) {
+      return undefined;
+    }
+    return typeof detail.code === 'string' ? detail.code : undefined;
+  },
   usePromptGallery: () => ({
     fetchPrompts: fetchPromptsMock,
     editPrompt: editPromptMock,
     removePrompt: removePromptMock,
     sharePrompt: sharePromptMock,
-    savePrompt: savePromptMock
+    savePrompt: savePromptMock,
+    fetchPromptUpdates: fetchPromptUpdatesMock,
+    ackPromptUpdate: ackPromptUpdateMock,
+    fetchPromptVersions: fetchPromptVersionsMock,
+    fetchPromptDiff: fetchPromptDiffMock
   }),
   useSkills: () => ({
     skills: [],
@@ -95,8 +153,13 @@ describe('PromptGalleryButton', () => {
     vi.restoreAllMocks();
   });
 
-  const renderComponent = (prompts = samplePrompts, props = {}) => {
+  const renderComponent = (
+    prompts = samplePrompts,
+    props = {},
+    updates: IPromptUpdate[] = []
+  ) => {
     clientState.prompts = prompts;
+    clientState.promptUpdates = updates;
     return render(<PromptGalleryButton onSelect={mockOnSelect} {...props} />);
   };
 
@@ -255,6 +318,99 @@ describe('PromptGalleryButton', () => {
     fireEvent.click(getGalleryBtn());
     await waitFor(() => {
       expect(screen.getByText('chat.promptGallery.new')).toBeInTheDocument();
+    });
+  });
+
+  describe('prompt updates', () => {
+    const versioningConfig = {
+      config: { promptGallery: true, promptVersioning: true }
+    };
+    const updateNotice: IPromptUpdate = {
+      promptId: 'p1',
+      title: 'Summarise',
+      sourcePromptId: 'source-1',
+      pinnedVersionId: 'v1',
+      pinnedVersion: 1,
+      localVersion: 1,
+      latestVersionId: 'v2',
+      latestVersion: 2,
+      notifiedVersion: 0
+    };
+    const secondNotice: IPromptUpdate = {
+      ...updateNotice,
+      promptId: 'p2',
+      title: 'Translate',
+      latestVersionId: 'v5',
+      latestVersion: 5
+    };
+
+    it('shows a quiet dot when an update is available', () => {
+      (useConfig as any).mockReturnValue(versioningConfig);
+      renderComponent(samplePrompts, {}, [updateNotice]);
+      expect(
+        screen.getByTestId('prompt-gallery-update-dot')
+      ).toBeInTheDocument();
+    });
+
+    it('shows no dot when there are no updates', () => {
+      (useConfig as any).mockReturnValue(versioningConfig);
+      renderComponent(samplePrompts, {}, []);
+      expect(screen.queryByTestId('prompt-gallery-update-dot')).toBeNull();
+    });
+
+    it('fetches updates once on mount and again when the dialog opens', async () => {
+      (useConfig as any).mockReturnValue(versioningConfig);
+      renderComponent(samplePrompts, {}, []);
+      await waitFor(() =>
+        expect(fetchPromptUpdatesMock).toHaveBeenCalledTimes(1)
+      );
+      fireEvent.click(getGalleryBtn());
+      await waitFor(() =>
+        expect(fetchPromptUpdatesMock).toHaveBeenCalledTimes(2)
+      );
+    });
+
+    it('shows one grouped toast per new version and acknowledges each', async () => {
+      (useConfig as any).mockReturnValue(versioningConfig);
+      renderComponent(samplePrompts, {}, [updateNotice, secondNotice]);
+
+      await waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1));
+      const [message, options] = toastMock.mock.calls[0];
+      expect(message).toBe('chat.promptGallery.updatesToast');
+      expect(options.action.label).toBe(
+        'chat.promptGallery.updatesToastAction'
+      );
+      expect(options.id).toBe('prompt-gallery-updates');
+
+      await waitFor(() => expect(ackPromptUpdateMock).toHaveBeenCalledTimes(2));
+      expect(ackPromptUpdateMock).toHaveBeenCalledWith('p1', 2);
+      expect(ackPromptUpdateMock).toHaveBeenCalledWith('p2', 5);
+
+      // Re-rendering must not emit a second toast for the same versions.
+      expect(toastMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not toast when versioning is unavailable', async () => {
+      (useConfig as any).mockReturnValue({ config: { promptGallery: true } });
+      renderComponent(samplePrompts, {}, [updateNotice]);
+      await act(() => Promise.resolve());
+      expect(fetchPromptUpdatesMock).not.toHaveBeenCalled();
+      expect(toastMock).not.toHaveBeenCalled();
+    });
+
+    it('shows a per-row chip and opens the version diff', async () => {
+      (useConfig as any).mockReturnValue(versioningConfig);
+      renderComponent(samplePrompts, {}, [updateNotice]);
+      fireEvent.click(getGalleryBtn());
+
+      const chip = await screen.findByTestId('prompt-update-chip-p1');
+      expect(chip).toHaveTextContent('chat.promptGallery.updateAvailable');
+      fireEvent.click(chip);
+
+      expect(
+        await screen.findByTestId('prompt-diff-dialog')
+      ).toBeInTheDocument();
+      expect(await screen.findByText('new line')).toBeInTheDocument();
     });
   });
 });

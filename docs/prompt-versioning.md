@@ -1,9 +1,9 @@
 # Prompt versioning and pinned sharing
 
 Prompt gallery entries keep an immutable history and can be copied from a
-shared prompt as a pinned, updateable copy. The version table already carries
-`kind` and `description` so skills can reuse it, but skill versioning and
-sharing routes are not exposed yet.
+shared prompt as a pinned, updateable copy. Skills reuse the same version table
+and share the pinned-copy contract; their routes and review gate are documented
+in [skills.md](skills.md#versioning-and-sharing).
 
 ## Version contract
 

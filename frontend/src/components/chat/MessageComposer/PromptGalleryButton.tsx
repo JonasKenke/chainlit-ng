@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { PromptSaveDialog } from '@/components/PromptSaveDialog';
+import { PromptVersionDiff } from '@/components/PromptVersionDiff';
 import Translator, { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 import {
@@ -76,14 +77,27 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
   const { config } = useConfig();
   const { t } = useTranslation();
   const prompts = useChainlitStore((state) => state.prompts);
-  const { fetchPrompts, editPrompt, removePrompt, sharePrompt, savePrompt } =
-    usePromptGallery();
+  const promptUpdates = useChainlitStore((state) => state.promptUpdates);
+  const {
+    fetchPrompts,
+    editPrompt,
+    removePrompt,
+    sharePrompt,
+    savePrompt,
+    fetchPromptUpdates,
+    ackPromptUpdate
+  } = usePromptGallery();
 
   const [open, setOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<IPrompt | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [diffTarget, setDiffTarget] = useState<{
+    prompt: IPrompt;
+    versionId: string | null;
+  } | null>(null);
   const promptsEnabled = config?.promptGallery === true;
   const skillsEnabled = config?.features?.skills === true;
+  const versioningEnabled = promptsEnabled && config?.promptVersioning === true;
   const [tab, setTab] = useState<'prompts' | 'skills'>(
     promptsEnabled ? 'prompts' : 'skills'
   );
@@ -109,11 +123,67 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
     }
   }, [open, promptsEnabled, fetchPrompts]);
 
+  // Query updates once so the quiet dot is visible before the dialog opens.
+  const hasFetchedUpdatesRef = useRef(false);
+  useEffect(() => {
+    if (!versioningEnabled || hasFetchedUpdatesRef.current) return;
+    hasFetchedUpdatesRef.current = true;
+    Promise.resolve(fetchPromptUpdates()).catch(() => {
+      hasFetchedUpdatesRef.current = false;
+    });
+  }, [versioningEnabled, fetchPromptUpdates]);
+
+  // Refresh on every open: the server clamps acknowledgements, the marker is
+  // kept locally by the hook so it does not disappear after acking.
+  useEffect(() => {
+    if (!open || !versioningEnabled) return;
+    Promise.resolve(fetchPromptUpdates()).catch(() => null);
+  }, [open, versioningEnabled, fetchPromptUpdates]);
+
   useEffect(() => {
     if (open) {
       setTab(promptsEnabled ? 'prompts' : 'skills');
     }
   }, [open, promptsEnabled]);
+
+  // One grouped, dismissible toast per newly seen source version. The quiet
+  // per-row marker stays; only the toast is dismissed by acknowledging.
+  const toastedVersionsRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!versioningEnabled) return;
+    const pending = promptUpdates.filter((update) => {
+      const seen = Math.max(
+        update.notifiedVersion,
+        toastedVersionsRef.current[update.promptId] ?? 0
+      );
+      return update.latestVersion > seen;
+    });
+    if (pending.length === 0) return;
+    for (const update of pending) {
+      toastedVersionsRef.current[update.promptId] = update.latestVersion;
+    }
+    const count = pending.length;
+    toast(t('chat.promptGallery.updatesToast', { count }), {
+      id: 'prompt-gallery-updates',
+      description:
+        count === 1
+          ? `${pending[0].title} → v${pending[0].latestVersion}`
+          : undefined,
+      action: {
+        label: t('chat.promptGallery.updatesToastAction'),
+        onClick: () => setOpen(true)
+      },
+      duration: 8000
+    });
+    for (const update of pending) {
+      ackPromptUpdate(update.promptId, update.latestVersion).catch(() => null);
+    }
+  }, [promptUpdates, versioningEnabled, ackPromptUpdate, t]);
+
+  const updatesByPrompt = new Map(
+    promptUpdates.map((update) => [update.promptId, update])
+  );
+  const hasUpdates = promptUpdates.length > 0;
 
   const handleShare = useCallback(
     async (prompt: IPrompt) => {
@@ -145,13 +215,20 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                 variant="ghost"
                 size="icon"
                 className={cn(
-                  'rounded-full hover:bg-muted hover:dark:bg-muted transition-all duration-200',
+                  'relative rounded-full hover:bg-muted hover:dark:bg-muted transition-all duration-200',
                   open && 'bg-muted/50'
                 )}
                 disabled={disabled}
                 onClick={() => setOpen(true)}
               >
                 <BookMarked className="!size-6" />
+                {hasUpdates ? (
+                  <span
+                    data-testid="prompt-gallery-update-dot"
+                    aria-hidden="true"
+                    className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary"
+                  />
+                ) : null}
               </Button>
             </TooltipTrigger>
             <TooltipContent>
@@ -238,6 +315,31 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                                 <span className="text-sm font-medium">
                                   {prompt.title}
                                 </span>
+                                {updatesByPrompt.get(prompt.id) ? (
+                                  <button
+                                    type="button"
+                                    data-testid={`prompt-update-chip-${prompt.id}`}
+                                    className="self-start rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20"
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const update = updatesByPrompt.get(
+                                        prompt.id
+                                      );
+                                      setDiffTarget({
+                                        prompt,
+                                        versionId:
+                                          update?.latestVersionId ?? null
+                                      });
+                                      setOpen(false);
+                                    }}
+                                  >
+                                    {t('chat.promptGallery.updateAvailable', {
+                                      version: updatesByPrompt.get(prompt.id)
+                                        ?.latestVersion
+                                    })}
+                                  </button>
+                                ) : null}
                                 <span className="line-clamp-2 text-xs text-muted-foreground whitespace-pre-wrap">
                                   {prompt.content}
                                 </span>
@@ -355,6 +457,18 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
         }}
         onClose={() => setCreateOpen(false)}
         onError={() => toast.error(t('common.status.error.default'))}
+      />
+
+      <PromptVersionDiff
+        prompt={diffTarget?.prompt ?? null}
+        open={diffTarget !== null}
+        initialVersionId={diffTarget?.versionId ?? null}
+        onOpenChange={(next) => {
+          if (!next) {
+            setDiffTarget(null);
+            setOpen(true);
+          }
+        }}
       />
     </>
   );

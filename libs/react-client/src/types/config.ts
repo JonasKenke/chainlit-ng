@@ -103,6 +103,8 @@ export interface IChainlitConfig {
   threadSharing?: boolean;
   threadClearAll?: boolean;
   promptGallery?: boolean;
+  /** Prompt history, pinned copies and update notices are available. */
+  promptVersioning?: boolean;
   promptScheduling?: boolean;
   scheduledTaskAfterHooks?: { name: string; default: boolean }[];
   scheduledTaskModels?: string[];
