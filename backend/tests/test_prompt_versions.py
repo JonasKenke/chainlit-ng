@@ -549,10 +549,13 @@ async def test_add_shared_prompt_pins_head_and_is_idempotent(api, data_layer):
     copy = response.json()
     assert copy["sourcePromptId"] == source["id"]
     assert copy["pinnedVersionId"] == head["id"]
+    assert copy["pinnedVersion"] == head["version"]
     assert copy["pinnedContentHash"] == head["contentHash"]
     assert copy["pinnedAt"]
     assert copy["isShared"] is False
     assert copy["version"] == 1
+    listed = await data_layer.list_prompts(READER.id)
+    assert listed[0]["pinnedVersion"] == head["version"]
 
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"]["code"] == "already_added"
@@ -574,6 +577,7 @@ async def test_add_shared_prompt_can_pin_an_older_version(api, data_layer):
     copy = response.json()
     assert copy["content"] == "v1"
     assert copy["pinnedVersionId"] == v1["id"]
+    assert copy["pinnedVersion"] == v1["version"]
     assert copy["pinnedContentHash"] == v1["contentHash"]
 
 
@@ -715,6 +719,7 @@ async def test_sync_happy_path_appends_version(api, data_layer):
     assert synced["content"] == "v2"
     assert synced["version"] == 2
     assert synced["pinnedVersionId"] == target["id"]
+    assert synced["pinnedVersion"] == target["version"]
     assert synced["pinnedContentHash"] == target["contentHash"]
     assert [item["version"] for item in versions.json()] == [2, 1]
 

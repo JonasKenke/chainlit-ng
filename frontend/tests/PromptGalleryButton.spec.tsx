@@ -433,6 +433,16 @@ describe('PromptGalleryButton', () => {
       expect(toastMock).not.toHaveBeenCalled();
     });
 
+    it('shows the pinned source version on the prompt badge', async () => {
+      (useConfig as any).mockReturnValue(versioningConfig);
+      renderComponent([{ ...samplePrompts[0], version: 2, pinnedVersion: 5 }]);
+      fireEvent.click(getGalleryBtn());
+
+      expect(await screen.findByTestId('prompt-versions-p1')).toHaveTextContent(
+        'v5'
+      );
+    });
+
     it('opens version history from the row badge without an update', async () => {
       (useConfig as any).mockReturnValue(versioningConfig);
       renderComponent(samplePrompts);

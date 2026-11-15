@@ -533,6 +533,7 @@ class PromptDict(TypedDict):
     version: NotRequired[int]
     sourcePromptId: NotRequired[Optional[str]]
     pinnedVersionId: NotRequired[Optional[str]]
+    pinnedVersion: NotRequired[Optional[int]]
     pinnedContentHash: NotRequired[Optional[str]]
     pinnedAt: NotRequired[Optional[str]]
     sharedAt: NotRequired[Optional[str]]

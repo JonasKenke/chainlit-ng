@@ -4,7 +4,7 @@ import ssl
 import uuid
 from dataclasses import asdict
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union, cast
 
 import aiofiles
 import aiohttp
@@ -1771,6 +1771,33 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         )
         return cast(PromptDict, result)
 
+    async def _attach_pinned_versions(
+        self,
+        rows: List[Dict[str, Any]],
+        project: Callable[[Dict[str, Any]], PromptDict],
+    ) -> List[PromptDict]:
+        """Add the source version number for pinned rows without an N+1 query."""
+        ids = sorted(
+            {str(row["pinnedVersionId"]) for row in rows if row.get("pinnedVersionId")}
+        )
+        versions: Dict[str, int] = {}
+        if ids:
+            result = await self.execute_sql(
+                'SELECT "id", "version" FROM prompt_versions WHERE "id" IN :ids',
+                {"ids": ids},
+                expanding=["ids"],
+            )
+            if isinstance(result, list):
+                versions = {str(row["id"]): int(row["version"]) for row in result}
+        projected = []
+        for row in rows:
+            item = project(row)
+            pinned = row.get("pinnedVersionId")
+            if pinned and str(pinned) in versions:
+                item["pinnedVersion"] = versions[str(pinned)]
+            projected.append(item)
+        return projected
+
     async def list_prompts(self, user_id: str) -> List[PromptDict]:
         if self.show_logger:
             logger.info(f"SQLAlchemy: list_prompts, user_id={user_id}")
@@ -1781,11 +1808,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         )
         if not isinstance(result, list):
             return []
-        return [
-            self._prompt_from_row(row)
-            for row in result
-            if (row.get("kind") or "prompt") == "prompt"
-        ]
+        rows = [row for row in result if (row.get("kind") or "prompt") == "prompt"]
+        return await self._attach_pinned_versions(rows, self._prompt_from_row)
 
     async def get_prompt(self, prompt_id: str) -> Optional[PromptDict]:
         if self.show_logger:
@@ -2415,7 +2439,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         )
         if not isinstance(result, list):
             raise RuntimeError("Could not read skills from the database")
-        return [self._skill_from_row(row) for row in result]
+        return await self._attach_pinned_versions(result, self._skill_from_row)
 
     async def get_skill(self, skill_id: str, user_id: str) -> Optional[PromptDict]:
         if self.show_logger:

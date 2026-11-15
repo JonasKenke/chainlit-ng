@@ -19,6 +19,8 @@ export interface ISkill {
   /** Shared source this skill is pinned to, if it was copied from a link. */
   sourcePromptId?: string | null;
   pinnedVersionId?: string | null;
+  /** Source version number when this row is a pinned copy. */
+  pinnedVersion?: number | null;
   pinnedContentHash?: string | null;
   pinnedAt?: string | null;
   /** Source version acknowledged for update notices. */

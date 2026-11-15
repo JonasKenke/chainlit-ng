@@ -18,6 +18,8 @@ export interface IPrompt {
   /** Source prompt this copy is pinned to. */
   sourcePromptId?: string | null;
   pinnedVersionId?: string | null;
+  /** Source version number when this row is a pinned copy. */
+  pinnedVersion?: number | null;
   pinnedContentHash?: string | null;
   pinnedAt?: string | null;
 }

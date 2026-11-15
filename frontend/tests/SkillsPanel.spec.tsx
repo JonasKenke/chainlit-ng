@@ -395,6 +395,15 @@ describe('SkillsPanel', () => {
     expect(screen.queryByTestId('skill-update-submit')).toBeNull();
   });
 
+  it('shows the pinned source version on the badge', async () => {
+    state.skills = [{ ...pinned, version: 2, pinnedVersion: 7 }];
+    render(<SkillsPanel />);
+
+    expect(await screen.findByTestId('skill-versions-s3')).toHaveTextContent(
+      'v7'
+    );
+  });
+
   it('opens the update dialog from the quiet update marker', async () => {
     state.skills = [pinned];
     state.skillUpdates = [notice];

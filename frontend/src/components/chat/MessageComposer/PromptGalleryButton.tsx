@@ -384,7 +384,12 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                                       className="inline-flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-primary/50 hover:text-primary"
                                       aria-label={t(
                                         'chat.promptGallery.versions',
-                                        { version: prompt.version ?? 1 }
+                                        {
+                                          version:
+                                            prompt.pinnedVersion ??
+                                            prompt.version ??
+                                            1
+                                        }
                                       )}
                                       onPointerDown={(e) => e.stopPropagation()}
                                       onClick={(e) => {
@@ -396,7 +401,10 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                                         setOpen(false);
                                       }}
                                     >
-                                      v{prompt.version ?? 1}
+                                      v
+                                      {prompt.pinnedVersion ??
+                                        prompt.version ??
+                                        1}
                                       <ChevronDown className="h-2.5 w-2.5" />
                                     </button>
                                   ) : null}

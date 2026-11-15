@@ -370,10 +370,13 @@ async def test_add_shared_skill_creates_a_disabled_pinned_copy(
     assert copy["version"] == 1
     assert copy["sourcePromptId"] == source["id"]
     assert copy["pinnedVersionId"] == head["id"]
+    assert copy["pinnedVersion"] == head["version"]
     assert copy["pinnedContentHash"] == head["contentHash"]
     assert copy["updateSeenVersionId"] == head["id"]
     assert copy["pinnedAt"]
     assert copy["content"] == "Alpha body."
+    listed = await data_layer.list_skills(READER.id)
+    assert listed[0]["pinnedVersion"] == head["version"]
 
     duplicate = await add_copy(api, source["id"])
     assert duplicate.status_code == 409
@@ -392,6 +395,7 @@ async def test_add_shared_skill_can_pin_an_older_version_and_rejects_name_confli
     assert older.status_code == 200
     assert older.json()["content"] == "v1"
     assert older.json()["pinnedVersionId"] == v1["id"]
+    assert older.json()["pinnedVersion"] == v1["version"]
 
     await create_skill(data_layer, user_id=STRANGER.id, title="alpha")
     conflict = await add_copy(api, source["id"], user=STRANGER)
@@ -485,6 +489,7 @@ async def test_update_from_source_forces_review_and_marks_seen(
     assert synced["enabled"] is False
     assert synced["version"] == 2
     assert synced["pinnedVersionId"] == target["id"]
+    assert synced["pinnedVersion"] == target["version"]
     assert synced["pinnedContentHash"] == target["contentHash"]
     assert synced["updateSeenVersionId"] == target["id"]
     assert [version["version"] for version in versions] == [2, 1]

@@ -368,13 +368,13 @@ export function SkillsPanel() {
                           data-testid={`skill-versions-${skill.id}`}
                           className="inline-flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-primary/50 hover:text-primary"
                           aria-label={t('chat.skills.versions', {
-                            version: skill.version ?? 1
+                            version: skill.pinnedVersion ?? skill.version ?? 1
                           })}
                           onClick={() =>
                             setUpdateTarget({ skill, versionId: null })
                           }
                         >
-                          v{skill.version ?? 1}
+                          v{skill.pinnedVersion ?? skill.version ?? 1}
                           <ChevronDown className="h-2.5 w-2.5" />
                         </button>
                         {skill.importedFrom && (

@@ -2369,6 +2369,7 @@ async def add_shared_prompt(
         source
     )
     requested_version = payload.versionId if payload else None
+    target: Optional[Dict[str, Any]] = None
 
     if _supports_prompt_versioning(data_layer):
         versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
@@ -2418,6 +2419,8 @@ async def add_shared_prompt(
         "pinnedContentHash": pinned_content_hash,
         "pinnedAt": now,
     }
+    if target:
+        copy["pinnedVersion"] = target["version"]
     created = await _dl_prompt(data_layer.create_prompt(copy))  # type: ignore[arg-type]
     return JSONResponse(content=created)
 
@@ -2673,6 +2676,7 @@ async def sync_prompt(
     if target.get("kind") == "skill":
         updated["description"] = target.get("description") or ""
     updated["pinnedVersionId"] = target["id"]
+    updated["pinnedVersion"] = target["version"]
     updated["pinnedContentHash"] = target["contentHash"]
     updated["pinnedAt"] = now
     updated["updatedAt"] = now
@@ -3252,6 +3256,7 @@ async def add_shared_skill(
         pinned_at=now,
         update_seen_version_id=target["id"],
     )
+    copy["pinnedVersion"] = target["version"]
     copy["createdAt"] = now
     copy["updatedAt"] = now
     created = await _dl_skill(data_layer.create_skill(copy))
@@ -3376,6 +3381,7 @@ async def update_skill_from_source(
     updated["enabled"] = False
     updated["isShared"] = False
     updated["pinnedVersionId"] = target["id"]
+    updated["pinnedVersion"] = target["version"]
     updated["pinnedContentHash"] = target["contentHash"]
     updated["pinnedAt"] = now
     updated["updateSeenVersionId"] = target["id"]
