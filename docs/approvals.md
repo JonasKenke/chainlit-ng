@@ -118,7 +118,8 @@ reject, expiry, supersede or orphan, `decision.approved` is `False`.
 
 ### Restricting the actions on a card
 
-Both entry points accept `allow_edit` and `allow_request_changes`:
+Both entry points accept `allow_edit`, `allow_request_changes`, and
+`allow_json_edit`:
 
 ```python
 @cl.step(
@@ -127,6 +128,7 @@ Both entry points accept `allow_edit` and `allow_request_changes`:
     approval_schema=PublishArgs,
     allow_edit=False,             # Approve / Reject only
     allow_request_changes=False,  # no comment box either
+    allow_json_edit=False,        # no raw-JSON edit fallback
 )
 async def publish(...):
     ...
@@ -137,6 +139,7 @@ await cl.Approval(
     arguments_schema=PublishArgs,
     allow_edit=False,
     allow_request_changes=False,
+    allow_json_edit=False,
 ).ask()
 ```
 
@@ -144,6 +147,7 @@ await cl.Approval(
 | ----------------------- | ------------------------- | --------------------------- | ------------------------- |
 | `allow_edit`            | Edit when a schema exists | No Edit, even with a schema | Edit when a schema exists |
 | `allow_request_changes` | Request changes offered   | No Request changes          | Request changes offered   |
+| `allow_json_edit`       | JSON fallback disabled    | JSON fallback disabled      | JSON fallback if no form  |
 
 The flags are enforced on the server, not only in the card. A decision that the
 policy forbids is refused with `ApprovalActionNotAllowed` (HTTP 400) and leaves
@@ -255,8 +259,10 @@ class TicketDraft(BaseModel):
     labels: list[str] = []
 ```
 
-Schemas with nested models or unsupported field types fall back to the JSON
-editor. Editing needs the live arguments; a resumed card only has the redacted
+Schemas with nested models or unsupported field types do **not** generate a
+form. By default they also do not offer Edit: the card would have to fall back to
+raw JSON. Set `allow_json_edit=True` to opt into the JSON editor for those
+schemas. Editing needs the live arguments; a resumed card only has the redacted
 preview, so its Edit action is hidden. `allow_edit=False` hides Edit even on a
 live schema-backed card and makes the server refuse the decision.
 

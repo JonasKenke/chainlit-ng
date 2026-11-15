@@ -927,7 +927,7 @@ def test_complex_schema_fields_fall_back_to_the_json_edit_path(schema):
     assert approval_module._edit_fields(schema) is None
 
 
-async def test_json_edit_fallback_payload_never_persists_argument_values(
+async def test_complex_schema_json_edit_is_opt_in(
     layer, mock_chainlit_context, mock_session
 ):
     mock_session.generation = "gen-1"
@@ -944,17 +944,59 @@ async def test_json_edit_fallback_payload_never_persists_argument_values(
         )
         payload = ctx.emitter.send_approval.await_args.args[0]
 
-        # No field form can represent the shape; the client edits raw JSON.
-        assert payload["editAllowed"] is True
+        # No generated form; JSON editing must be explicitly enabled.
+        assert payload["editAllowed"] is False
         assert payload["editFields"] is None
 
         record = layer.steps[step.id]["metadata"]["approval"]
         assert record["argumentsPreview"] == {"rows": [{"token": "[redacted]"}]}
         assert "sk-live-value" not in json.dumps(record)
-        assert "sk-live-value" not in json.dumps(payload["editFields"])
+
+        with pytest.raises(ApprovalActionNotAllowed):
+            await _decide(
+                mock_session,
+                entry,
+                "edited",
+                edited_arguments={"rows": [{"token": "changed"}]},
+            )
 
         await _decide(mock_session, entry, "rejected")
         await task
+
+
+async def test_json_edit_fallback_is_available_when_opted_in(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(
+            step,
+            {"rows": [{"token": "sk-live-value"}]},
+            arguments_schema=_ListDictArgs,
+            allow_json_edit=True,
+        )
+        payload = ctx.emitter.send_approval.await_args.args[0]
+
+        assert payload["editAllowed"] is True
+        assert payload["editFields"] is None
+
+        stored = await _decide(
+            mock_session,
+            entry,
+            "edited",
+            edited_arguments={"rows": [{"token": "changed"}]},
+        )
+        decision = await task
+
+    assert decision.arguments == {"rows": [{"token": "changed"}]}
+    assert stored["editedArgumentsPreview"] == {"rows": [{"token": "[redacted]"}]}
+    assert "sk-live-value" not in json.dumps(stored)
+    assert "changed" not in json.dumps(stored["editedArgumentsPreview"])
 
 
 async def test_pending_record_has_every_field_and_redacts_secrets(

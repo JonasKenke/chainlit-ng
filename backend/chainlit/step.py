@@ -160,6 +160,7 @@ def step(
     approval_content: Optional[str] = None,
     allow_edit: Optional[bool] = None,
     allow_request_changes: Optional[bool] = None,
+    allow_json_edit: Optional[bool] = None,
 ):
     """Step decorator for async and sync functions."""
 
@@ -222,6 +223,7 @@ def step(
                             arguments_schema=approval_schema,
                             allow_edit=allow_edit,
                             allow_request_changes=allow_request_changes,
+                            allow_json_edit=allow_json_edit,
                         ).ask()
                         if not decision.approved:
                             step.is_error = True

@@ -1445,6 +1445,7 @@ class Approval:
         timeout: Optional[float] = None,
         allow_edit: Optional[bool] = None,
         allow_request_changes: Optional[bool] = None,
+        allow_json_edit: Optional[bool] = None,
     ) -> None:
         if arguments_schema is not None and not (
             isinstance(arguments_schema, type)
@@ -1460,6 +1461,7 @@ class Approval:
         for flag_name, flag_value in (
             ("allow_edit", allow_edit),
             ("allow_request_changes", allow_request_changes),
+            ("allow_json_edit", allow_json_edit),
         ):
             if flag_value is not None and not isinstance(flag_value, bool):
                 raise ValueError(f"{flag_name} must be a bool")
@@ -1480,7 +1482,12 @@ class Approval:
         self.arguments_schema = arguments_schema
         # Editing still requires a schema to validate against; the flag can
         # only remove the action, never add one the server cannot check.
-        self.edit_allowed = arguments_schema is not None and allow_edit is not False
+        generated_fields = _edit_fields(arguments_schema)
+        self.edit_allowed = (
+            arguments_schema is not None
+            and allow_edit is not False
+            and (generated_fields is not None or allow_json_edit is True)
+        )
         self.request_changes_allowed = allow_request_changes is not False
         self.redact = tuple(redact)
         self.timeout = timeout
