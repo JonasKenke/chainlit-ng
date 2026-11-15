@@ -79,7 +79,10 @@ describe('Approvals', () => {
     cy.get('[data-testid="approval-card"]')
       .contains('button', 'Approve')
       .click();
-    cy.get('[data-testid="approval-card"]').should('contain', 'Approved');
+    cy.get('[data-testid="approval-card"]')
+      .should('not.contain', 'Approved')
+      .find('button')
+      .should('not.exist');
     cy.contains('executed');
   });
 });

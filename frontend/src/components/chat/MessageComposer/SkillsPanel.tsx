@@ -154,7 +154,7 @@ export function SkillsPanel() {
           </p>
         )}
 
-        <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
+        <div className="max-h-[50vh] overflow-y-auto custom-scrollbar px-1">
           {loading ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {t('chat.skills.loading')}

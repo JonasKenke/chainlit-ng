@@ -24,11 +24,6 @@ vi.mock('@/components/i18n/Translator', () => ({
         'chat.question.readOnly': 'This question can no longer be answered.',
         'chat.question.answeredPrivately': 'Answered privately',
         'chat.question.by': 'By',
-        'chat.question.status.pending': 'Waiting for your answer',
-        'chat.question.status.answered': 'Answered',
-        'chat.question.status.expired': 'Expired',
-        'chat.question.status.superseded': 'Superseded',
-        'chat.question.status.orphaned': 'Unavailable',
         'chat.question.errors.answer': 'Unable to answer question',
         'common.actions.submit': 'Submit'
       })[key] ??
@@ -175,7 +170,7 @@ describe('QuestionCard', () => {
       decidedAt: '2026-11-08T15:00:00Z'
     });
 
-    expect(screen.getByText('Answered')).toBeInTheDocument();
+    expect(screen.queryByText('Answered')).toBeNull();
     expect(screen.getByText('Production')).toBeInTheDocument();
     expect(screen.getByText(/alice@example.com/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
@@ -190,6 +185,39 @@ describe('QuestionCard', () => {
 
     expect(screen.getByText('Answered privately')).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('renders no status label for an expired question', () => {
+    renderCard({ status: 'expired' });
+
+    expect(screen.queryByText('Expired')).toBeNull();
+    expect(
+      screen.getByText('This question can no longer be answered.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
+  });
+
+  it('draws option and free-text focus rings inside the control', () => {
+    renderCard();
+
+    for (const control of [
+      screen.getByRole('radio', { name: /Staging/ }),
+      screen.getByLabelText('Other answer')
+    ]) {
+      expect(control.className).toContain('focus-visible:ring-inset');
+      expect(control.className).toContain('focus-visible:ring-primary');
+      expect(control.className).toContain('focus-visible:ring-2');
+    }
+  });
+
+  it('does not clip the scrollable body horizontally', () => {
+    renderCard();
+
+    const scroll = screen.getByTestId('question-card-scroll');
+    expect(scroll).toHaveClass('overflow-y-auto');
+    expect(scroll.className).not.toContain('overflow-hidden');
+    expect(scroll.className).not.toContain('overflow-x-hidden');
   });
 
   it('renders a pending card as read-only when it is not live', () => {

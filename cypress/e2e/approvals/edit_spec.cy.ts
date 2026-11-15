@@ -54,7 +54,7 @@ describe('Approval edit and reject', () => {
       .click();
 
     cy.wait('@decide').its('response.statusCode').should('eq', 200);
-    cy.get('[data-testid="approval-card"]').should('contain', 'Edited');
+    cy.get('[data-testid="approval-card"]').should('not.contain', 'Edited');
     cy.get('[data-testid="approval-diff"]').should(
       'contain',
       '~ to: "person@example.com" → "other@example.com"'
@@ -99,7 +99,7 @@ describe('Approval edit and reject', () => {
       .click();
 
     cy.wait('@decide').its('response.statusCode').should('eq', 200);
-    cy.get('[data-testid="approval-card"]').should('contain', 'Rejected');
+    cy.get('[data-testid="approval-card"]').should('not.contain', 'Rejected');
     cy.get('[data-testid="approval-card"]').find('button').should('not.exist');
     cy.contains('not executed: reject');
   });

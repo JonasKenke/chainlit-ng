@@ -12,13 +12,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 
-const statusKey: Record<IQuestion['status'], string> = {
-  pending: 'chat.question.status.pending',
-  answered: 'chat.question.status.answered',
-  expired: 'chat.question.status.expired',
-  superseded: 'chat.question.status.superseded',
-  orphaned: 'chat.question.status.orphaned'
-};
+// Controls sit in a scrollable card body, where an outward focus ring is
+// clipped. Draw the ring inside the control instead.
+const focusRing =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary';
 
 const questionErrorMessage = (error: unknown, fallback: string): string => {
   const detail = (error as { payload?: { detail?: unknown } })?.payload?.detail;
@@ -86,13 +83,8 @@ export const QuestionCard = ({ question }: Props) => {
       aria-live="polite"
       className="scroll-mt-4 flex max-h-[min(80vh,calc(100dvh_-_14rem))] flex-col rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
-      <div className="flex shrink-0 items-start justify-between gap-4">
-        <div className="text-sm font-semibold">{t('chat.question.title')}</div>
-        {question.status !== 'pending' ? (
-          <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            {t(statusKey[question.status])}
-          </span>
-        ) : null}
+      <div className="shrink-0 text-sm font-semibold">
+        {t('chat.question.title')}
       </div>
 
       <div
@@ -130,7 +122,7 @@ export const QuestionCard = ({ question }: Props) => {
                             setSelected(option.id);
                             setText('');
                           }}
-                          className="mt-0.5 accent-primary"
+                          className={`mt-0.5 accent-primary ${focusRing}`}
                         />
                         <span className="min-w-0">
                           <bdi dir="auto" className="break-words">
@@ -174,7 +166,7 @@ export const QuestionCard = ({ question }: Props) => {
                   placeholder={t('chat.question.otherPlaceholder', {
                     defaultValue: 'Type your answer...'
                   })}
-                  className="mt-1 min-h-16 w-full rounded-md border border-border bg-background p-2 text-sm"
+                  className={`mt-1 min-h-16 w-full rounded-md border border-border bg-background p-2 text-sm ${focusRing}`}
                   maxLength={2000}
                   value={text}
                   onChange={(event) => {
@@ -187,9 +179,7 @@ export const QuestionCard = ({ question }: Props) => {
           </div>
         ) : (
           <div className="mt-3 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
-            {isPending ? (
-              <span>{t('chat.question.readOnly')}</span>
-            ) : question.status === 'answered' ? (
+            {question.status === 'answered' ? (
               <span>
                 {answer?.redacted ? (
                   <span>{t('chat.question.answeredPrivately')}</span>
@@ -202,7 +192,7 @@ export const QuestionCard = ({ question }: Props) => {
                 ) : null}
               </span>
             ) : (
-              <span>{t(statusKey[question.status])}</span>
+              <span>{t('chat.question.readOnly')}</span>
             )}
             {question.decidedBy ? (
               <span>

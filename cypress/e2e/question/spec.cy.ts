@@ -36,7 +36,7 @@ describe('Question card', () => {
       .click();
 
     cy.wait('@answer').its('response.statusCode').should('eq', 200);
-    cy.get('[data-testid="question-card"]').should('contain', 'Answered');
+    cy.get('[data-testid="question-card"]').should('not.contain', 'Answered');
     cy.get('[data-testid="question-card"]').should('contain', 'Staging');
     cy.contains('answered option=staging label=Staging').should('be.visible');
   });
@@ -58,7 +58,7 @@ describe('Question card', () => {
       .click();
 
     cy.wait('@answer').its('response.statusCode').should('eq', 200);
-    cy.get('[data-testid="question-card"]').should('contain', 'Answered');
+    cy.get('[data-testid="question-card"]').should('not.contain', 'Answered');
     cy.get('[data-testid="question-card"]').should('contain', 'Kestrel');
     cy.contains('answered text=Kestrel').should('be.visible');
   });

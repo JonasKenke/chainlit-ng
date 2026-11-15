@@ -20,16 +20,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { Markdown } from '@/components/Markdown';
 import { Button } from '@/components/ui/button';
 
-const statusLabel: Record<IApproval['status'], string> = {
-  pending: 'Awaiting decision',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  edited: 'Edited',
-  changes_requested: 'Changes requested',
-  expired: 'Expired',
-  superseded: 'Superseded',
-  orphaned: 'Orphaned'
-};
+// Editable controls live in scrollable card bodies, where an outward focus
+// ring is clipped at the left edge. Draw the ring inside the control instead.
+const focusRing =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary';
 
 const displayToolName = (tool: string): string =>
   tool
@@ -480,8 +474,7 @@ export const ApprovalCard = ({ approval }: Props) => {
   const renderField = (field: IApprovalEditField) => {
     const id = `approval-${approval.id}-${field.name}`;
     const value = fieldValues[field.name];
-    const className =
-      'mt-1 w-full rounded border border-border bg-background p-2 text-sm';
+    const className = `mt-1 w-full rounded border border-border bg-background p-2 text-sm ${focusRing}`;
     const ref =
       field.name === firstEditableFieldName ? setFirstFieldElement : undefined;
     if (isServerHeld(field)) {
@@ -504,7 +497,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           id={id}
           aria-label={field.label}
           type="checkbox"
-          className="mt-1 h-4 w-4 rounded border-border"
+          className={`mt-1 h-4 w-4 rounded border-border ${focusRing}`}
           checked={Boolean(value)}
           onChange={(event) =>
             setFieldValues((old) => ({
@@ -599,21 +592,12 @@ export const ApprovalCard = ({ approval }: Props) => {
       aria-label={`Approval for ${approval.tool}`}
       className="scroll-mt-4 rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div data-testid="approval-tool" className="text-sm font-semibold">
-            {displayToolName(approval.tool)}
-          </div>
-          {approval.title ? (
-            <div className="text-sm text-muted-foreground">
-              {approval.title}
-            </div>
-          ) : null}
+      <div>
+        <div data-testid="approval-tool" className="text-sm font-semibold">
+          {displayToolName(approval.tool)}
         </div>
-        {approval.status !== 'pending' ? (
-          <span className="text-xs font-medium uppercase text-muted-foreground">
-            {statusLabel[approval.status]}
-          </span>
+        {approval.title ? (
+          <div className="text-sm text-muted-foreground">{approval.title}</div>
         ) : null}
       </div>
 
@@ -697,7 +681,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           <textarea
             ref={jsonEditorRef}
             aria-label="Edited arguments JSON"
-            className="h-40 w-full rounded border border-border bg-background p-2 font-mono text-xs"
+            className={`h-40 w-full rounded border border-border bg-background p-2 font-mono text-xs ${focusRing}`}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
           />
@@ -734,7 +718,7 @@ export const ApprovalCard = ({ approval }: Props) => {
             id={`approval-comment-${approval.id}`}
             aria-label="Comment"
             maxLength={500}
-            className="mt-1 h-24 w-full rounded border border-border bg-background p-2 text-sm"
+            className={`mt-1 h-24 w-full rounded border border-border bg-background p-2 text-sm ${focusRing}`}
             value={comment}
             onChange={(event) => setComment(event.target.value)}
           />

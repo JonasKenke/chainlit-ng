@@ -22,6 +22,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
+// The fields sit in a scrollable dialog body, so the focus ring must be drawn
+// inside the control or the left/right edges are clipped.
+const fieldFocus =
+  'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary focus-visible:ring-offset-0';
+
 interface Props {
   open: boolean;
   skill?: ISkill;
@@ -103,6 +108,7 @@ export function SkillEditorDialog({ open, skill, onSave, onClose }: Props) {
             <Label htmlFor="skill-name">{t('chat.skills.editor.name')}</Label>
             <Input
               id="skill-name"
+              className={fieldFocus}
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="release-notes"
@@ -126,6 +132,7 @@ export function SkillEditorDialog({ open, skill, onSave, onClose }: Props) {
             </Label>
             <Input
               id="skill-description"
+              className={fieldFocus}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               aria-invalid={!!errors.description}
@@ -156,7 +163,7 @@ export function SkillEditorDialog({ open, skill, onSave, onClose }: Props) {
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
                 rows={12}
-                className="resize-none font-mono text-xs"
+                className={`resize-none font-mono text-xs ${fieldFocus}`}
                 aria-invalid={!!errors.content}
                 aria-describedby={
                   errors.content ? 'skill-content-error' : undefined

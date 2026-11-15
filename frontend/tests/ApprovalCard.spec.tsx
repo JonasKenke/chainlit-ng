@@ -359,6 +359,72 @@ describe('ApprovalCard', () => {
     ).toBeInTheDocument();
   });
 
+  it('draws editable field focus rings inside the control', () => {
+    renderCard({ editAllowed: true, editFields, arguments: { to: 'a@b.c' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    for (const label of ['To', 'Count', 'Labels', 'Urgent']) {
+      const control = screen.getByLabelText(label);
+      expect(control.className).toContain('focus-visible:ring-inset');
+      expect(control.className).toContain('focus-visible:ring-primary');
+      expect(control.className).toContain('focus-visible:ring-2');
+    }
+  });
+
+  it('draws JSON editor and comment focus rings inside the control', () => {
+    renderCard({ editAllowed: true, arguments: { to: 'a@b.c' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText('Edited arguments JSON').className).toContain(
+      'focus-visible:ring-inset'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Request changes' }));
+    const comment = screen.getByLabelText('Comment');
+    expect(comment.className).toContain('focus-visible:ring-inset');
+    expect(comment.className).toContain('focus-visible:ring-primary');
+  });
+
+  it('does not clip the edit form horizontally', () => {
+    renderCard({ editAllowed: true, editFields, arguments: { to: 'a@b.c' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const form = screen.getByTestId('approval-edit-form');
+    expect(form.querySelector('.overflow-hidden')).toBeNull();
+    expect(form.querySelector('.overflow-x-hidden')).toBeNull();
+    expect(form.querySelector('.overflow-y-auto')).not.toBeNull();
+  });
+
+  it('renders no status label for any terminal state', () => {
+    const labels = [
+      'Approved',
+      'Rejected',
+      'Edited',
+      'Changes requested',
+      'Expired',
+      'Superseded',
+      'Orphaned'
+    ];
+    for (const status of [
+      'approved',
+      'rejected',
+      'edited',
+      'changes_requested',
+      'expired',
+      'superseded',
+      'orphaned'
+    ] as const) {
+      const { unmount } = renderCard({ status });
+      for (const label of labels) {
+        expect(screen.queryByText(label)).toBeNull();
+      }
+      unmount();
+    }
+  });
+
   it('renders embedded newlines in diff values as real line breaks', () => {
     renderCard({
       status: 'edited',
@@ -637,7 +703,7 @@ describe('ApprovalCard', () => {
       decidedAt: '2026-01-01T00:00:00Z'
     });
 
-    expect(screen.getByText('Changes requested')).toBeInTheDocument();
+    expect(screen.queryByText('Changes requested')).toBeNull();
     expect(screen.getByTestId('approval-comment')).toHaveTextContent(
       'split the ticket'
     );
@@ -652,7 +718,7 @@ describe('ApprovalCard', () => {
       decidedAt: '2026-01-01T00:00:00Z'
     });
 
-    expect(screen.getByText('Rejected')).toBeInTheDocument();
+    expect(screen.queryByText('Rejected')).toBeNull();
     expect(screen.getByTestId('approval-comment')).toHaveTextContent('not now');
   });
 
@@ -701,7 +767,7 @@ describe('ApprovalCard', () => {
       </ChainlitContext.Provider>
     );
 
-    expect(screen.getByText('Edited')).toBeInTheDocument();
+    expect(screen.queryByText('Edited')).toBeNull();
     expect(
       screen.getByText(
         'Requested content; the approved changes are in the diff.'
@@ -767,7 +833,7 @@ describe('ApprovalCard', () => {
     expect(
       screen.queryByRole('button', { name: 'Request changes' })
     ).toBeNull();
-    expect(screen.getByText('Approved')).toBeInTheDocument();
+    expect(screen.queryByText('Approved')).toBeNull();
   });
 
   it('focuses the first editable field, skipping server-held fields', () => {
