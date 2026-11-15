@@ -257,6 +257,21 @@ describe('PromptVersionDiff', () => {
     expect(screen.getByTestId('prompt-diff-update')).toBeDisabled();
   });
 
+  it('labels an older target as a downgrade', async () => {
+    renderDialog({
+      prompt: { ...prompt, contentHash: 'sha256:source-new-head' }
+    });
+
+    fireEvent.pointerDown(await screen.findByTestId('prompt-diff-version'));
+    fireEvent.click(await screen.findByTestId('prompt-diff-version-option-v2'));
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'chat.promptGallery.diff.downgrade'
+      })
+    ).toBeInTheDocument();
+  });
+
   it('defaults a pinned prompt that is current to its current version', async () => {
     renderDialog({
       prompt: { ...prompt, contentHash: 'sha256:source-new-head' }

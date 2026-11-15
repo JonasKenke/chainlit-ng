@@ -250,6 +250,19 @@ describe('SkillUpdateDialog', () => {
     expect(screen.queryByTestId('skill-update-submit')).toBeNull();
   });
 
+  it('labels an older target as a downgrade', async () => {
+    renderDialog({ skill: { ...skill, contentHash: 'sha256:new' } });
+
+    fireEvent.pointerDown(await screen.findByTestId('skill-update-version'));
+    fireEvent.click(
+      await screen.findByTestId('skill-update-version-option-sv1')
+    );
+
+    expect(await screen.findByTestId('skill-update-submit')).toHaveTextContent(
+      'chat.skills.update.downgrade'
+    );
+  });
+
   it('defaults a current pinned skill to its current version', async () => {
     renderDialog({ skill: { ...skill, contentHash: 'sha256:new' } });
 

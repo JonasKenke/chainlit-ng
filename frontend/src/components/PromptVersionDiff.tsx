@@ -194,10 +194,17 @@ export function PromptVersionDiff({
         ?.id,
     [versions, prompt?.contentHash]
   );
+  const currentVersion =
+    versions.find((version) => version.id === currentId) ?? null;
   const targetIsCurrent = Boolean(
     targetVersion &&
     prompt?.contentHash &&
     targetVersion.contentHash === prompt.contentHash
+  );
+  const isDowngrade = Boolean(
+    targetVersion &&
+    currentVersion &&
+    targetVersion.version < currentVersion.version
   );
 
   const handleUpdate = async (confirm: boolean) => {
@@ -210,7 +217,13 @@ export function PromptVersionDiff({
         confirm,
         expectedLocalHash: prompt?.contentHash ?? undefined
       });
-      toast.success(t('chat.promptGallery.diff.updated'));
+      toast.success(
+        isDowngrade
+          ? t('chat.promptGallery.diff.downgraded', {
+              version: targetVersion?.version
+            })
+          : t('chat.promptGallery.diff.updated')
+      );
       onUpdated?.(updated);
       onOpenChange(false);
     } catch (error) {
@@ -452,9 +465,12 @@ export function PromptVersionDiff({
                   data-testid="prompt-diff-update"
                 >
                   {targetVersion
-                    ? t('chat.promptGallery.diff.update', {
-                        version: targetVersion.version
-                      })
+                    ? t(
+                        isDowngrade
+                          ? 'chat.promptGallery.diff.downgrade'
+                          : 'chat.promptGallery.diff.update',
+                        { version: targetVersion.version }
+                      )
                     : t('chat.promptGallery.diff.updateFallback')}
                 </Button>
               </div>

@@ -278,7 +278,9 @@
         "loadError": "Could not load the version comparison.",
         "currentVersion": "This is your current version.",
         "noVersions": "No other versions are available.",
-        "versionUnavailable": "That version is no longer available. Pick another one."
+        "versionUnavailable": "That version is no longer available. Pick another one.",
+        "downgrade": "Downgrade to v{{version}}",
+        "downgraded": "Prompt downgraded to v{{version}}"
       },
       "updatesToast_one": "{{count}} saved prompt has a newer shared version",
       "updatesToast_other": "{{count}} saved prompts have a newer shared version"
@@ -478,7 +480,9 @@
         "historyDescription": "Choose a version to see what changed.",
         "currentVersion": "This is your current version.",
         "noVersions": "No other versions are available.",
-        "versionUnavailable": "That version is no longer available. Pick another one."
+        "versionUnavailable": "That version is no longer available. Pick another one.",
+        "downgrade": "Downgrade to v{{version}}",
+        "downgraded": "Skill downgraded to v{{version}}"
       },
       "empty": {
         "title": "No skills yet",

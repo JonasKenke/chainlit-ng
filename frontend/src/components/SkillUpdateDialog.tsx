@@ -203,6 +203,13 @@ export function SkillUpdateDialog({
         ?.id,
     [versions, skill?.contentHash]
   );
+  const currentVersion =
+    versions.find((version) => version.id === currentId) ?? null;
+  const isDowngrade = Boolean(
+    targetVersion &&
+    currentVersion &&
+    targetVersion.version < currentVersion.version
+  );
 
   const handleUpdate = async (confirm: boolean) => {
     if (!skillId) return;
@@ -214,7 +221,13 @@ export function SkillUpdateDialog({
         confirm,
         expectedLocalHash: skill?.contentHash ?? undefined
       });
-      toast.success(t('chat.skills.update.updated'));
+      toast.success(
+        isDowngrade
+          ? t('chat.skills.update.downgraded', {
+              version: targetVersion?.version
+            })
+          : t('chat.skills.update.updated')
+      );
       onUpdated?.(updated);
       onOpenChange(false);
     } catch (error) {
@@ -462,9 +475,12 @@ export function SkillUpdateDialog({
                   data-testid="skill-update-submit"
                 >
                   {targetVersion
-                    ? t('chat.skills.update.update', {
-                        version: targetVersion.version
-                      })
+                    ? t(
+                        isDowngrade
+                          ? 'chat.skills.update.downgrade'
+                          : 'chat.skills.update.update',
+                        { version: targetVersion.version }
+                      )
                     : t('chat.skills.update.updateFallback')}
                 </Button>
               </div>
