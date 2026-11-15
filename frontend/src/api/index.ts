@@ -20,6 +20,8 @@ const on401 = () => {
 };
 
 const onError = (error: ClientError) => {
+  // Version panels surface these inline and recover by reloading the picker.
+  if (error.status === 404 && error.path?.includes('/versions')) return;
   toast.error(error.toString());
 };
 

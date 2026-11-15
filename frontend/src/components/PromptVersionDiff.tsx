@@ -88,7 +88,11 @@ export function PromptVersionDiff({
       setDiff(computeTextDiff(prompt?.content ?? '', target.content));
     } catch (error) {
       const code = promptErrorCode(error);
-      if (
+      const status = (error as { status?: number })?.status;
+      if (status === 404) {
+        setDiff(null);
+        setActionError(t('chat.promptGallery.diff.versionUnavailable'));
+      } else if (
         isPinned &&
         (code === 'pinned_unavailable' ||
           code === 'not_pinned' ||
@@ -138,9 +142,11 @@ export function PromptVersionDiff({
       setTargetId(preferred ?? null);
     } catch (error) {
       const code = promptErrorCode(error);
+      const status = (error as { status?: number })?.status;
       if (
         isPinned &&
-        (code === 'pinned_unavailable' ||
+        (status === 404 ||
+          code === 'pinned_unavailable' ||
           code === 'not_pinned' ||
           code === 'source_unavailable')
       ) {

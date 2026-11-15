@@ -277,7 +277,8 @@
         "updateError": "Could not update this prompt",
         "loadError": "Could not load the version comparison.",
         "currentVersion": "This is your current version.",
-        "noVersions": "No other versions are available."
+        "noVersions": "No other versions are available.",
+        "versionUnavailable": "That version is no longer available. Pick another one."
       },
       "updatesToast_one": "{{count}} saved prompt has a newer shared version",
       "updatesToast_other": "{{count}} saved prompts have a newer shared version"
@@ -476,7 +477,8 @@
         "historyTitle": "Version history",
         "historyDescription": "Choose a version to see what changed.",
         "currentVersion": "This is your current version.",
-        "noVersions": "No other versions are available."
+        "noVersions": "No other versions are available.",
+        "versionUnavailable": "That version is no longer available. Pick another one."
       },
       "empty": {
         "title": "No skills yet",

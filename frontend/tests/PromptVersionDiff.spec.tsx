@@ -309,6 +309,19 @@ describe('PromptVersionDiff', () => {
     expect(screen.queryByTestId('prompt-diff-update')).toBeNull();
   });
 
+  it('explains when a selected prompt version disappeared', async () => {
+    mocks.fetchPromptVersion.mockRejectedValue({
+      status: 404,
+      detail: 'Prompt version not found'
+    });
+
+    renderDialog();
+
+    expect(
+      await screen.findByText('chat.promptGallery.diff.versionUnavailable')
+    ).toBeInTheDocument();
+  });
+
   it('keeps a single prompt version visible and explains it is current', async () => {
     const localPrompt: IPrompt = {
       ...prompt,

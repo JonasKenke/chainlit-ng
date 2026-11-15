@@ -70,12 +70,20 @@ export class ClientError extends Error {
   status: number;
   detail?: string;
   payload?: any;
+  path?: string;
 
-  constructor(message: string, status: number, detail?: string, payload?: any) {
+  constructor(
+    message: string,
+    status: number,
+    detail?: string,
+    payload?: any,
+    path?: string
+  ) {
     super(message);
     this.status = status;
     this.detail = detail;
     this.payload = payload;
+    this.path = path;
   }
 
   toString() {
@@ -208,7 +216,8 @@ export class APIBase {
           res.statusText,
           res.status,
           payload?.detail,
-          payload
+          payload,
+          path
         );
       }
 

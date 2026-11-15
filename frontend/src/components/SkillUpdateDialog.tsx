@@ -102,7 +102,11 @@ export function SkillUpdateDialog({
         ? initialVersionId
         : (fallback ?? current?.id ?? latest?.id);
       setTargetId(preferred ?? null);
-    } catch {
+    } catch (error) {
+      const status = (error as { status?: number })?.status;
+      if (isPinned && status === 404) {
+        setSourceUnavailable(true);
+      }
       setVersions([]);
       setLoadError(true);
     } finally {
@@ -142,7 +146,10 @@ export function SkillUpdateDialog({
       .catch((error) => {
         if (cancelled) return;
         const code = promptErrorCode(error);
-        if (
+        const status = (error as { status?: number })?.status;
+        if (status === 404) {
+          setActionError(t('chat.skills.update.versionUnavailable'));
+        } else if (
           isPinned &&
           (code === 'source_unavailable' || code === 'not_pinned')
         ) {

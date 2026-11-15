@@ -201,6 +201,19 @@ describe('SkillUpdateDialog', () => {
     expect(screen.queryByTestId('skill-update-submit')).toBeNull();
   });
 
+  it('explains when a selected skill version disappeared', async () => {
+    fetchSkillVersionMock.mockRejectedValue({
+      status: 404,
+      detail: 'Skill version not found'
+    });
+
+    renderDialog();
+
+    expect(
+      await screen.findByText('chat.skills.update.versionUnavailable')
+    ).toBeInTheDocument();
+  });
+
   it('keeps the only skill version visible and explains it is current', async () => {
     const localSkill: ISkill = {
       ...skill,
