@@ -52,6 +52,7 @@ export function SkillUpdateDialog({
   const {
     fetchSkillVersions,
     fetchSkillVersion,
+    fetchSkillUpdates,
     updateSkillFromSource,
     detachSkill
   } = useSkills();
@@ -221,6 +222,9 @@ export function SkillUpdateDialog({
         confirm,
         expectedLocalHash: skill?.contentHash ?? undefined
       });
+      if (isDowngrade) {
+        fetchSkillUpdates().catch(() => null);
+      }
       toast.success(
         isDowngrade
           ? t('chat.skills.update.downgraded', {

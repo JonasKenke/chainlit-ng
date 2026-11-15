@@ -46,8 +46,13 @@ export function PromptVersionDiff({
   onUpdated
 }: PromptVersionDiffProps) {
   const { t } = useTranslation();
-  const { fetchPromptVersions, fetchPromptVersion, syncPrompt, detachPrompt } =
-    usePromptGallery();
+  const {
+    fetchPromptVersions,
+    fetchPromptVersion,
+    fetchPromptUpdates,
+    syncPrompt,
+    detachPrompt
+  } = usePromptGallery();
 
   const [versions, setVersions] = useState<IPromptVersionSummary[]>([]);
   const [targetId, setTargetId] = useState<string | null>(null);
@@ -217,6 +222,9 @@ export function PromptVersionDiff({
         confirm,
         expectedLocalHash: prompt?.contentHash ?? undefined
       });
+      if (isDowngrade) {
+        fetchPromptUpdates().catch(() => null);
+      }
       toast.success(
         isDowngrade
           ? t('chat.promptGallery.diff.downgraded', {

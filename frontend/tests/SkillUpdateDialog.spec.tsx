@@ -10,6 +10,7 @@ import { SkillUpdateDialog } from '@/components/SkillUpdateDialog';
 
 const fetchSkillVersionsMock = vi.hoisted(() => vi.fn());
 const fetchSkillVersionMock = vi.hoisted(() => vi.fn());
+const fetchSkillUpdatesMock = vi.hoisted(() => vi.fn());
 const updateSkillFromSourceMock = vi.hoisted(() => vi.fn());
 const detachSkillMock = vi.hoisted(() => vi.fn());
 const onUpdatedMock = vi.hoisted(() => vi.fn());
@@ -38,6 +39,7 @@ vi.mock('@chainlit-ng/react-client', () => ({
   useSkills: () => ({
     fetchSkillVersions: fetchSkillVersionsMock,
     fetchSkillVersion: fetchSkillVersionMock,
+    fetchSkillUpdates: fetchSkillUpdatesMock,
     updateSkillFromSource: updateSkillFromSourceMock,
     detachSkill: detachSkillMock
   })
@@ -117,6 +119,7 @@ describe('SkillUpdateDialog', () => {
           ? targetVersion
           : { ...versions[1], content: '# Skill\nold line' }
     );
+    fetchSkillUpdatesMock.mockResolvedValue([]);
     updateSkillFromSourceMock.mockResolvedValue({
       ...skill,
       enabled: false,
@@ -261,6 +264,19 @@ describe('SkillUpdateDialog', () => {
     expect(await screen.findByTestId('skill-update-submit')).toHaveTextContent(
       'chat.skills.update.downgrade'
     );
+  });
+
+  it('refreshes update notices after downgrading', async () => {
+    renderDialog({ skill: { ...skill, contentHash: 'sha256:new' } });
+
+    fireEvent.pointerDown(await screen.findByTestId('skill-update-version'));
+    fireEvent.click(
+      await screen.findByTestId('skill-update-version-option-sv1')
+    );
+    fireEvent.click(await screen.findByTestId('skill-update-submit'));
+
+    await waitFor(() => expect(updateSkillFromSourceMock).toHaveBeenCalled());
+    await waitFor(() => expect(fetchSkillUpdatesMock).toHaveBeenCalledTimes(1));
   });
 
   it('defaults a current pinned skill to its current version', async () => {

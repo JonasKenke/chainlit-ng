@@ -8,6 +8,7 @@ import { PromptVersionDiff } from '@/components/PromptVersionDiff';
 const mocks = vi.hoisted(() => ({
   fetchPromptVersions: vi.fn(),
   fetchPromptVersion: vi.fn(),
+  fetchPromptUpdates: vi.fn(),
   syncPrompt: vi.fn(),
   detachPrompt: vi.fn(),
   toast: Object.assign(vi.fn(), {
@@ -26,6 +27,7 @@ vi.mock('@chainlit-ng/react-client', () => ({
   usePromptGallery: () => ({
     fetchPromptVersions: mocks.fetchPromptVersions,
     fetchPromptVersion: mocks.fetchPromptVersion,
+    fetchPromptUpdates: mocks.fetchPromptUpdates,
     syncPrompt: mocks.syncPrompt,
     detachPrompt: mocks.detachPrompt
   }),
@@ -118,6 +120,7 @@ describe('PromptVersionDiff', () => {
         content: versionContent(versionId)
       })
     );
+    mocks.fetchPromptUpdates.mockResolvedValue([]);
     mocks.syncPrompt.mockResolvedValue({
       ...prompt,
       content: 'hello\nnew line'
@@ -270,6 +273,21 @@ describe('PromptVersionDiff', () => {
         name: 'chat.promptGallery.diff.downgrade'
       })
     ).toBeInTheDocument();
+  });
+
+  it('refreshes update notices after downgrading', async () => {
+    renderDialog({
+      prompt: { ...prompt, contentHash: 'sha256:source-new-head' }
+    });
+
+    fireEvent.pointerDown(await screen.findByTestId('prompt-diff-version'));
+    fireEvent.click(await screen.findByTestId('prompt-diff-version-option-v2'));
+    fireEvent.click(screen.getByTestId('prompt-diff-update'));
+
+    await waitFor(() => expect(mocks.syncPrompt).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mocks.fetchPromptUpdates).toHaveBeenCalledTimes(1)
+    );
   });
 
   it('defaults a pinned prompt that is current to its current version', async () => {
