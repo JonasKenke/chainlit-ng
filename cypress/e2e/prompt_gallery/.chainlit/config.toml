@@ -53,6 +53,9 @@ favorites = false
 # Enable the prompt gallery (store, edit, share reusable prompts)
 prompt_gallery = true
 
+# Enable per-user skills for the versioned sharing spec.
+skills = true
+
 [features.slack]
 # Add emoji reaction when message is received (requires reactions:write OAuth scope)
 reaction_on_message_received = false

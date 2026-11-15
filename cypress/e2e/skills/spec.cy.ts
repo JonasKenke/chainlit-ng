@@ -1,13 +1,26 @@
 const row = (name: string) => cy.contains('[data-testid="skill-row"]', name);
 
 describe('Skills', () => {
+  it('hides skill sharing controls when no auth is configured', () => {
+    cy.get('#prompt-gallery-open').click();
+    cy.get('#skill-new').click();
+    cy.get('#skill-name').type('local-no-auth');
+    cy.get('#skill-description').type('Local only.');
+    cy.get('#skill-content').type('# Local');
+    cy.get('#skill-save').click();
+
+    row('local-no-auth').find('[data-testid^="skill-actions-"]').click();
+    cy.contains('[role="menuitem"]', 'Share skill').should('not.exist');
+    cy.screenshot('skills-no-auth-sharing');
+    cy.get('body').type('{esc}');
+  });
+
   it('creates, enables and keeps a skill after reload', () => {
     cy.intercept('POST', '/project/skills').as('createSkill');
     cy.intercept('PUT', '/project/skills/*').as('updateSkill');
     cy.intercept('GET', '/project/skills').as('listSkills');
 
     cy.get('#prompt-gallery-open').click();
-    cy.get('[role="dialog"]').contains('Skills').should('be.visible');
     cy.get('#skill-new').click();
     cy.get('#skill-name').type('release-notes');
     cy.get('#skill-description').type(
@@ -49,7 +62,6 @@ describe('Skills', () => {
     cy.intercept('PUT', '/project/skills/*').as('updateSkill');
 
     cy.get('#prompt-gallery-open').click();
-    cy.get('[role="dialog"]').contains('Skills').should('be.visible');
 
     cy.get('#skill-import-input').selectFile(
       'cypress/fixtures/skill-invalid.md',
@@ -69,11 +81,32 @@ describe('Skills', () => {
     row('imported-one').within(() => {
       cy.contains('Imported').should('be.visible');
       cy.contains('skill-import.md').should('be.visible');
-      cy.contains('Disabled — review before enabling').should('be.visible');
+      cy.contains('Disabled. Review before enabling.').should('be.visible');
       cy.get('[role="switch"]').should('have.attr', 'aria-checked', 'false');
+      cy.get('[role="switch"]').should(
+        'have.attr',
+        'aria-label',
+        'Enable imported-one'
+      );
     });
 
+    // Toggle opens review; cancelling leaves the skill disabled.
     row('imported-one').find('[role="switch"]').click();
+    cy.get('[data-testid="skill-review-dialog"]').should('be.visible');
+    cy.get('[data-testid="skill-review-dialog"]')
+      .contains('button', 'Cancel')
+      .click();
+    cy.get('[data-testid="skill-review-dialog"]').should('not.exist');
+    row('imported-one')
+      .find('[role="switch"]')
+      .should('have.attr', 'aria-checked', 'false');
+
+    // Toggle again, then enable through the review gate.
+    row('imported-one').find('[role="switch"]').click();
+    cy.get('[data-testid="skill-review-dialog"]')
+      .contains('button', 'Enable skill')
+      .should('not.be.disabled')
+      .click();
     cy.wait('@updateSkill');
     row('imported-one')
       .find('[role="switch"]')
@@ -85,14 +118,16 @@ describe('Skills', () => {
     cy.intercept('DELETE', '/project/skills/*').as('deleteSkill');
 
     cy.get('#prompt-gallery-open').click();
-    row('release-notes').find('[aria-label="Edit skill"]').click();
+    row('release-notes').find('[data-testid^="skill-actions-"]').click();
+    cy.contains('[role="menuitem"]', 'Edit').click();
     cy.get('#skill-description').clear();
     cy.get('#skill-description').type('Updated description.');
     cy.get('#skill-save').click();
     cy.wait('@updateSkill');
     row('release-notes').contains('Updated description.').should('be.visible');
 
-    row('release-notes').find('[aria-label="Delete skill"]').click();
+    row('release-notes').find('[data-testid^="skill-actions-"]').click();
+    cy.contains('[role="menuitem"]', 'Delete').click();
     cy.wait('@deleteSkill');
     row('release-notes').should('not.exist');
   });

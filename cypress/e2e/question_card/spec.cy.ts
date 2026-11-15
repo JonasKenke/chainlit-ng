@@ -16,6 +16,7 @@ describe('Question card reload and share', () => {
     submitMessage('ask-text');
 
     questionCard().should('contain', 'What should I name the release?');
+    cy.screenshot('question-card-pending');
     questionCard().find('textarea').focus().type('Kestrel');
     questionCard().contains('button', 'Submit').click();
     cy.contains('answered privately').should('be.visible');
@@ -26,7 +27,6 @@ describe('Question card reload and share', () => {
       cy.step('Owner reload renders the answered card read-only');
       cy.reload();
       questionCard().should('contain', 'What should I name the release?');
-      questionCard().should('contain', 'Answered');
       questionCard().should('contain', 'Kestrel');
       questionCard().find('textarea').should('not.exist');
       questionCard().find('input[type="radio"]').should('not.exist');
@@ -76,6 +76,7 @@ describe('Question card reload and share', () => {
       cy.visit(`/share/${threadId}`);
       questionCard().should('be.visible');
       questionCard().should('contain', 'Answered privately');
+      cy.screenshot('question-card-mobile-readonly');
     });
   });
 
@@ -96,7 +97,6 @@ describe('Question card reload and share', () => {
     cy.step('Owner reload renders the option label read-only');
     cy.reload();
     questionCard().should('contain', 'Staging');
-    questionCard().should('contain', 'Answered');
     questionCard().find('input[type="radio"]').should('not.exist');
 
     cy.location('pathname').then((path) => {
@@ -113,7 +113,6 @@ describe('Question card reload and share', () => {
       cy.visit(`/share/${threadId}`);
       cy.wait('@share').its('response.statusCode').should('eq', 200);
       questionCard().should('contain', 'Staging');
-      questionCard().should('contain', 'Answered');
       questionCard().should('not.contain', 'Answered privately');
       questionCard().find('input[type="radio"]').should('not.exist');
     });

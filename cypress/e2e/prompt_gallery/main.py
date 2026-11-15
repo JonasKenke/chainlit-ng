@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 import chainlit as cl
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 
+os.environ.setdefault("CHAINLIT_AUTH_SECRET", "prompt-gallery-cypress-secret")
+
 # Keep setup and the data layer on the same SQLite database.  An in-memory
 # database would be lost when the setup engine is disposed.
 _DB_PATH = os.path.join(os.path.dirname(__file__), "test_e2e.db")
@@ -106,6 +108,13 @@ asyncio.run(_ensure_tables())
 @cl.data_layer
 def get_data_layer():
     return SQLAlchemyDataLayer(conninfo=_DB_URI)
+
+
+@cl.password_auth_callback
+async def authenticate(username: str, password: str):
+    if password == username and username in {"alice", "bob"}:
+        return cl.User(identifier=username, display_name=username.title())
+    return None
 
 
 @cl.on_message

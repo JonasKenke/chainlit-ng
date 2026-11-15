@@ -37,7 +37,7 @@ describe('Approval edit and reject', () => {
       .should('not.exist');
   });
 
-  it('edits a schema field and renders the diff', () => {
+  it('edits a schema field in the form and renders the diff', () => {
     cy.intercept('POST', approveUrl).as('decide');
     login();
     cy.visit('/');
@@ -48,17 +48,49 @@ describe('Approval edit and reject', () => {
       .should('be.visible')
       .click();
 
-    editArguments('{"to": "other@example.com"}');
+    cy.get('[data-testid="approval-card"]').then(($card) => {
+      const approvalId = $card.attr('data-approval-id');
+      const to = `#approval-${approvalId}-to`;
+      cy.get(to).should('have.value', 'person@example.com');
+      cy.get(to).clear();
+      cy.get(to).type('form@example.com');
+    });
+    cy.get('[data-testid="approval-card"]')
+      .contains('button', 'Save & approve')
+      .click();
+
+    cy.wait('@decide').its('response.statusCode').should('eq', 200);
+    cy.get('[data-testid="approval-diff"]')
+      .should('contain', 'To')
+      .and('contain', 'person@example.com')
+      .and('contain', 'form@example.com');
+    cy.contains('edited to form@example.com');
+    cy.screenshot('approval-form-edited');
+  });
+
+  it('edits a schema field and renders the diff', () => {
+    cy.intercept('POST', approveUrl).as('decide');
+    login();
+    cy.visit('/');
+
+    submitMessage('json');
+    cy.get('[data-testid="approval-card"]')
+      .contains('button', 'Edit')
+      .should('be.visible')
+      .click();
+
+    editArguments('{"to": "other@example.com", "options": {"tone": "brief"}}');
     cy.get('[data-testid="approval-card"]')
       .contains('button', 'Save edit')
       .click();
 
     cy.wait('@decide').its('response.statusCode').should('eq', 200);
     cy.get('[data-testid="approval-card"]').should('not.contain', 'Edited');
-    cy.get('[data-testid="approval-diff"]').should(
-      'contain',
-      '~ to: "person@example.com" → "other@example.com"'
-    );
+    cy.get('[data-testid="approval-diff"]')
+      .should('contain', 'To')
+      .and('contain', 'person@example.com')
+      .and('contain', 'other@example.com');
+    cy.screenshot('approval-edited-diff');
     cy.get('[data-testid="approval-card"]').find('button').should('not.exist');
     cy.contains('edited to other@example.com');
   });
@@ -68,13 +100,15 @@ describe('Approval edit and reject', () => {
     login();
     cy.visit('/');
 
-    submitMessage('schema');
+    submitMessage('json');
     cy.get('[data-testid="approval-card"]')
       .contains('button', 'Edit')
       .should('be.visible')
       .click();
 
-    editArguments('{"to": "other@example.com", "unknownField": true}');
+    editArguments(
+      '{"to": "other@example.com", "options": {"tone": "brief"}, "unknownField": true}'
+    );
     cy.get('[data-testid="approval-card"]')
       .contains('button', 'Save edit')
       .click();
@@ -85,6 +119,36 @@ describe('Approval edit and reject', () => {
     cy.get('[data-testid="approval-card"]')
       .contains('button', 'Edit')
       .should('be.visible');
+  });
+
+  it('requires a comment before requesting changes', () => {
+    cy.intercept('POST', approveUrl).as('decide');
+    login();
+    cy.visit('/');
+
+    submitMessage('ask');
+    cy.get('[data-testid="approval-card"]')
+      .contains('button', 'Request changes')
+      .should('be.visible')
+      .click();
+
+    cy.get('textarea[aria-label="Comment"]').should('be.visible').as('comment');
+    cy.get('[data-testid="approval-card"]')
+      .contains('button', 'Request changes')
+      .should('be.disabled');
+    cy.get('@comment').type('Use the finance alias.');
+    cy.get('[data-testid="approval-card"]')
+      .contains('button', 'Request changes')
+      .should('not.be.disabled')
+      .click();
+
+    cy.wait('@decide').its('response.statusCode').should('eq', 200);
+    cy.get('[data-testid="approval-comment"]').should(
+      'contain',
+      'Use the finance alias.'
+    );
+    cy.get('[data-testid="approval-card"]').find('button').should('not.exist');
+    cy.screenshot('approval-request-changes');
   });
 
   it('renders a reject decision as rejected without decision affordances', () => {

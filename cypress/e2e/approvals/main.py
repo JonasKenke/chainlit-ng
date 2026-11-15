@@ -19,6 +19,15 @@ class EmailArguments(BaseModel):
     to: str
 
 
+class JsonArguments(BaseModel):
+    """Nested values have no generated form, so Edit uses the JSON editor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    to: str
+    options: dict[str, str]
+
+
 @cl.header_auth_callback
 async def header_auth(headers):
     if headers.get("test-header"):
@@ -44,16 +53,22 @@ async def test_endpoints(request: Request, call_next):
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    if message.content not in {"ask", "schema"}:
+    if message.content not in {"ask", "schema", "json"}:
         await cl.Message(content="ready").send()
         return
 
     schema = EmailArguments if message.content == "schema" else None
+    if message.content == "json":
+        schema = JsonArguments
+    arguments = {"to": "person@example.com"}
+    if message.content == "json":
+        arguments["options"] = {"tone": "brief"}
     async with cl.Step(name="send_email", type="tool") as step:
         decision = await cl.Approval(
             step=step,
-            arguments={"to": "person@example.com"},
+            arguments=arguments,
             arguments_schema=schema,
+            allow_json_edit=message.content == "json",
             timeout=120,
         ).ask()
 

@@ -1,6 +1,19 @@
 import { submitMessage } from '../../support/testUtils';
 
+const login = () =>
+  cy.request({
+    method: 'POST',
+    url: '/login',
+    form: true,
+    body: { username: 'alice', password: 'alice' }
+  });
+
 describe('Prompt Gallery', () => {
+  beforeEach(() => {
+    login();
+    cy.visit('/');
+  });
+
   it('shows gallery button in message composer', () => {
     cy.get('#prompt-gallery-open').should('exist');
   });
