@@ -30,7 +30,8 @@ interface Props {
 
 function shortHash(hash?: string | null): string {
   if (!hash) return '—';
-  return hash.length > 18 ? `${hash.slice(0, 18)}…` : hash;
+  const bare = hash.replace(/^sha256:/, '');
+  return bare.length > 18 ? `${bare.slice(0, 18)}…` : bare;
 }
 
 /**

@@ -1,4 +1,5 @@
 import type {
+  IChainlitConfig,
   IPrompt,
   IPromptUpdate,
   ISkillUpdateNotice
@@ -28,6 +29,7 @@ const clientState = vi.hoisted(() => ({
   promptUpdates: [] as IPromptUpdate[],
   skillUpdates: [] as ISkillUpdateNotice[]
 }));
+const authState = vi.hoisted(() => ({ requireLogin: true }));
 const fetchPromptVersionsMock = vi.fn().mockResolvedValue([
   {
     id: 'v2',
@@ -95,6 +97,10 @@ vi.mock('sonner', () => ({ toast: toastMock }));
 
 vi.mock('@chainlit-ng/react-client', () => ({
   useConfig: vi.fn(),
+  useAuth: () => ({
+    data: { requireLogin: authState.requireLogin },
+    isAuthenticated: authState.requireLogin
+  }),
   promptErrorCode: (error: unknown) => {
     if (!error || typeof error !== 'object' || !('detail' in error)) {
       return undefined;
@@ -162,6 +168,7 @@ describe('PromptGalleryButton', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.requireLogin = true;
   });
 
   afterEach(() => {
@@ -208,6 +215,36 @@ describe('PromptGalleryButton', () => {
 
     expect(await screen.findByText('chat.skills.tab')).toBeInTheDocument();
     expect(screen.getByText('chat.promptGallery.tab')).toBeInTheDocument();
+  });
+
+  it('hides prompt sharing when the app has no authenticated users', async () => {
+    authState.requireLogin = false;
+    const config = {
+      promptGallery: true,
+      ui: { name: 'Test', cot: 'hidden' },
+      features: { audio: { enabled: false, sample_rate: 24000 } },
+      userEnv: [],
+      dataPersistence: true,
+      threadResumable: false,
+      chatProfiles: [],
+      translation: {}
+    } satisfies IChainlitConfig;
+    vi.mocked(useConfig).mockReturnValue({
+      config,
+      error: undefined,
+      isLoading: false,
+      language: 'en-US'
+    });
+    renderComponent();
+    fireEvent.click(getGalleryBtn());
+
+    expect(await screen.findByText('Summarise')).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('chat.promptGallery.share.title')
+    ).toBeNull();
+    expect(
+      screen.getByLabelText('chat.promptGallery.edit')
+    ).toBeInTheDocument();
   });
 
   const getGalleryBtn = () => document.getElementById('prompt-gallery-open')!;
@@ -498,6 +535,11 @@ describe('PromptGalleryButton', () => {
       expect(message).toBe('chat.skills.updatesToast');
       expect(options.id).toBe('skill-updates');
       expect(options.action.label).toBe('chat.skills.updatesToastAction');
+      act(() => options.action.onClick());
+      expect(
+        await screen.findByText('chat.promptGallery.title')
+      ).toBeInTheDocument();
+      expect(await screen.findByText('chat.skills.new')).toBeInTheDocument();
       await waitFor(() =>
         expect(ackSkillUpdateMock).toHaveBeenCalledWith('s1', 2)
       );

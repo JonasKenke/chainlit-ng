@@ -8,6 +8,7 @@ import {
 import {
   ISkill,
   promptErrorCode,
+  useAuth,
   useConfig,
   useSkills
 } from '@chainlit-ng/react-client';
@@ -41,6 +42,13 @@ interface UpdateTarget {
   versionId: string | null;
 }
 
+/** Imported hashes already carry the sha256: prefix; do not double it. */
+function displayHash(value?: string | null): string {
+  if (!value) return '—';
+  const bare = value.replace(/^sha256:/, '');
+  return `${bare.slice(0, 12)}…`;
+}
+
 /** Imported and linked copies must be reviewed before reaching a model. */
 function needsReview(skill: ISkill): boolean {
   return !!skill.importedFrom || !!skill.sourcePromptId;
@@ -49,6 +57,7 @@ function needsReview(skill: ISkill): boolean {
 export function SkillsPanel() {
   const { t } = useTranslation();
   const { config } = useConfig();
+  const { data: authConfig } = useAuth();
   const {
     skills,
     skillUpdates,
@@ -79,6 +88,7 @@ export function SkillsPanel() {
   const fallbackError = t('common.status.error.default');
 
   const sharingEnabled = config?.skillsSharing === true;
+  const shareLinksEnabled = sharingEnabled && authConfig?.requireLogin === true;
   const libraryEnabled = config?.skillsLibrary !== false;
 
   useEffect(() => {
@@ -102,18 +112,25 @@ export function SkillsPanel() {
   }, [fetchSkills, fetchSkillUpdates, sharingEnabled, fallbackError]);
 
   // "From link · pinned vN" needs the source's version number; the pin stores
-  // only an id. One lookup per shared source is cached for the panel lifetime.
+  // only an id. Cache per pin so an update to a new version id refreshes it.
   useEffect(() => {
     if (!sharingEnabled) return;
     let cancelled = false;
-    const sources = new Map<string, string>();
+    const sources = new Map<
+      string,
+      { sourceId: string; pinnedVersionId: string }
+    >();
     for (const skill of skills) {
       if (!skill.sourcePromptId || !skill.pinnedVersionId) continue;
-      if (loadedSourcesRef.current.has(skill.sourcePromptId)) continue;
-      sources.set(skill.sourcePromptId, skill.pinnedVersionId);
+      const key = `${skill.sourcePromptId}:${skill.pinnedVersionId}`;
+      if (loadedSourcesRef.current.has(key)) continue;
+      sources.set(key, {
+        sourceId: skill.sourcePromptId,
+        pinnedVersionId: skill.pinnedVersionId
+      });
     }
-    sources.forEach((pinnedVersionId, sourceId) => {
-      loadedSourcesRef.current.add(sourceId);
+    sources.forEach(({ sourceId, pinnedVersionId }, key) => {
+      loadedSourcesRef.current.add(key);
       fetchSkillVersions(sourceId, { shared: true })
         .then((versions) => {
           if (cancelled) return;
@@ -125,7 +142,7 @@ export function SkillsPanel() {
           }));
         })
         .catch(() => {
-          loadedSourcesRef.current.delete(sourceId);
+          loadedSourcesRef.current.delete(key);
         });
     });
     return () => {
@@ -264,7 +281,7 @@ export function SkillsPanel() {
 
   return (
     <>
-      <div className="flex flex-col gap-3 min-h-0">
+      <div className="flex flex-1 min-h-0 flex-col gap-3">
         <div className="flex items-center gap-2">
           <Button id="skill-new" size="sm" onClick={() => setEditing('new')}>
             <Plus className="h-4 w-4 mr-1" />
@@ -328,7 +345,7 @@ export function SkillsPanel() {
           ))}
         </div>
 
-        <div className="max-h-[50vh] overflow-y-auto custom-scrollbar px-1">
+        <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar px-1">
           {loading ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {t('chat.skills.loading')}
@@ -410,32 +427,28 @@ export function SkillsPanel() {
                       </p>
                       {skill.importedFrom && (
                         <p
-                          className="break-all text-xs text-muted-foreground"
+                          className="break-words text-xs text-muted-foreground"
                           title={
                             skill.contentHash
-                              ? `sha256:${skill.contentHash}`
+                              ? `sha256:${skill.contentHash.replace(/^sha256:/, '')}`
                               : undefined
                           }
                         >
                           {t('chat.skills.provenance', {
                             source: skill.importedFrom,
                             date: formatSkillTimestamp(skill.importedAt),
-                            hash: skill.contentHash
-                              ? `${skill.contentHash.slice(0, 12)}…`
-                              : '—'
+                            hash: displayHash(skill.contentHash)
                           })}
                         </p>
                       )}
                       {skill.sourcePromptId && (
                         <p
-                          className="break-all text-xs text-muted-foreground"
+                          className="break-words text-xs text-muted-foreground"
                           data-testid={`skill-pin-${skill.id}`}
                         >
                           {t('chat.skills.pinnedProvenance', {
                             version: pinnedNumber ?? '—',
-                            hash: skill.pinnedContentHash
-                              ? `${skill.pinnedContentHash.slice(0, 12)}…`
-                              : '—'
+                            hash: displayHash(skill.pinnedContentHash)
                           })}
                         </p>
                       )}
@@ -480,7 +493,7 @@ export function SkillsPanel() {
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                      {sharingEnabled && (
+                      {shareLinksEnabled && (
                         <Button
                           type="button"
                           variant="ghost"

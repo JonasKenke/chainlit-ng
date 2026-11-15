@@ -3,6 +3,7 @@ import getRouterBasename from '@/lib/router';
 import { cn } from '@/lib/utils';
 import {
   IPrompt,
+  useAuth,
   useChainlitStore,
   useConfig,
   usePromptGallery,
@@ -52,8 +53,17 @@ interface Props {
   onSelect: (content: string) => void;
 }
 
+const LIBRARY_OPEN_EVENT = 'chainlit:library-open';
+
+function requestLibrary(tab: 'prompts' | 'skills') {
+  window.dispatchEvent(
+    new CustomEvent(LIBRARY_OPEN_EVENT, { detail: { tab } })
+  );
+}
+
 export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
   const { config } = useConfig();
+  const { data: authConfig } = useAuth();
   const { t } = useTranslation();
   const prompts = useChainlitStore((state) => state.prompts);
   const promptUpdates = useChainlitStore((state) => state.promptUpdates);
@@ -80,9 +90,29 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
     config?.features?.skills === true && config?.skillsLibrary !== false;
   const versioningEnabled = promptsEnabled && config?.promptVersioning === true;
   const skillSharingEnabled = skillsEnabled && config?.skillsSharing === true;
+  const shareLinksEnabled = authConfig?.requireLogin === true;
   const [tab, setTab] = useState<'prompts' | 'skills'>(
     promptsEnabled ? 'prompts' : 'skills'
   );
+
+  // Toast actions can outlive a render; route them back to the mounted dialog
+  // instead of closing over a possibly stale state setter.
+  useEffect(() => {
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: 'prompts' | 'skills' }>)
+        .detail;
+      setTab(
+        detail?.tab === 'skills'
+          ? 'skills'
+          : promptsEnabled
+            ? 'prompts'
+            : 'skills'
+      );
+      setOpen(true);
+    };
+    window.addEventListener(LIBRARY_OPEN_EVENT, handleOpen);
+    return () => window.removeEventListener(LIBRARY_OPEN_EVENT, handleOpen);
+  }, [promptsEnabled]);
 
   const hasFetchedRef = useRef(false);
   const fetchInFlightRef = useRef(false);
@@ -121,12 +151,6 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
     if (!open || !versioningEnabled) return;
     Promise.resolve(fetchPromptUpdates()).catch(() => null);
   }, [open, versioningEnabled, fetchPromptUpdates]);
-
-  useEffect(() => {
-    if (open) {
-      setTab(promptsEnabled ? 'prompts' : 'skills');
-    }
-  }, [open, promptsEnabled]);
 
   const hasFetchedSkillUpdatesRef = useRef(false);
   useEffect(() => {
@@ -167,7 +191,10 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
           : undefined,
       action: {
         label: t('chat.promptGallery.updatesToastAction'),
-        onClick: () => setOpen(true)
+        onClick: () => {
+          // Let the click finish before the modal's outside-click guard runs.
+          window.setTimeout(() => requestLibrary('prompts'), 0);
+        }
       },
       duration: 8000
     });
@@ -203,8 +230,8 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
       action: {
         label: t('chat.skills.updatesToastAction'),
         onClick: () => {
-          setTab('skills');
-          setOpen(true);
+          // Let the click finish before the modal's outside-click guard runs.
+          window.setTimeout(() => requestLibrary('skills'), 0);
         }
       },
       duration: 8000
@@ -250,6 +277,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                 id="prompt-gallery-open"
                 variant="ghost"
                 size="icon"
+                aria-label={t('chat.promptGallery.button')}
                 className={cn(
                   'relative rounded-full hover:bg-muted hover:dark:bg-muted transition-all duration-200',
                   open && 'bg-muted/50'
@@ -300,7 +328,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
           <Tabs
             value={tab}
             onValueChange={(value) => setTab(value as 'prompts' | 'skills')}
-            className="flex-1 overflow-hidden flex flex-col"
+            className="flex-1 min-h-0 overflow-hidden flex flex-col"
           >
             {promptsEnabled && skillsEnabled && (
               <TabsList className="self-start">
@@ -314,7 +342,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
             {promptsEnabled && (
               <TabsContent
                 value="prompts"
-                className="flex-1 overflow-hidden flex flex-col"
+                className="flex-1 min-h-0 overflow-hidden flex flex-col"
               >
                 <Command className="flex-1 overflow-hidden border rounded-md">
                   <CommandInput placeholder={t('chat.promptGallery.search')} />
@@ -392,37 +420,39 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className={cn(
-                                    'h-7 w-7',
-                                    prompt.isShared
-                                      ? 'text-blue-500 hover:text-blue-600'
-                                      : 'text-muted-foreground hover:text-foreground'
-                                  )}
-                                  aria-label={
-                                    prompt.isShared
-                                      ? t('chat.promptGallery.unshare')
-                                      : t('chat.promptGallery.share.title')
-                                  }
-                                  onPointerDown={(e) => e.stopPropagation()}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleShare(prompt).catch(() =>
-                                      toast.error(
-                                        t('common.status.error.default')
-                                      )
-                                    );
-                                  }}
-                                >
-                                  {prompt.isShared ? (
-                                    <GlobeLock className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <Globe className="h-3.5 w-3.5" />
-                                  )}
-                                </Button>
+                                {shareLinksEnabled ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className={cn(
+                                      'h-7 w-7',
+                                      prompt.isShared
+                                        ? 'text-blue-500 hover:text-blue-600'
+                                        : 'text-muted-foreground hover:text-foreground'
+                                    )}
+                                    aria-label={
+                                      prompt.isShared
+                                        ? t('chat.promptGallery.unshare')
+                                        : t('chat.promptGallery.share.title')
+                                    }
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleShare(prompt).catch(() =>
+                                        toast.error(
+                                          t('common.status.error.default')
+                                        )
+                                      );
+                                    }}
+                                  >
+                                    {prompt.isShared ? (
+                                      <GlobeLock className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <Globe className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                ) : null}
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -453,7 +483,10 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
             )}
 
             {skillsEnabled && (
-              <TabsContent value="skills" className="flex-1 overflow-hidden">
+              <TabsContent
+                value="skills"
+                className="flex-1 min-h-0 overflow-hidden flex flex-col"
+              >
                 <SkillsPanel />
               </TabsContent>
             )}

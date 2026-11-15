@@ -15,7 +15,8 @@ const state = vi.hoisted(() => {
   return {
     skills: [] as ISkill[],
     skillUpdates: [] as ISkillUpdateNotice[],
-    config
+    config,
+    requireLogin: true
   };
 });
 
@@ -60,6 +61,10 @@ vi.mock('@chainlit-ng/react-client', () => ({
     return typeof detail.code === 'string' ? detail.code : undefined;
   },
   useConfig: () => ({ config: state.config }),
+  useAuth: () => ({
+    data: { requireLogin: state.requireLogin },
+    isAuthenticated: state.requireLogin
+  }),
   useSkills: () => ({
     skills: state.skills,
     skillUpdates: state.skillUpdates,
@@ -97,7 +102,7 @@ const imported: ISkill = {
   enabled: false,
   importedFrom: 'review.md',
   importedAt: '2026-01-02T03:04:05Z',
-  contentHash: 'a'.repeat(64)
+  contentHash: `sha256:${'a'.repeat(64)}`
 };
 
 const own: ISkill = {
@@ -125,8 +130,8 @@ const pinned: ISkill = {
   enabled: false,
   sourcePromptId: 'source-1',
   pinnedVersionId: 'sv1',
-  pinnedContentHash: 'c'.repeat(64),
-  contentHash: 'c'.repeat(64)
+  pinnedContentHash: `sha256:${'c'.repeat(64)}`,
+  contentHash: `sha256:${'c'.repeat(64)}`
 };
 
 const notice: ISkillUpdateNotice = {
@@ -148,6 +153,7 @@ describe('SkillsPanel', () => {
     state.skills = [];
     state.skillUpdates = [];
     state.config = { features: { latex: false } };
+    state.requireLogin = true;
     fetchSkills.mockResolvedValue([]);
     fetchSkillUpdates.mockResolvedValue([]);
     fetchSkillVersions.mockImplementation(async (id: string) =>
@@ -182,7 +188,7 @@ describe('SkillsPanel', () => {
               version: 1,
               title: 'imported-skill',
               description: '',
-              contentHash: 'a'.repeat(64),
+              contentHash: `sha256:${'a'.repeat(64)}`,
               createdAt: '2026-01-01T00:00:00Z'
             }
           ]
@@ -220,7 +226,9 @@ describe('SkillsPanel', () => {
     expect(row).toHaveTextContent('chat.skills.importedBadge');
     expect(row).toHaveTextContent('review.md');
     expect(row).toHaveTextContent('chat.skills.reviewBeforeEnabling');
-    expect(row).toHaveTextContent(imported.contentHash!.slice(0, 12));
+    expect(row).toHaveTextContent(
+      imported.contentHash!.replace(/^sha256:/, '').slice(0, 12)
+    );
 
     expect(
       screen.getByRole('switch', { name: 'chat.skills.toggle imported-skill' })
@@ -256,12 +264,15 @@ describe('SkillsPanel', () => {
       name: 'chat.skills.review.enable'
     });
     await waitFor(() => expect(enable).toBeEnabled());
+    const hash = screen.getByTestId('skill-review-hash');
+    expect(hash).toHaveTextContent('aaaaaaaaaaaaaaaaaa…');
+    expect(hash).not.toHaveTextContent('sha256:sha256');
     fireEvent.click(enable);
 
     await waitFor(() =>
       expect(updateSkill).toHaveBeenCalledWith('s1', {
         enabled: true,
-        reviewedContentHash: 'a'.repeat(64)
+        reviewedContentHash: `sha256:${'a'.repeat(64)}`
       })
     );
   });
@@ -323,6 +334,8 @@ describe('SkillsPanel', () => {
     await waitFor(() =>
       expect(pin).toHaveTextContent('chat.skills.pinnedProvenance 1')
     );
+    expect(pin).toHaveTextContent('cccccccccccc…');
+    expect(pin).not.toHaveTextContent('sha256:sha256');
 
     fireEvent.click(screen.getByTestId('skill-detach-s3'));
     await waitFor(() => expect(detachSkill).toHaveBeenCalledWith('s3'));
@@ -347,6 +360,19 @@ describe('SkillsPanel', () => {
     await screen.findByTestId('skill-row');
     expect(screen.queryByTestId('skill-share-s2')).toBeNull();
     expect(screen.queryByTestId('skill-detach-s2')).toBeNull();
+  });
+
+  it('hides share links but keeps editing without authenticated users', async () => {
+    state.requireLogin = false;
+    state.config = { skillsSharing: true, features: { latex: false } };
+    state.skills = [own];
+    render(<SkillsPanel />);
+
+    await screen.findByTestId('skill-row');
+    expect(screen.queryByTestId('skill-share-s2')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'chat.skills.edit' })
+    ).toBeInTheDocument();
   });
 
   it('validates inline before creating and then saves', async () => {
