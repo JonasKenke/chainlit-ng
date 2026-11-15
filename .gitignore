@@ -14,8 +14,7 @@ venv
 
 **/.chainlit/*
 chainlit.md
-!backend/chainlit/sample/whats_new_after_2_12/.chainlit/config.toml
-!backend/chainlit/sample/whats_new_after_2_12/chainlit.md
+backend/chainlit/sample/whats_new_after_2_12/
 
 cypress/screenshots
 cypress/videos
