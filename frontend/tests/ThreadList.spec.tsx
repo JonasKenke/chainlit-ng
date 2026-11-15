@@ -1,6 +1,8 @@
 import {
   ChainlitAPI,
   ChainlitContext,
+  type IApproval,
+  type IQuestion,
   type IThread,
   type ThreadHistory,
   getChainlitStore
@@ -22,7 +24,11 @@ vi.mock('@chainlit-ng/react-client', async () => ({
 }));
 
 vi.mock('@/components/i18n', () => ({
-  Translator: ({ path }: { path: string }) => <span>{path}</span>
+  Translator: ({ path }: { path: string }) => <span>{path}</span>,
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) =>
+      options?.defaultValue ?? key
+  })
 }));
 
 vi.mock('@/hooks/use-mobile', () => ({
@@ -35,6 +41,7 @@ vi.mock('@/components/LeftSidebar/ThreadOptions', () => ({
       type="button"
       onClick={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         onDelete();
       }}
     >
@@ -50,6 +57,33 @@ const thread: IThread = {
   steps: []
 };
 
+const otherThread: IThread = {
+  id: 'other-thread',
+  name: 'Other conversation',
+  createdAt: '2026-01-02T00:00:00Z',
+  steps: []
+};
+
+const pendingApproval: IApproval = {
+  id: 'approval-1',
+  stepId: 'step-1',
+  threadId: thread.id,
+  tool: 'send_email',
+  status: 'pending',
+  live: true
+};
+
+const pendingQuestion: IQuestion = {
+  id: 'question-1',
+  stepId: 'step-1',
+  threadId: thread.id,
+  status: 'pending',
+  prompt: 'Continue?',
+  options: [],
+  allowFreeText: false,
+  live: true
+};
+
 function LocationProbe() {
   const location = useLocation();
   return <output data-testid="path">{location.pathname}</output>;
@@ -61,22 +95,30 @@ function path() {
 
 function setup({
   currentThreadId,
-  idToResume
+  idToResume,
+  threads = [thread],
+  approvals = [],
+  questions = []
 }: {
   currentThreadId?: string;
   idToResume?: string;
+  threads?: IThread[];
+  approvals?: IApproval[];
+  questions?: IQuestion[];
 }) {
   const client = new ChainlitAPI('http://localhost:8000', 'webapp');
   const deleteThread = vi.spyOn(client, 'deleteThread');
   const history: ThreadHistory = {
-    threads: [thread],
-    timeGroupedThreads: { Today: [thread] }
+    threads,
+    timeGroupedThreads: { Today: threads }
   };
   const store = getChainlitStore(client);
   store.setState({
     currentThreadId,
     threadIdToResume: idToResume,
-    threadHistory: history
+    threadHistory: history,
+    approvals,
+    questions
   });
 
   render(
@@ -199,6 +241,81 @@ describe('ThreadList deletion', () => {
     expect(store.getState().threadHistory?.threads).toEqual([thread]);
   });
 
+  it.each([
+    ['approval', { approvals: [pendingApproval] }],
+    ['question', { questions: [pendingQuestion] }]
+  ])(
+    'warns before deleting the active thread with a pending %s',
+    (_kind, pending) => {
+      const { deleteThread, store } = setup({
+        currentThreadId: thread.id,
+        ...pending
+      });
+
+      confirmDeletion();
+
+      expect(
+        screen.getByText('Pending approval or question')
+      ).toBeInTheDocument();
+      expect(path()).toBe(`/thread/${thread.id}`);
+      expect(store.getState().currentThreadId).toBe(thread.id);
+      expect(
+        store.getState().approvals.length + store.getState().questions.length
+      ).toBe(1);
+      expect(deleteThread).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps the active thread and interaction when cancelling deletion', () => {
+    const { deleteThread, store } = setup({
+      currentThreadId: thread.id,
+      approvals: [pendingApproval]
+    });
+
+    confirmDeletion();
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(path()).toBe(`/thread/${thread.id}`);
+    expect(store.getState().currentThreadId).toBe(thread.id);
+    expect(store.getState().approvals).toEqual([pendingApproval]);
+    expect(deleteThread).not.toHaveBeenCalled();
+  });
+
+  it('deletes the active thread after confirming the warning', async () => {
+    const { deleteThread, store } = setup({
+      currentThreadId: thread.id,
+      questions: [pendingQuestion]
+    });
+    deleteThread.mockResolvedValue({ success: true });
+
+    confirmDeletion();
+    fireEvent.click(screen.getByText('Delete chat'));
+
+    expect(path()).toBe('/');
+    expect(store.getState().currentThreadId).toBeUndefined();
+    expect(deleteThread).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(deleteThread).toHaveBeenCalledWith(thread.id);
+  });
+
+  it('deletes a historical thread without a pending warning', async () => {
+    const { deleteThread } = setup({
+      currentThreadId: 'other-thread',
+      approvals: [pendingApproval]
+    });
+    deleteThread.mockResolvedValue({ success: true });
+
+    confirmDeletion();
+
+    expect(
+      screen.queryByText('Pending approval or question')
+    ).not.toBeInTheDocument();
+    expect(deleteThread).toHaveBeenCalledWith(thread.id);
+  });
+
   it('returns to the active thread and re-requests its resume when deletion fails', async () => {
     const { deleteThread, store } = setup({ currentThreadId: thread.id });
     let rejectDeletion!: (reason: unknown) => void;
@@ -221,5 +338,73 @@ describe('ThreadList deletion', () => {
 
     expect(path()).toBe(`/thread/${thread.id}`);
     expect(store.getState().threadIdToResume).toBe(thread.id);
+  });
+});
+
+describe('ThreadList pending interaction navigation', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['approval', { approvals: [pendingApproval] }],
+    ['question', { questions: [pendingQuestion] }]
+  ])('blocks switching threads with a pending %s', (_kind, pending) => {
+    setup({
+      currentThreadId: thread.id,
+      threads: [thread, otherThread],
+      ...pending
+    });
+
+    fireEvent.click(screen.getByText('Other conversation'));
+
+    expect(
+      screen.getByText(
+        'This chat still has an approval or question waiting. Changing chats will discard it.'
+      )
+    ).toBeInTheDocument();
+    expect(path()).toBe(`/thread/${thread.id}`);
+  });
+
+  it('stays on the current thread when cancelling the warning', () => {
+    const { store } = setup({
+      currentThreadId: thread.id,
+      threads: [thread, otherThread],
+      approvals: [pendingApproval]
+    });
+
+    fireEvent.click(screen.getByText('Other conversation'));
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(path()).toBe(`/thread/${thread.id}`);
+    expect(store.getState().currentThreadId).toBe(thread.id);
+    expect(store.getState().approvals).toEqual([pendingApproval]);
+  });
+
+  it('switches to the target thread after confirming the warning', () => {
+    setup({
+      currentThreadId: thread.id,
+      threads: [thread, otherThread],
+      questions: [pendingQuestion]
+    });
+
+    fireEvent.click(screen.getByText('Other conversation'));
+    fireEvent.click(screen.getByText('Switch chat'));
+
+    expect(path()).toBe('/thread/other-thread');
+  });
+
+  it('navigates normally without a pending interaction', () => {
+    setup({
+      currentThreadId: thread.id,
+      threads: [thread, otherThread]
+    });
+
+    fireEvent.click(screen.getByText('Other conversation'));
+
+    expect(
+      screen.queryByText('Pending approval or question')
+    ).not.toBeInTheDocument();
+    expect(path()).toBe('/thread/other-thread');
   });
 });

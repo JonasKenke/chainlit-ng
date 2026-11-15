@@ -8,6 +8,7 @@ import {
 import { useContext, useEffect, useState } from 'react';
 
 import { Markdown } from '@/components/Markdown';
+import PendingInteractionDialog from '@/components/PendingInteractionDialog';
 import {
   HoverCard,
   HoverCardContent,
@@ -20,6 +21,8 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
+
+import { useHasPendingInteraction } from '@/hooks/usePendingInteraction';
 
 import { useAppStore } from '@/state/store';
 
@@ -38,6 +41,8 @@ export default function ChatProfiles({ navigate }: Props) {
   const setAttachments = useAppStore((state) => state.setAttachments);
   const [newChatProfile, setNewChatProfile] = useState<string | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const [pendingWarningOpen, setPendingWarningOpen] = useState(false);
+  const hasPendingInteraction = useHasPendingInteraction();
 
   const profiles = config?.chatProfiles;
   const hasMultipleProfiles = !!profiles && profiles.length > 1;
@@ -89,7 +94,9 @@ export default function ChatProfiles({ navigate }: Props) {
         value={chatProfile || ''}
         onValueChange={(value) => {
           setNewChatProfile(value);
-          if (firstInteraction) {
+          if (hasPendingInteraction) {
+            setPendingWarningOpen(true);
+          } else if (firstInteraction) {
             setOpenDialog(true);
           } else {
             handleConfirm(value);
@@ -152,6 +159,18 @@ export default function ChatProfiles({ navigate }: Props) {
         open={openDialog}
         handleClose={handleClose}
         handleConfirm={() => newChatProfile && handleConfirm(newChatProfile)}
+      />
+      <PendingInteractionDialog
+        open={pendingWarningOpen}
+        onOpenChange={setPendingWarningOpen}
+        onConfirm={() => {
+          if (newChatProfile) {
+            handleConfirm(newChatProfile);
+          }
+          setPendingWarningOpen(false);
+        }}
+        contentId="pending-chat-profile-dialog"
+        confirmId="confirm-pending-chat-profile"
       />
     </div>
   );

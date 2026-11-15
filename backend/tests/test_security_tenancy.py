@@ -461,6 +461,32 @@ class TestSharedThreadExposure:
         ]["approval"]
         assert owner_approval == approval
 
+    def test_share_view_hides_an_orphaned_approval_trace(self, client, data_layer):
+        stored = thread(metadata={"is_shared": True})
+        stored["steps"] = [
+            {
+                "id": "step-1",
+                "threadId": "thread-1",
+                "input": json.dumps(
+                    {"approval": {"argumentsPreview": {"recipient": "bob@example.com"}}}
+                ),
+                "output": "Approval rejected: owner-only comment",
+                "metadata": {},
+            }
+        ]
+        data_layer.get_thread.return_value = stored
+
+        with patch("chainlit.server.get_data_layer", return_value=data_layer):
+            response = client.get("/project/share/thread-1")
+
+        assert response.status_code == 200
+        step = response.json()["steps"][0]
+        assert step["metadata"] == {}
+        assert "input" not in step
+        assert "output" not in step
+        assert "bob@example.com" not in response.text
+        assert "owner-only comment" not in response.text
+
     @pytest.mark.parametrize(
         "metadata",
         [

@@ -182,6 +182,118 @@ def test_owner_view_keeps_the_full_approval_record():
     assert result["steps"][0]["input"] == thread["steps"][0]["input"]
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [{}, {"elementsPosition": "above"}],
+    ids=["empty", "unrelated-keys"],
+)
+@pytest.mark.parametrize("as_json", [True, False], ids=["json-string", "dict"])
+def test_share_drops_the_input_marker_when_metadata_has_no_approval(metadata, as_json):
+    preview = {"recipient": "bob@example.com", "secret": "arguments-value"}
+    marker = {"approval": {"tool": "dangerous_tool", "argumentsPreview": preview}}
+    thread = {
+        "id": "thread-1",
+        "metadata": {"is_shared": True},
+        "steps": [
+            {
+                "id": "step-1",
+                "input": json.dumps(marker) if as_json else marker,
+                "output": "Approval rejected: owner-only comment",
+                "metadata": metadata,
+            }
+        ],
+    }
+
+    result = public_thread(thread)
+
+    step = result["steps"][0]
+    assert step["metadata"] == metadata
+    assert "input" not in step
+    assert "output" not in step
+    assert "bob@example.com" not in json.dumps(result)
+    assert "arguments-value" not in json.dumps(result)
+    assert "owner-only comment" not in json.dumps(result)
+    # Projection only: the stored step still carries the owner trace.
+    assert thread["steps"][0]["input"]
+    assert thread["steps"][0]["output"]
+
+
+def test_share_drops_the_marker_from_unparseable_metadata():
+    thread = {
+        "id": "thread-1",
+        "metadata": {"is_shared": True},
+        "steps": [
+            {
+                "id": "step-1",
+                "input": json.dumps(
+                    {"approval": {"argumentsPreview": {"secret": "arguments-value"}}}
+                ),
+                "output": "Approval rejected: owner-only comment",
+                "metadata": "not-json",
+            }
+        ],
+    }
+
+    step = public_thread(thread)["steps"][0]
+
+    assert step["metadata"] == {}
+    assert "input" not in step
+    assert "output" not in step
+    assert "arguments-value" not in json.dumps(step)
+    assert "owner-only comment" not in json.dumps(step)
+
+
+@pytest.mark.parametrize(
+    "approval",
+    ["secret-value", ["secret-value"], {"kind": "unexpected"}],
+    ids=["string", "list", "unknown-kind"],
+)
+def test_share_drops_output_for_unexpected_approval_metadata(approval):
+    thread = _question_thread(metadata={"keep": "step-meta", "approval": approval})
+    thread["steps"][0]["output"] = "Approval rejected: owner-only comment"
+
+    step = public_thread(thread)["steps"][0]
+
+    assert "output" not in step
+    assert "input" not in step
+    assert "owner-only comment" not in json.dumps(step)
+    assert "secret-value" not in json.dumps(step)
+
+
+def test_share_drops_a_comment_bearing_output_from_an_approval_step():
+    thread = _approval_thread()
+    thread["steps"][0]["output"] = "Approval rejected: owner-only comment"
+
+    result = public_thread(thread)
+
+    step = result["steps"][0]
+    assert "output" not in step
+    assert "input" not in step
+    assert "owner-only comment" not in json.dumps(result)
+    assert thread["steps"][0]["output"] == "Approval rejected: owner-only comment"
+
+
+def test_share_keeps_a_non_interaction_step_trace():
+    thread = {
+        "id": "thread-1",
+        "metadata": {"is_shared": True},
+        "steps": [
+            {
+                "id": "step-1",
+                "input": '{"query": "plain input"}',
+                "output": "plain output",
+                "metadata": {"elementsPosition": "above"},
+            }
+        ],
+    }
+
+    step = public_thread(thread)["steps"][0]
+
+    assert step["input"] == '{"query": "plain input"}'
+    assert step["output"] == "plain output"
+    assert step["metadata"] == {"elementsPosition": "above"}
+
+
 def _question_record(**overrides):
     record = {
         "version": 1,

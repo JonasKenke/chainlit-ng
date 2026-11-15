@@ -229,6 +229,49 @@ def test_get_shared_prompt_ok(test_client, monkeypatch, mock_data_layer, sample_
     assert response.json()["isShared"] is True
 
 
+def test_get_shared_prompt_returns_public_projection_only(
+    test_client, monkeypatch, mock_data_layer, sample_prompt
+):
+    """The anonymous share endpoint must not expose owner-only fields."""
+    _enable_gallery(monkeypatch)
+    shared = {
+        **sample_prompt,
+        "isShared": True,
+        "contentHash": "deadbeef",
+        "importedFrom": "legacy-app",
+        "importedAt": "2024-01-02T00:00:00Z",
+        "kind": "prompt",
+        "description": "internal description",
+        "enabled": True,
+        "futurePrivateField": "must not leak",
+    }
+    mock_data_layer.get_prompt.return_value = shared
+    with patch("chainlit.server.get_data_layer", return_value=mock_data_layer):
+        response = test_client.get("/project/prompt/share/prompt-1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "id": "prompt-1",
+        "title": "Test Prompt",
+        "content": "Do something useful",
+        "isShared": True,
+        "createdAt": "2024-01-01T00:00:00Z",
+        "updatedAt": "2024-01-01T00:00:00Z",
+    }
+    for owner_only in (
+        "userId",
+        "contentHash",
+        "importedFrom",
+        "importedAt",
+        "kind",
+        "description",
+        "enabled",
+        "futurePrivateField",
+    ):
+        assert owner_only not in body
+
+
 def test_get_shared_prompt_does_not_require_auth(
     test_client, monkeypatch, mock_data_layer, sample_prompt
 ):
@@ -251,6 +294,26 @@ def test_get_shared_prompt_not_shared(
         response = test_client.get("/project/prompt/share/prompt-1")
 
     assert response.status_code == 404
+
+
+def test_get_shared_prompt_missing(test_client, monkeypatch, mock_data_layer):
+    _enable_gallery(monkeypatch)
+    mock_data_layer.get_prompt.return_value = None
+    with patch("chainlit.server.get_data_layer", return_value=mock_data_layer):
+        response = test_client.get("/project/prompt/share/missing")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Prompt not found"
+
+
+def test_get_shared_prompt_feature_disabled(test_client, monkeypatch, mock_data_layer):
+    monkeypatch.setattr(config.features, "prompt_gallery", False)
+    with patch("chainlit.server.get_data_layer", return_value=mock_data_layer):
+        response = test_client.get("/project/prompt/share/prompt-1")
+
+    assert response.status_code == 400
+    assert "not enabled" in response.json()["detail"]
+    mock_data_layer.get_prompt.assert_not_called()
 
 
 def test_add_shared_prompt_no_auth(

@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 
 import Alert from '@/components/Alert';
 import { Loader } from '@/components/Loader';
+import PendingInteractionDialog from '@/components/PendingInteractionDialog';
 import ShareDialog from '@/components/share/ShareDialog';
 import {
   AlertDialog,
@@ -55,6 +56,11 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
+import {
+  confirmPendingNavigation,
+  useHasPendingInteraction
+} from '@/hooks/usePendingInteraction';
+
 import { Translator } from '../i18n';
 import ThreadOptions from './ThreadOptions';
 
@@ -79,6 +85,9 @@ export function ThreadList({
   const [threadIdToDelete, setThreadIdToDelete] = useState<string>();
   const [threadIdToRename, setThreadIdToRename] = useState<string>();
   const [threadNewName, setThreadNewName] = useState<string>();
+  const [threadIdToSwitch, setThreadIdToSwitch] = useState<string>();
+  const [pendingDeleteThreadId, setPendingDeleteThreadId] = useState<string>();
+  const hasPendingInteraction = useHasPendingInteraction();
   const setThreadHistory = useSetChainlitState('threadHistory');
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
@@ -202,9 +211,7 @@ export function ThreadList({
     );
   }
 
-  const handleDeleteThread = async () => {
-    if (!threadIdToDelete) return;
-    const threadId = threadIdToDelete;
+  const deleteThread = async (threadId: string) => {
     const isActiveThread =
       threadId === idToResume || threadId === currentThreadId;
 
@@ -246,6 +253,21 @@ export function ThreadList({
         }
       }
     });
+  };
+
+  const handleDeleteThread = async () => {
+    if (!threadIdToDelete) return;
+    const threadId = threadIdToDelete;
+    const isActiveThread =
+      threadId === idToResume || threadId === currentThreadId;
+
+    if (isActiveThread && hasPendingInteraction) {
+      setThreadIdToDelete(undefined);
+      setPendingDeleteThreadId(threadId);
+      return;
+    }
+
+    await deleteThread(threadId);
   };
 
   const handleRenameThread = () => {
@@ -373,6 +395,39 @@ export function ThreadList({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <PendingInteractionDialog
+        open={!!threadIdToSwitch}
+        onOpenChange={(open) => {
+          if (!open) setThreadIdToSwitch(undefined);
+        }}
+        onConfirm={() => {
+          if (threadIdToSwitch) {
+            confirmPendingNavigation(threadIdToSwitch);
+            navigate(`/thread/${threadIdToSwitch}`);
+          }
+          setThreadIdToSwitch(undefined);
+        }}
+        contentId="pending-thread-switch-dialog"
+        confirmId="confirm-pending-thread-switch"
+      />
+      <PendingInteractionDialog
+        open={!!pendingDeleteThreadId}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteThreadId(undefined);
+        }}
+        onConfirm={() => {
+          const threadId = pendingDeleteThreadId;
+          setPendingDeleteThreadId(undefined);
+          if (threadId) {
+            void deleteThread(threadId);
+          }
+        }}
+        contentId="pending-thread-delete-dialog"
+        confirmId="confirm-pending-thread-delete"
+        confirmLabel={t('navigation.pendingInteraction.deleteConfirm', {
+          defaultValue: 'Delete chat'
+        })}
+      />
       <ShareDialog
         open={isShareDialogOpen}
         onOpenChange={(open) => {
@@ -404,7 +459,16 @@ export function ThreadList({
                       >
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Link to={isResumed ? '' : `/thread/${thread.id}`}>
+                            <Link
+                              to={isResumed ? '' : `/thread/${thread.id}`}
+                              onClick={(event) => {
+                                if (isSelected || !hasPendingInteraction) {
+                                  return;
+                                }
+                                event.preventDefault();
+                                setThreadIdToSwitch(thread.id);
+                              }}
+                            >
                               <SidebarMenuButton
                                 isActive={isSelected}
                                 className="relative h-9 group/thread"

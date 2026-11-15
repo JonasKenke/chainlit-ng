@@ -6,6 +6,10 @@ This file provides guidance to AI agents when working with code in this reposito
 
 All changes **MUST** be backward-compatible. If a refactor or breaking change is unavoidable, notify the user and stop — do not proceed without explicit approval. When approved, prefer adding a compatibility layer over keeping legacy code in place.
 
+## Testing (CRITICAL)
+
+Every behavior change **MUST** ship with unit and UI tests. Cover negative and edge cases, request/response payloads, authorization, fail-closed behavior, disabled/empty states, and keyboard/accessibility where relevant. Do not weaken or delete existing assertions to make a change pass; update a contract test only when the contract intentionally changed. Run the narrowest relevant suites after edits and report exact pass/fail counts. If something cannot be tested, state exactly what and why.
+
 ## MCP-First Approach (CRITICAL)
 
 When available, **ALWAYS** prefer MCP servers over manual alternatives. Use **Context7** for docs/API references and **Serena** for code navigation/refactoring/memory. Fall back to CLI tools, direct file reads, or web searches **ONLY IF** the corresponding MCP is unavailable or cannot fulfill the request.

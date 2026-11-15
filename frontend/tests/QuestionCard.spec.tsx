@@ -259,4 +259,83 @@ describe('QuestionCard', () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId('approval-card')).toBeNull();
   });
+
+  it('pins the Submit action outside the scrollable body and keeps it focusable', () => {
+    renderCard();
+
+    const card = screen.getByTestId('question-card');
+    const scroll = screen.getByTestId('question-card-scroll');
+    const actions = screen.getByTestId('question-card-actions');
+    const submit = screen.getByRole('button', { name: 'Submit' });
+
+    expect(card).toContainElement(scroll);
+    expect(card).toContainElement(actions);
+    expect(card).toContainElement(submit);
+    expect(scroll).toContainElement(screen.getByText('Which environment?'));
+    expect(scroll).toContainElement(
+      screen.getByRole('radio', { name: /Staging/ })
+    );
+    expect(scroll).toContainElement(screen.getByLabelText('Other answer'));
+    expect(scroll).not.toContainElement(submit);
+    expect(actions).toContainElement(submit);
+    expect(actions).not.toHaveAttribute('aria-hidden');
+    expect(card).not.toHaveAttribute('inert');
+
+    fireEvent.click(screen.getByRole('radio', { name: /Staging/ }));
+    expect(submit).toBeEnabled();
+    submit.focus();
+    expect(submit).toHaveFocus();
+    expect(submit.tabIndex).toBe(0);
+  });
+
+  it('enables Submit for either answer source and disables it when empty', () => {
+    renderCard();
+
+    const submit = screen.getByRole('button', { name: 'Submit' });
+    const other = screen.getByLabelText('Other answer');
+
+    expect(submit).toBeDisabled();
+    fireEvent.change(other, { target: { value: '   ' } });
+    expect(submit).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('radio', { name: /Staging/ }));
+    expect(submit).toBeEnabled();
+
+    fireEvent.change(other, { target: { value: 'custom answer' } });
+    expect(screen.getByRole('radio', { name: /Staging/ })).not.toBeChecked();
+    expect(submit).toBeEnabled();
+
+    fireEvent.change(other, { target: { value: '' } });
+    expect(submit).toBeDisabled();
+  });
+
+  it('keeps Submit in the DOM but disabled while an answer is in flight', async () => {
+    const { promise, resolve: resolveAnswer } = Promise.withResolvers<{
+      questionId: string;
+      status: 'answered';
+      answer: { optionId: string; label: string };
+      revision: number;
+      durable: boolean;
+    }>();
+    respondToQuestion.mockReturnValue(promise);
+    renderCard();
+
+    fireEvent.click(screen.getByRole('radio', { name: /Staging/ }));
+    const submit = screen.getByRole('button', { name: 'Submit' });
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(submit).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Submit' })).toBe(submit);
+    fireEvent.click(submit);
+    expect(respondToQuestion).toHaveBeenCalledTimes(1);
+
+    resolveAnswer({
+      questionId: 'question-1',
+      status: 'answered',
+      answer: { optionId: 'staging', label: 'Staging' },
+      revision: 2,
+      durable: true
+    });
+    await waitFor(() => expect(submit).toBeEnabled());
+  });
 });

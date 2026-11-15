@@ -1,6 +1,6 @@
 import { FileSpec, useConfig } from '@chainlit-ng/react-client';
 
-import { Translator } from '@/components/i18n';
+import { Translator, useTranslation } from '@/components/i18n';
 import { PaperClip } from '@/components/icons/PaperClip';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,6 +26,7 @@ export const UploadButton = ({
   onFileUploadError
 }: UploadButtonProps) => {
   const { config } = useConfig();
+  const { t } = useTranslation();
   const upload = useUpload({
     spec: fileSpec,
     onResolved: (payloads: File[]) => onFileUpload(payloads),
@@ -50,6 +51,9 @@ export const UploadButton = ({
             />
             <Button
               id={disabled ? 'upload-button-loading' : 'upload-button'}
+              aria-label={t('chat.input.actions.attachFiles', {
+                defaultValue: 'Attach files'
+              })}
               variant="ghost"
               size="icon"
               className="hover:bg-muted"

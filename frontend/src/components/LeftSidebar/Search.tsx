@@ -1,4 +1,9 @@
-import { ChainlitContext, IThread } from '@chainlit-ng/react-client';
+import {
+  ChainlitContext,
+  IThread,
+  useChatMessages,
+  useChatSession
+} from '@chainlit-ng/react-client';
 import _ from 'lodash';
 import { useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { Loader } from '@/components/Loader';
+import PendingInteractionDialog from '@/components/PendingInteractionDialog';
 import { Search } from '@/components/icons/Search';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,6 +31,11 @@ import {
 } from '@/components/ui/tooltip';
 import { Translator } from 'components/i18n';
 
+import {
+  confirmPendingNavigation,
+  useHasPendingInteraction
+} from '@/hooks/usePendingInteraction';
+
 import { Kbd } from '../Kbd';
 
 export default function SearchChats() {
@@ -34,8 +45,12 @@ export default function SearchChats() {
   const [searchQuery, setSearchQuery] = useState('');
   const [threads, setThreads] = useState<IThread[]>([]);
   const [loading, setLoading] = useState(false);
+  const [threadIdToSwitch, setThreadIdToSwitch] = useState<string>();
 
   const apiClient = useContext(ChainlitContext);
+  const { threadId: currentThreadId } = useChatMessages();
+  const { idToResume } = useChatSession();
+  const hasPendingInteraction = useHasPendingInteraction();
 
   // Debounced search function
   const debouncedSearch = useMemo(
@@ -140,6 +155,14 @@ export default function SearchChats() {
                     value={`${searchQuery}-${thread.id}`}
                     onSelect={() => {
                       setOpen(false);
+                      if (
+                        hasPendingInteraction &&
+                        thread.id !== currentThreadId &&
+                        thread.id !== idToResume
+                      ) {
+                        setThreadIdToSwitch(thread.id);
+                        return;
+                      }
                       navigate(`/thread/${thread.id}`);
                     }}
                   >
@@ -153,6 +176,21 @@ export default function SearchChats() {
           )}
         </CommandList>
       </CommandDialog>
+      <PendingInteractionDialog
+        open={!!threadIdToSwitch}
+        onOpenChange={(open) => {
+          if (!open) setThreadIdToSwitch(undefined);
+        }}
+        onConfirm={() => {
+          if (threadIdToSwitch) {
+            confirmPendingNavigation(threadIdToSwitch);
+            navigate(`/thread/${threadIdToSwitch}`);
+          }
+          setThreadIdToSwitch(undefined);
+        }}
+        contentId="pending-search-switch-dialog"
+        confirmId="confirm-pending-search-switch"
+      />
     </>
   );
 }

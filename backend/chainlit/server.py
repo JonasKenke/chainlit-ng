@@ -2086,7 +2086,18 @@ async def get_shared_prompt(
     prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
     if not prompt or not prompt["isShared"]:
         raise HTTPException(status_code=404, detail="Prompt not found")
-    return JSONResponse(content=prompt)
+    # Public projection only: this endpoint is unauthenticated, so owner-only
+    # fields (userId and future provenance/version fields) must never leak.
+    return JSONResponse(
+        content={
+            "id": prompt["id"],
+            "title": prompt["title"],
+            "content": prompt["content"],
+            "isShared": prompt["isShared"],
+            "createdAt": prompt["createdAt"],
+            "updatedAt": prompt["updatedAt"],
+        }
+    )
 
 
 @router.post("/project/prompt/share/{prompt_id}/add")

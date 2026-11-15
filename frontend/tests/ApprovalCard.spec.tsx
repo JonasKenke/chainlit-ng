@@ -8,9 +8,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalCard } from '@/components/chat/Approvals/ApprovalCard';
 
 const respondToApproval = vi.fn();
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+const { toastError, toastMessage } = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastMessage: vi.fn()
+}));
 
-vi.mock('sonner', () => ({ toast: { error: toastError } }));
+vi.mock('sonner', () => ({
+  toast: { error: toastError, message: toastMessage }
+}));
 
 vi.mock('@chainlit-ng/react-client', async () => {
   const ReactModule = await import('react');
@@ -35,14 +40,37 @@ const approval: IApproval = {
   }
 };
 
+// The react-client module is mocked, so only the one client method the card
+// calls exists; cast at this test boundary instead of widening the mock type.
+const chainlitClient = {
+  respondToApproval
+} as unknown as React.ComponentProps<typeof ChainlitContext.Provider>['value'];
+
+const messageContext = {
+  cot: 'hidden'
+} as unknown as React.ComponentProps<typeof MessageContext.Provider>['value'];
+
 function renderCard(overrides: Partial<IApproval> = {}) {
-  return render(
-    <ChainlitContext.Provider value={{ respondToApproval } as any}>
-      <MessageContext.Provider value={{ cot: 'hidden' } as any}>
+  return render(cardTree(overrides));
+}
+
+function cardTree(overrides: Partial<IApproval> = {}) {
+  return (
+    <ChainlitContext.Provider value={chainlitClient}>
+      <MessageContext.Provider value={messageContext}>
         <ApprovalCard approval={{ ...approval, ...overrides }} />
       </MessageContext.Provider>
     </ChainlitContext.Provider>
   );
+}
+
+// jsdom does not synthesize the activation click a browser fires for
+// Enter/Space on a native button, so dispatch the key press and then the
+// click the browser would produce (detail: 0 marks a keyboard-originated
+// click).
+function activateWithKeyboard(element: HTMLElement, key = 'Enter') {
+  fireEvent.keyDown(element, { key, code: key });
+  fireEvent.click(element, { detail: 0 });
 }
 
 describe('ApprovalCard', () => {
@@ -131,6 +159,50 @@ describe('ApprovalCard', () => {
       </ChainlitContext.Provider>
     );
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+  });
+
+  it('offers Request changes by default when the flag is absent', () => {
+    renderCard();
+
+    expect(
+      screen.getByRole('button', { name: 'Request changes' })
+    ).toBeInTheDocument();
+  });
+
+  it('offers Request changes when the server allows it', () => {
+    renderCard({ requestChangesAllowed: true });
+
+    expect(
+      screen.getByRole('button', { name: 'Request changes' })
+    ).toBeInTheDocument();
+  });
+
+  it('hides Request changes when the server forbids it', () => {
+    renderCard({ requestChangesAllowed: false });
+
+    expect(
+      screen.queryByRole('button', { name: 'Request changes' })
+    ).toBeNull();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+  });
+
+  it('keeps Edit available when only Request changes is forbidden', () => {
+    renderCard({ editAllowed: true, requestChangesAllowed: false });
+
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Request changes' })
+    ).toBeNull();
+  });
+
+  it('hides Edit when the server forbids it but keeps Request changes', () => {
+    renderCard({ editAllowed: false, requestChangesAllowed: true });
+
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Request changes' })
+    ).toBeInTheDocument();
   });
 
   it('sends a schema-validated edit to the server', async () => {
@@ -394,7 +466,7 @@ describe('ApprovalCard', () => {
     });
   });
 
-  it('renders multiline and secret fields with their own input types', () => {
+  it('renders multiline fields and server-held secrets without their values', () => {
     renderCard({
       editAllowed: true,
       editFields: [
@@ -412,7 +484,8 @@ describe('ApprovalCard', () => {
           kind: 'string',
           required: false,
           nullable: true,
-          secret: true
+          secret: true,
+          serverHeld: true
         }
       ],
       arguments: { body: 'hello', token: 'shh' }
@@ -423,7 +496,80 @@ describe('ApprovalCard', () => {
     const body = screen.getByLabelText('Body');
     expect(body.tagName).toBe('TEXTAREA');
     expect(body).toHaveValue('hello');
-    expect(screen.getByLabelText('Token')).toHaveAttribute('type', 'password');
+    const token = screen.getByLabelText('Token');
+    expect(token).toBeDisabled();
+    expect(token).toHaveValue('Server-held');
+    expect(token).not.toHaveAttribute('type', 'password');
+    expect(screen.queryByDisplayValue('shh')).toBeNull();
+  });
+
+  it('keeps server-held fields out of the edit payload', async () => {
+    respondToApproval.mockResolvedValue({
+      approvalId: 'approval-1',
+      status: 'edited',
+      decision: 'edit',
+      revision: 2
+    });
+    renderCard({
+      editAllowed: true,
+      editFields: [
+        {
+          name: 'to',
+          label: 'To',
+          kind: 'string',
+          required: true,
+          nullable: false,
+          secret: false,
+          serverHeld: false
+        },
+        {
+          name: 'apiKey',
+          label: 'API key',
+          kind: 'string',
+          required: true,
+          nullable: false,
+          secret: true,
+          serverHeld: true
+        },
+        {
+          name: 'tenant',
+          label: 'Tenant',
+          kind: 'string',
+          required: true,
+          nullable: false,
+          secret: false,
+          serverHeld: true
+        }
+      ],
+      // Defense in depth: even if a value arrived, the card never shows it.
+      arguments: {
+        to: 'person@example.com',
+        apiKey: 'sk-live',
+        tenant: 'acme'
+      }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    for (const label of ['API key', 'Tenant']) {
+      const input = screen.getByLabelText(label);
+      expect(input).toBeDisabled();
+      expect(input).toHaveValue('Server-held');
+      expect(input).toHaveAttribute('readonly');
+    }
+    expect(screen.queryByDisplayValue('sk-live')).toBeNull();
+    expect(screen.queryByDisplayValue('acme')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('To'), {
+      target: { value: 'other@example.com' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save & approve' }));
+
+    await waitFor(() => expect(respondToApproval).toHaveBeenCalledTimes(1));
+    const editedArguments = respondToApproval.mock.calls[0][0].editedArguments;
+    expect(editedArguments).toEqual({ to: 'other@example.com' });
+    expect(editedArguments).not.toHaveProperty('apiKey');
+    expect(editedArguments).not.toHaveProperty('tenant');
   });
 
   it('hides editable fields when the approval is no longer live', () => {
@@ -495,6 +641,39 @@ describe('ApprovalCard', () => {
     expect(screen.getByTestId('approval-comment')).toHaveTextContent(
       'split the ticket'
     );
+  });
+
+  it('shows a persisted comment on a rejected card', () => {
+    renderCard({
+      status: 'rejected',
+      decision: 'reject',
+      reason: 'not now',
+      decidedBy: 'test_user_identifier',
+      decidedAt: '2026-01-01T00:00:00Z'
+    });
+
+    expect(screen.getByText('Rejected')).toBeInTheDocument();
+    expect(screen.getByTestId('approval-comment')).toHaveTextContent('not now');
+  });
+
+  it('isolates a bidi comment and renders it as plain text', () => {
+    const reason =
+      'before \u202egnp.exe after\n\tsecond line <img src=x onerror=alert(1)>';
+    renderCard({
+      status: 'changes_requested',
+      decision: 'request_changes',
+      reason,
+      decidedBy: 'test_user_identifier',
+      decidedAt: '2026-01-01T00:00:00Z'
+    });
+
+    const comment = screen.getByTestId('approval-comment');
+    const bdi = comment.querySelector('bdi');
+    expect(bdi).not.toBeNull();
+    expect(bdi).toHaveAttribute('dir', 'auto');
+    expect(bdi?.textContent).toBe(reason);
+    expect(comment).toHaveClass('whitespace-pre-wrap');
+    expect(comment.querySelector('img')).toBeNull();
   });
 
   it('shows the final arguments and an original-to-edited diff', () => {
@@ -573,6 +752,8 @@ describe('ApprovalCard', () => {
           approval={{
             ...approval,
             status: 'approved',
+            editAllowed: true,
+            requestChangesAllowed: true,
             decidedBy: 'test_user_identifier',
             decidedAt: '2026-01-01T00:00:00Z'
           }}
@@ -582,6 +763,161 @@ describe('ApprovalCard', () => {
 
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reject' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Request changes' })
+    ).toBeNull();
     expect(screen.getByText('Approved')).toBeInTheDocument();
+  });
+
+  it('focuses the first editable field, skipping server-held fields', () => {
+    renderCard({
+      editAllowed: true,
+      editFields: [
+        {
+          name: 'token',
+          label: 'Token',
+          kind: 'string',
+          required: false,
+          nullable: true,
+          secret: true,
+          serverHeld: true
+        },
+        {
+          name: 'body',
+          label: 'Body',
+          kind: 'text',
+          required: false,
+          nullable: true,
+          secret: false
+        }
+      ],
+      arguments: { token: 'shh', body: 'hello' }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.getByLabelText('Body')).toHaveFocus();
+    expect(screen.getByLabelText('Token')).not.toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it('focuses the first editable field when Edit is activated by keyboard', () => {
+    renderCard({
+      editAllowed: true,
+      editFields,
+      arguments: { to: 'person@example.com' }
+    });
+
+    const edit = screen.getByRole('button', { name: 'Edit' });
+    edit.focus();
+    activateWithKeyboard(edit);
+
+    expect(screen.getByTestId('approval-edit-form')).toBeInTheDocument();
+    expect(screen.getByLabelText('To')).toHaveFocus();
+  });
+
+  it('focuses the comment box and restores focus to its trigger on Cancel', () => {
+    renderCard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Request changes' }));
+    expect(screen.getByLabelText('Comment')).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(
+      screen.getByRole('button', { name: 'Request changes' })
+    ).toHaveFocus();
+  });
+
+  it('restores focus to Edit after cancelling the edit form', () => {
+    renderCard({
+      editAllowed: true,
+      editFields,
+      arguments: { to: 'person@example.com' }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus();
+  });
+
+  it('does not submit an unchanged edit form and keeps the card pending', () => {
+    renderCard({
+      editAllowed: true,
+      editFields,
+      arguments: {
+        to: 'person@example.com',
+        count: 2,
+        labels: ['api'],
+        urgent: false
+      }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save & approve' }));
+
+    expect(respondToApproval).not.toHaveBeenCalled();
+    expect(toastMessage).toHaveBeenCalledWith('No changes to save');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.queryByTestId('approval-diff')).toBeNull();
+    expect(screen.getByTestId('approval-card')).toHaveFocus();
+  });
+
+  it('submits a changed edit form and renders the applied diff', async () => {
+    respondToApproval.mockResolvedValue({
+      approvalId: 'approval-1',
+      status: 'edited',
+      decision: 'edit',
+      revision: 2
+    });
+    const targetFields: IApprovalEditField[] = [
+      {
+        name: 'to',
+        label: 'To',
+        kind: 'string',
+        required: true,
+        nullable: false,
+        secret: false
+      }
+    ];
+    const { rerender } = renderCard({
+      editAllowed: true,
+      editFields: targetFields,
+      arguments: { to: 'person@example.com' },
+      argumentsPreview: { to: 'person@example.com' }
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('To'), {
+      target: { value: 'other@example.com' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save & approve' }));
+
+    await waitFor(() => expect(respondToApproval).toHaveBeenCalledTimes(1));
+    expect(respondToApproval.mock.calls[0][0]).toMatchObject({
+      approvalId: 'approval-1',
+      decision: 'edit',
+      editedArguments: { to: 'other@example.com' }
+    });
+    expect(screen.getByTestId('approval-card')).toHaveFocus();
+
+    rerender(
+      cardTree({
+        editAllowed: true,
+        editFields: targetFields,
+        status: 'edited',
+        decision: 'edit',
+        argumentsPreview: { to: 'person@example.com' },
+        editedArgumentsPreview: { to: 'other@example.com' },
+        decidedBy: 'test_user_identifier',
+        decidedAt: '2026-01-01T00:00:00Z'
+      })
+    );
+
+    expect(screen.getByTestId('approval-diff')).toHaveTextContent(
+      '~ to: "person@example.com" → "other@example.com"'
+    );
   });
 });

@@ -1,10 +1,11 @@
 # Tool-call approvals
 
 Chainlit can pause an async tool call until an authenticated user decides
-whether it may run. The server owns the execution arguments and sends them to
-the authorized user's live card; the persisted record keeps only a redacted
-preview. A decision is accepted only for the user, thread, step and session that
-requested it, and a terminal decision must be persisted before the tool can run.
+whether it may run. The server owns the execution arguments and sends only the
+non-secret fields to the authorized user's live card; the persisted record keeps
+only a redacted preview. A decision is accepted only for the user, thread, step
+and session that requested it, and a terminal decision must be persisted before
+the tool can run.
 
 Approvals are opt-in. Steps that do not pass `requires_approval` keep their
 current behaviour.
@@ -37,11 +38,14 @@ When the step runs:
   result.
 - **Reject** – the tool does not run. The step is marked as an error, the output
   is `Approval rejected`, and the decorated function returns `None`.
-- **Edit** – the edited arguments are validated against `approval_schema` on the
-  server. The tool runs with the validated arguments, and the step trace shows
-  the final redacted arguments. An edit is offered only for a pydantic
-  `BaseModel` with `model_config = ConfigDict(extra="forbid")`; otherwise the
-  server returns `ApprovalEditNotAllowed`.
+- **Edit** – the non-secret edited arguments are validated against
+  `approval_schema` on the server. Secret and read-only fields keep their
+  original server-held values; a client-supplied value for those fields is
+  ignored. The tool runs with the merged arguments, and the step trace shows the
+  final redacted arguments. An edit is offered only for a pydantic `BaseModel`
+  with `model_config = ConfigDict(extra="forbid")`; otherwise the server returns
+  `ApprovalEditNotAllowed`. Pass `allow_edit=False` to remove Edit even when a
+  schema is present (`ApprovalActionNotAllowed`).
 - **Expire, supersede or orphan** – the tool does not run. The step is marked as
   an error, the output names the terminal state, and the function returns
   `None`.
@@ -111,6 +115,50 @@ if decision.approved:
 The explicit API never runs the tool; the app decides what to do with
 `decision.arguments`. Always use those final arguments, not the originals. On
 reject, expiry, supersede or orphan, `decision.approved` is `False`.
+
+### Restricting the actions on a card
+
+Both entry points accept `allow_edit` and `allow_request_changes`:
+
+```python
+@cl.step(
+    type="tool",
+    requires_approval=True,
+    approval_schema=PublishArgs,
+    allow_edit=False,             # Approve / Reject only
+    allow_request_changes=False,  # no comment box either
+)
+async def publish(...):
+    ...
+
+await cl.Approval(
+    step=step,
+    arguments=payload,
+    arguments_schema=PublishArgs,
+    allow_edit=False,
+    allow_request_changes=False,
+).ask()
+```
+
+| Flag                    | `None` (default)          | `False`                     | `True`                    |
+| ----------------------- | ------------------------- | --------------------------- | ------------------------- |
+| `allow_edit`            | Edit when a schema exists | No Edit, even with a schema | Edit when a schema exists |
+| `allow_request_changes` | Request changes offered   | No Request changes          | Request changes offered   |
+
+The flags are enforced on the server, not only in the card. A decision that the
+policy forbids is refused with `ApprovalActionNotAllowed` (HTTP 400) and leaves
+the record pending; no arguments or comment are stored. Authorization is checked
+first: a wrong user, thread or session generation still gets the usual
+`ApprovalNotFound` or `ApprovalSessionMismatch`, so the policy cannot be probed
+anonymously.
+
+`allow_edit=True` without an `arguments_schema` does not enable Edit: the server
+has no schema to validate against and still returns `ApprovalEditNotAllowed`.
+With the decorator, the flags forward to the internal `Approval`. With explicit
+`cl.Approval`, they apply directly. Both values are stored on the pending record
+(`editAllowed`, `requestChangesAllowed`) and sent in the live payload with the
+same names, so the card can hide the buttons. They are preserved on terminal
+records and on resume.
 
 ### Markdown content without a JSON block
 
@@ -209,7 +257,25 @@ class TicketDraft(BaseModel):
 
 Schemas with nested models or unsupported field types fall back to the JSON
 editor. Editing needs the live arguments; a resumed card only has the redacted
-preview, so its Edit action is hidden.
+preview, so its Edit action is hidden. `allow_edit=False` hides Edit even on a
+live schema-backed card and makes the server refuse the decision.
+
+Some fields are **server-held** and can never be edited from the card:
+
+- names that look like credentials (`api_key`, `apiKey`, `password`, `secret`,
+  `token`, `authorization`, `credential`, and other case-insensitive matches),
+- JSON-schema `format: "password"` or `writeOnly: true` fields (pydantic
+  `SecretStr`),
+- fields marked with `json_schema_extra={"readOnly": True}` or the convenience
+  alias `json_schema_extra={"editable": False}`.
+
+The live payload omits their values. The form renders a disabled `Server-held`
+control instead of the value, and the field is excluded from the edit payload.
+On the server, the original values are merged back before schema validation, so
+the tool and the argument digest always see the original secret even if a client
+supplies a different value. Non-secret fields stay editable. To change a
+server-held value, request changes or start a new approval with the new value;
+an edit to the card cannot do it.
 
 ### Review actions and feedback
 
@@ -219,6 +285,10 @@ preview, so its Edit action is hidden.
 | Edit            | Opens the generated form; saving approves the edited values.                                                    |
 | Reject          | Stops execution immediately, without a comment box. Explicit API callers may still attach an optional `reason`. |
 | Request changes | Opens a comment box. The comment is required and tells the model what to revise.                                |
+
+Hide an action with `allow_edit=False` or `allow_request_changes=False`; the
+server refuses the decision even if a client still sends it. See
+[Restricting the actions on a card](#restricting-the-actions-on-a-card).
 
 `request_changes` is a distinct terminal status (`changes_requested`) so the app
 can re-plan instead of treating it as a plain rejection:
@@ -240,10 +310,14 @@ if not decision.approved:
 create_ticket(**decision.arguments)
 ```
 
-Comments are trimmed, capped at 500 characters, and stored as `reason` on the
-record; public shares exclude them. The decorator path records a rejection
-comment on the step output. Use the explicit `cl.Approval` API when the model
-must read the comment and re-plan.
+Comments are untrusted user input. They are normalized to plain text
+(CRLF collapsed, trimmed, newlines and tabs allowed), capped at 500 characters,
+and rejected with `ApprovalInvalidArguments` when they contain control, bidi,
+zero-width, tag or surrogate characters. The normalized comment is stored as
+`reason` on the record and excluded from public shares. The decorator path
+records only a fixed status label on the step output (`Approval rejected`,
+`Approval changes_requested`, ...), never the comment. Use the explicit
+`cl.Approval` API when the model must read the comment and re-plan.
 
 ## Contract
 
@@ -257,20 +331,30 @@ must read the comment and re-plan.
   to 500 characters), and a client request id.
 - The approval card and the decision endpoint use the server record. The client
   cannot replace the arguments by editing the payload.
+- For a schema-backed approval, secret and read-only fields are server-held:
+  their values are omitted from the live `arguments`, their edit descriptor
+  carries `serverHeld: true`, and the form renders a disabled `Server-held`
+  control. An edit request that supplies a value for one is ignored; the server
+  restores the original snapshot value and only then validates the schema and
+  computes the digest and preview. Invalid non-secret fields still fail closed.
+- Approvals without an `arguments_schema` cannot be edited and still send their
+  live arguments to the card. In a JSON-fallback schema, top-level secret-like
+  keys are withheld, but nested values inside lists or dictionaries are only
+  redacted in the persisted preview.
 - Approval arguments are keyed by the function signature. For methods, `self`
   and `cls` are excluded from the approval payload and restored for execution.
 
 ### Decisions and execution
 
-| Decision                              | Record status       | `approved` | Runs? | Arguments                                         |
-| ------------------------------------- | ------------------- | ---------- | ----- | ------------------------------------------------- |
-| approve                               | `approved`          | `True`     | Yes   | Original server-held arguments                    |
-| reject                                | `rejected`          | `False`    | No    | None executed; the optional comment is returned   |
-| edit                                  | `edited`            | `True`     | Yes   | Validated edited arguments                        |
-| request changes                       | `changes_requested` | `False`    | No    | None executed; a comment is required and returned |
-| timeout                               | `expired`           | `False`    | No    | None                                              |
-| stop / replace / delete / session end | `superseded`        | `False`    | No    | None                                              |
-| restart / resume without a waiter     | `orphaned`          | `False`    | No    | None                                              |
+| Decision                              | Record status       | `approved` | Runs? | Arguments                                                   |
+| ------------------------------------- | ------------------- | ---------- | ----- | ----------------------------------------------------------- |
+| approve                               | `approved`          | `True`     | Yes   | Original server-held arguments                              |
+| reject                                | `rejected`          | `False`    | No    | None executed; the optional comment is returned             |
+| edit                                  | `edited`            | `True`     | Yes   | Validated non-secret edits with original server-held values |
+| request changes                       | `changes_requested` | `False`    | No    | None executed; a comment is required and returned           |
+| timeout                               | `expired`           | `False`    | No    | None                                                        |
+| stop / replace / delete / session end | `superseded`        | `False`    | No    | None                                                        |
+| restart / resume without a waiter     | `orphaned`          | `False`    | No    | None                                                        |
 
 The framework does not auto-approve, remember decisions, or provide an admin
 override.
@@ -313,9 +397,11 @@ record is refused without changing state.
 ## Persistence contract
 
 The record lives under `step.metadata["approval"]`. It contains the approval id,
-revision, tool, title, status, requesting user, timestamps, expiry, edit flag, a
-per-approval salt, an HMAC digest of the full arguments, a recursively redacted
-preview, and the decision comment (`reason`) when one was supplied. The preview
+revision, tool, title, status, requesting user, timestamps, expiry, the two
+action flags (`editAllowed`, `requestChangesAllowed`), a per-approval salt, an
+HMAC digest of the full arguments, a recursively redacted preview, and the
+validated decision comment (`reason`) when one was supplied.
+The comment is untrusted user input and stays owner-only. The preview
 is key-name based: a value under a non-secret-looking key stays in the record
 even though the full-argument digest also covers it. Raw argument objects are
 never stored. Public shares keep only the fields in the approval allowlist, so
@@ -358,7 +444,7 @@ treated as absent, never as pending.
 | ----------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------- |
 | Approve now                         | Terminal write succeeds, then the waiter resolves                                                | Yes, once                  |
 | Reject now                          | `rejected`                                                                                       | No                         |
-| Edit now                            | Schema-validated final arguments, final redacted trace                                           | Yes, with edited arguments |
+| Edit now                            | Schema-validated non-secret edits plus original server-held fields; final redacted trace         | Yes, with edited arguments |
 | Same-session socket reconnect       | The waiter survives; the server does not re-emit the card, so Edit is hidden until a fresh event | After a decision, once     |
 | Page reload / new session           | No waiter; resume marks a persisted pending record `orphaned`; the app may ask again             | No                         |
 | Process restart                     | No waiter; resume marks the record `orphaned`                                                    | No                         |
@@ -376,20 +462,21 @@ render the final status without waiting for another event.
 
 ## Refusal codes
 
-| Code                       | Typical HTTP status | Meaning                                                                                                          |
-| -------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `ApprovalAuthRequired`     | 401                 | No authenticated user                                                                                            |
-| `ApprovalNotReady`         | 409                 | No user message has happened yet                                                                                 |
-| `ApprovalUnsupported`      | 400                 | Wrong session type, missing generation, manual flag, or sync decorator                                           |
-| `ApprovalThreadMismatch`   | 403                 | The step belongs to another thread                                                                               |
-| `ApprovalSessionMismatch`  | 403                 | The decision comes from another session generation                                                               |
-| `ApprovalNotFound`         | 404                 | Unknown approval, or it does not belong to this thread                                                           |
-| `ApprovalNotPending`       | 409                 | The approval is already terminal or has expired                                                                  |
-| `ApprovalPersistenceError` | 500                 | The terminal record could not be proven durable                                                                  |
-| `ApprovalInvalidArguments` | 422                 | Arguments are not JSON-compatible, an edit failed validation, or a request-change comment is missing or too long |
-| `ApprovalEditNotAllowed`   | 422                 | Edit was requested without an edit schema                                                                        |
-| `ApprovalLimitReached`     | 429                 | More than 8 pending approvals in one session                                                                     |
-| `ApprovalPending`          | 409                 | A new run was attempted while an approval is pending                                                             |
+| Code                       | Typical HTTP status | Meaning                                                                                                                        |
+| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ApprovalAuthRequired`     | 401                 | No authenticated user                                                                                                          |
+| `ApprovalNotReady`         | 409                 | No user message has happened yet                                                                                               |
+| `ApprovalUnsupported`      | 400                 | Wrong session type, missing generation, manual flag, or sync decorator                                                         |
+| `ApprovalThreadMismatch`   | 403                 | The step belongs to another thread                                                                                             |
+| `ApprovalSessionMismatch`  | 403                 | The decision comes from another session generation                                                                             |
+| `ApprovalNotFound`         | 404                 | Unknown approval, or it does not belong to this thread                                                                         |
+| `ApprovalNotPending`       | 409                 | The approval is already terminal or has expired                                                                                |
+| `ApprovalPersistenceError` | 500                 | The terminal record could not be proven durable                                                                                |
+| `ApprovalInvalidArguments` | 422                 | Arguments are not JSON-compatible, an edit failed validation, or a comment is missing, too long, or contains unsafe characters |
+| `ApprovalEditNotAllowed`   | 422                 | Edit was requested without an edit schema                                                                                      |
+| `ApprovalActionNotAllowed` | 400                 | The approval's policy forbids the requested decision (`allow_edit=False` or `allow_request_changes=False`)                     |
+| `ApprovalLimitReached`     | 429                 | More than 8 pending approvals in one session                                                                                   |
+| `ApprovalPending`          | 409                 | A new run was attempted while an approval is pending                                                                           |
 
 Invalid edit responses contain only a field path and an error type. They never
 echo the submitted value. Invalid arguments produce no write and no execution.
@@ -408,12 +495,16 @@ echo the submitted value. Invalid arguments produce no write and no execution.
 - **Lost or clobbered record** – approval writes merge the reserved key under a
   per-step lock with a revision check. An app that writes another `Step` object
   with the same id is outside this protection.
-- **Secrets at rest** – the decorated path stores only a redacted preview. The
-  preview redacts case-insensitive key parts such as `authorization`, `api_key`,
-  `apikey`, `password`, `secret`, `token` and `credential`, recursively, up to
-  depth 8 and 16 KiB. Values under other keys stay visible; the heuristic does
-  not inspect values. Apps can add keys with `Approval(redact=...)`, or use the
-  explicit API when the decorator's fixed list is not enough.
+- **Secrets in transit and at rest** – a schema-backed approval omits secret and
+  read-only field values from the live card, and an edit cannot replace them.
+  The decorated path stores only a redacted preview. The preview redacts
+  case-insensitive key parts such as `authorization`, `api_key`, `apikey`,
+  `password`, `secret`, `token` and `credential`, recursively, up to depth 8 and
+  16 KiB. Values under other keys stay visible; the heuristic does not inspect
+  values. Apps can add preview keys with `Approval(redact=...)`, or use the
+  explicit API when the decorator's fixed list is not enough. An approval
+  without a schema, or a JSON-fallback schema with nested secret values, still
+  sends those values to the live card by design.
 - **Terminal overwrite** – one locked transition handles decisions and timeouts.
   A later transition returns the stored record and changes nothing.
 - **Identity / session spoofing** – the record is bound to the authenticated

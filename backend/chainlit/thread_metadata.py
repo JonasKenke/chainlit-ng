@@ -109,6 +109,26 @@ def _normalize_steps(steps: Any) -> Any:
     ]
 
 
+def _input_has_interaction(step: Mapping[str, Any]) -> bool:
+    """True when the redacted interaction preview marks this step.
+
+    The input trace survives a failed metadata write, so it is an independent
+    marker that the step is an approval or question interaction.
+    """
+    raw = step.get("input")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return False
+    return isinstance(raw, Mapping) and "approval" in raw
+
+
+def _drop_interaction_trace(step: Mapping[str, Any]) -> dict:
+    """Drop the input and output of an interaction from a public projection."""
+    return {key: value for key, value in step.items() if key not in ("input", "output")}
+
+
 def _public_steps(steps: Any) -> Any:
     if not isinstance(steps, list):
         return []
@@ -116,6 +136,7 @@ def _public_steps(steps: Any) -> Any:
     for step in steps:
         if not isinstance(step, dict):
             continue
+        interaction_input = _input_has_interaction(step)
         raw_metadata = step.get("metadata")
         if isinstance(raw_metadata, str):
             try:
@@ -125,22 +146,24 @@ def _public_steps(steps: Any) -> Any:
         if not isinstance(raw_metadata, dict):
             # Without parseable metadata we cannot tell whether the step is an
             # interaction; drop the input trace as well as the metadata.
-            result.append(
-                {
-                    key: value
-                    for key, value in step.items()
-                    if key not in ("input", "metadata")
-                }
-                | {"metadata": {}}
-            )
+            public_step = {
+                key: value
+                for key, value in step.items()
+                if key not in ("input", "metadata")
+            }
+            if interaction_input:
+                public_step.pop("output", None)
+            result.append({**public_step, "metadata": {}})
             continue
         if "approval" not in raw_metadata:
-            result.append({**step, "metadata": raw_metadata})
+            public_step = _drop_interaction_trace(step) if interaction_input else step
+            result.append({**public_step, "metadata": raw_metadata})
             continue
         approval = raw_metadata["approval"]
         # The framework writes the edited preview into the step input trace
-        # (M11); the public view must not carry it past the allowlist.
-        public_step = {key: value for key, value in step.items() if key != "input"}
+        # (M11); the public view must not carry it past the allowlist. The
+        # step output may repeat the decision and comment.
+        public_step = _drop_interaction_trace(step)
         if not isinstance(approval, Mapping):
             # An unexpected shape may carry detail outside the nested record;
             # drop the whole step metadata rather than guessing.

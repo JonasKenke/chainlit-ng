@@ -201,6 +201,13 @@ class ApprovalEditNotAllowed(ApprovalError):
     status_code = 422
 
 
+class ApprovalActionNotAllowed(ApprovalError):
+    """The approval's server-enforced policy forbids this decision."""
+
+    code = "ApprovalActionNotAllowed"
+    status_code = 400
+
+
 class ApprovalLimitReached(ApprovalError):
     code = "ApprovalLimitReached"
     status_code = 429
@@ -670,6 +677,20 @@ def _is_secret_name(name: str) -> bool:
     return any(part in lower for part in _SECRET_KEY_PARTS)
 
 
+def _is_secret_field(name: str, prop: Mapping[str, Any]) -> bool:
+    """A field whose value is a credential, never sent to the browser."""
+    return (
+        _is_secret_name(name)
+        or prop.get("format") == "password"
+        or bool(prop.get("writeOnly"))
+    )
+
+
+def _is_non_editable_field(prop: Mapping[str, Any]) -> bool:
+    """Read-only fields keep the original value; the form cannot change them."""
+    return prop.get("readOnly") is True or prop.get("editable") is False
+
+
 def _unwrap_optional_schema(
     prop: Mapping[str, Any],
 ) -> tuple[Dict[str, Any], bool]:
@@ -756,6 +777,7 @@ def _edit_fields(
             return None
         field_kind, options = kind
         _unwrapped, nullable = _unwrap_optional_schema(raw)
+        secret = _is_secret_field(name, raw)
         fields.append(
             {
                 "name": name,
@@ -763,9 +785,10 @@ def _edit_fields(
                 "kind": field_kind,
                 "required": name in required,
                 "nullable": nullable,
-                "secret": _is_secret_name(name)
-                or raw.get("format") == "password"
-                or bool(raw.get("writeOnly")),
+                "secret": secret,
+                # Secret values and explicitly read-only fields stay on the
+                # server; the form only shows that they are held there.
+                "serverHeld": secret or _is_non_editable_field(raw),
                 "options": options,
                 "description": raw.get("description"),
                 "default": raw.get("default"),
@@ -778,10 +801,55 @@ def _edit_fields(
     return fields
 
 
+def _server_held_names(
+    schema: Optional[type[BaseModel]],
+    fields: Optional[list[Dict[str, Any]]],
+    arguments: Mapping[str, Any],
+) -> set[str]:
+    """Field names whose values never leave the server.
+
+    A schema with editable fields carries the authoritative ``serverHeld``
+    flags. A schema that falls back to the raw JSON editor has no field
+    descriptors, so top-level secret-looking keys still stay server-held.
+    """
+    if schema is None:
+        return set()
+    if fields is not None:
+        return {str(field["name"]) for field in fields if field.get("serverHeld")}
+    return {str(name) for name in arguments if _is_secret_name(str(name))}
+
+
+def _client_arguments(
+    arguments: Mapping[str, Any], withheld: set[str]
+) -> Dict[str, Any]:
+    return {
+        str(key): value for key, value in arguments.items() if str(key) not in withheld
+    }
+
+
+def _with_server_held_values(
+    edited: Any,
+    schema: type[BaseModel],
+    original: Mapping[str, Any],
+) -> Any:
+    """Ignore client values for server-held fields and restore originals."""
+    if not isinstance(edited, Mapping):
+        # Let _validate_edited report object_type without echoing the value.
+        return edited
+    submitted = dict(edited)
+    for name in _server_held_names(schema, _edit_fields(schema), original):
+        if name in original:
+            submitted[name] = deepcopy(original[name])
+        else:
+            submitted.pop(name, None)
+    return submitted
+
+
 def _payload(
     record: Mapping[str, Any],
     arguments: Mapping[str, Any],
     edit_fields: Optional[list[Dict[str, Any]]] = None,
+    server_held: set[str] | frozenset[str] = frozenset(),
 ) -> Dict[str, Any]:
     return {
         "id": record["id"],
@@ -801,10 +869,11 @@ def _payload(
         "reason": record.get("reason"),
         "terminalReason": record.get("terminalReason"),
         "editAllowed": bool(record.get("editAllowed")),
+        "requestChangesAllowed": record.get("requestChangesAllowed") is not False,
         "editFields": edit_fields,
         "argumentsPreview": record.get("argumentsPreview"),
         "editedArgumentsPreview": record.get("editedArgumentsPreview"),
-        "arguments": dict(arguments),
+        "arguments": _client_arguments(arguments, set(server_held)),
     }
 
 
@@ -840,8 +909,14 @@ async def _emit(
         if entry.kind == "question":
             await entry.emitter.send_question(_question_payload(record))
         else:
+            edit_fields = _edit_fields(entry.arguments_schema)
             await entry.emitter.send_approval(
-                _payload(record, arguments, _edit_fields(entry.arguments_schema))
+                _payload(
+                    record,
+                    arguments,
+                    edit_fields,
+                    _server_held_names(entry.arguments_schema, edit_fields, arguments),
+                )
             )
     except Exception:
         logger.exception("Failed to emit %s event", entry.kind)
@@ -898,12 +973,8 @@ async def _write(
         return False
 
 
-def _normalize_question_text(value: Any) -> str:
-    if not isinstance(value, str):
-        raise QuestionInvalid("answer text must be a string")
-    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not text or len(text) > _MAX_QUESTION_ANSWER:
-        raise QuestionInvalid("answer text must be 1..2000 characters")
+def _contains_forbidden_text_char(text: str) -> bool:
+    """True for control, bidi, zero-width, tag and surrogate characters."""
     for char in text:
         codepoint = ord(char)
         if (
@@ -913,7 +984,38 @@ def _normalize_question_text(value: Any) -> str:
             or 0xE0000 <= codepoint <= 0xE007F
             or char in _FORBIDDEN_ANSWER_CHARS
         ):
-            raise QuestionInvalid("answer text contains control characters")
+            return True
+    return False
+
+
+def _normalize_question_text(value: Any) -> str:
+    if not isinstance(value, str):
+        raise QuestionInvalid("answer text must be a string")
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text or len(text) > _MAX_QUESTION_ANSWER:
+        raise QuestionInvalid("answer text must be 1..2000 characters")
+    if _contains_forbidden_text_char(text):
+        raise QuestionInvalid("answer text contains control characters")
+    return text
+
+
+def _normalize_comment(value: str) -> str:
+    """Plain-text decision comment; newlines and tabs are layout, not control."""
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    if len(text) > _MAX_COMMENT_CHARS:
+        raise ApprovalInvalidArguments(
+            "comment is too long",
+            field="reason",
+            error_type="too_long",
+        )
+    if _contains_forbidden_text_char(text):
+        raise ApprovalInvalidArguments(
+            "comment contains control characters",
+            field="reason",
+            error_type="control_characters",
+        )
     return text
 
 
@@ -976,16 +1078,16 @@ async def _transition_locked(
         )
         raise ApprovalNotPending("Interaction has expired", record=stored)
 
+    if (
+        to_status == "changes_requested"
+        and pending.get("requestChangesAllowed") is False
+    ):
+        raise ApprovalActionNotAllowed("This approval does not accept change requests")
+
     comment: Optional[str] = None
     if to_status in user_statuses:
-        comment = reason.strip() if isinstance(reason, str) else None
+        comment = _normalize_comment(reason) if isinstance(reason, str) else ""
         comment = comment or None
-        if comment is not None and len(comment) > _MAX_COMMENT_CHARS:
-            raise ApprovalInvalidArguments(
-                "comment is too long",
-                field="reason",
-                error_type="too_long",
-            )
         if to_status == "changes_requested" and comment is None:
             raise ApprovalInvalidArguments(
                 "a comment is required when requesting changes",
@@ -1000,13 +1102,20 @@ async def _transition_locked(
     if to_status == "edited":
         if entry.arguments_schema is None:
             raise ApprovalEditNotAllowed("This approval does not accept edits")
+        if pending.get("editAllowed") is not True:
+            raise ApprovalActionNotAllowed("Editing is disabled for this approval")
         if edited_arguments is None:
             raise ApprovalInvalidArguments(
                 "edited arguments are required",
                 field="editedArguments",
                 error_type="missing",
             )
-        validated = _validate_edited(edited_arguments, entry.arguments_schema)
+        validated = _validate_edited(
+            _with_server_held_values(
+                edited_arguments, entry.arguments_schema, entry.arguments
+            ),
+            entry.arguments_schema,
+        )
         final_arguments = validated
         record.update(
             {
@@ -1334,6 +1443,8 @@ class Approval:
         arguments_schema: Optional[type[BaseModel]] = None,
         redact: Sequence[str] = (),
         timeout: Optional[float] = None,
+        allow_edit: Optional[bool] = None,
+        allow_request_changes: Optional[bool] = None,
     ) -> None:
         if arguments_schema is not None and not (
             isinstance(arguments_schema, type)
@@ -1346,6 +1457,12 @@ class Approval:
             raise ValueError(
                 "arguments_schema must set model_config = ConfigDict(extra='forbid')"
             )
+        for flag_name, flag_value in (
+            ("allow_edit", allow_edit),
+            ("allow_request_changes", allow_request_changes),
+        ):
+            if flag_value is not None and not isinstance(flag_value, bool):
+                raise ValueError(f"{flag_name} must be a bool")
         self.step = step
         self.arguments = deepcopy(dict(arguments))
         self.tool = tool or step.name
@@ -1361,6 +1478,10 @@ class Approval:
             content = content or None
         self.content = content
         self.arguments_schema = arguments_schema
+        # Editing still requires a schema to validate against; the flag can
+        # only remove the action, never add one the server cannot check.
+        self.edit_allowed = arguments_schema is not None and allow_edit is not False
+        self.request_changes_allowed = allow_request_changes is not False
         self.redact = tuple(redact)
         self.timeout = timeout
 
@@ -1393,7 +1514,8 @@ class Approval:
             "requestedBy": user.identifier,
             "requestedAt": requested_at,
             "expiresAt": expires_at,
-            "editAllowed": self.arguments_schema is not None,
+            "editAllowed": self.edit_allowed,
+            "requestChangesAllowed": self.request_changes_allowed,
             "digestSalt": salt,
             "argumentsDigest": _arguments_digest(self.arguments, salt),
             "argumentsPreview": _arguments_preview(self.arguments, self.redact),

@@ -158,6 +158,8 @@ def step(
     requires_approval: bool = False,
     approval_schema: Optional[Type[BaseModel]] = None,
     approval_content: Optional[str] = None,
+    allow_edit: Optional[bool] = None,
+    allow_request_changes: Optional[bool] = None,
 ):
     """Step decorator for async and sync functions."""
 
@@ -218,17 +220,18 @@ def step(
                             arguments=approval_arguments,
                             content=approval_content,
                             arguments_schema=approval_schema,
+                            allow_edit=allow_edit,
+                            allow_request_changes=allow_request_changes,
                         ).ask()
                         if not decision.approved:
                             step.is_error = True
-                            label = (
-                                "rejected"
-                                if decision.decision == "reject"
-                                else decision.decision
-                            )
+                            label = {
+                                "reject": "rejected",
+                                "request_changes": "changes_requested",
+                            }.get(decision.decision, decision.decision)
+                            # The comment is untrusted user input and stays
+                            # owner-only in metadata.approval.reason.
                             step.output = f"Approval {label}"
-                            if decision.comment:
-                                step.output += f": {decision.comment}"
                             return None
                         call_args, call_kwargs = _approval_call_arguments(
                             func,

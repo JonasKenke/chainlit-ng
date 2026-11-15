@@ -84,9 +84,9 @@ export const QuestionCard = ({ question }: Props) => {
       data-question-id={question.id}
       aria-label={t('chat.question.ariaLabel')}
       aria-live="polite"
-      className="scroll-mt-4 rounded-lg border border-border bg-card p-4 text-card-foreground"
+      className="scroll-mt-4 flex max-h-[min(80vh,calc(100dvh_-_14rem))] flex-col rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex shrink-0 items-start justify-between gap-4">
         <div className="text-sm font-semibold">{t('chat.question.title')}</div>
         {question.status !== 'pending' ? (
           <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -95,13 +95,16 @@ export const QuestionCard = ({ question }: Props) => {
         ) : null}
       </div>
 
-      <div className="mt-3 max-h-[80vh] overflow-y-auto custom-scrollbar whitespace-pre-wrap rounded-md bg-muted/40 p-2.5 text-sm leading-6">
-        <bdi dir="auto">{question.prompt}</bdi>
-      </div>
+      <div
+        data-testid="question-card-scroll"
+        className="mt-3 min-h-0 flex-1 overflow-y-auto custom-scrollbar pr-1"
+      >
+        <div className="whitespace-pre-wrap rounded-md bg-muted/40 p-2.5 text-sm leading-6">
+          <bdi dir="auto">{question.prompt}</bdi>
+        </div>
 
-      {canAnswer ? (
-        <>
-          <div className="mt-3 max-h-[80vh] overflow-y-auto custom-scrollbar pr-1">
+        {canAnswer ? (
+          <div>
             {question.options.length ? (
               <fieldset className="mt-3">
                 <legend className="text-xs font-medium text-muted-foreground">
@@ -182,48 +185,53 @@ export const QuestionCard = ({ question }: Props) => {
               </div>
             ) : null}
           </div>
-
-          <div className="mt-3 flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              className="w-full sm:w-auto"
-              disabled={submitDisabled}
-              onClick={submit}
-            >
-              {t('common.actions.submit')}
-            </Button>
+        ) : (
+          <div className="mt-3 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
+            {isPending ? (
+              <span>{t('chat.question.readOnly')}</span>
+            ) : question.status === 'answered' ? (
+              <span>
+                {answer?.redacted ? (
+                  <span>{t('chat.question.answeredPrivately')}</span>
+                ) : answer?.label ? (
+                  <bdi dir="auto">{answer.label}</bdi>
+                ) : answer?.text ? (
+                  <bdi dir="auto" className="whitespace-pre-wrap">
+                    {answer.text}
+                  </bdi>
+                ) : null}
+              </span>
+            ) : (
+              <span>{t(statusKey[question.status])}</span>
+            )}
+            {question.decidedBy ? (
+              <span>
+                {' '}
+                · {t('chat.question.by')}{' '}
+                <bdi dir="auto">{question.decidedBy}</bdi>
+              </span>
+            ) : null}
+            {question.decidedAt ? <span> · {question.decidedAt}</span> : null}
           </div>
-        </>
-      ) : (
-        <div className="mt-3 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
-          {isPending ? (
-            <span>{t('chat.question.readOnly')}</span>
-          ) : question.status === 'answered' ? (
-            <span>
-              {answer?.redacted ? (
-                <span>{t('chat.question.answeredPrivately')}</span>
-              ) : answer?.label ? (
-                <bdi dir="auto">{answer.label}</bdi>
-              ) : answer?.text ? (
-                <bdi dir="auto" className="whitespace-pre-wrap">
-                  {answer.text}
-                </bdi>
-              ) : null}
-            </span>
-          ) : (
-            <span>{t(statusKey[question.status])}</span>
-          )}
-          {question.decidedBy ? (
-            <span>
-              {' '}
-              · {t('chat.question.by')}{' '}
-              <bdi dir="auto">{question.decidedBy}</bdi>
-            </span>
-          ) : null}
-          {question.decidedAt ? <span> · {question.decidedAt}</span> : null}
+        )}
+      </div>
+
+      {canAnswer ? (
+        <div
+          data-testid="question-card-actions"
+          className="mt-3 flex shrink-0 justify-end border-t border-border pt-3"
+        >
+          <Button
+            type="button"
+            size="sm"
+            className="w-full sm:w-auto"
+            disabled={submitDisabled}
+            onClick={submit}
+          >
+            {t('common.actions.submit')}
+          </Button>
         </div>
-      )}
+      ) : null}
     </section>
   );
 };

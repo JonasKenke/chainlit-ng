@@ -21,6 +21,7 @@ export interface IApprovalEditField {
   required: boolean;
   nullable: boolean;
   secret: boolean;
+  serverHeld?: boolean;
   options?: (string | number | boolean)[] | null;
   description?: string | null;
   default?: unknown;
@@ -41,6 +42,7 @@ export interface IApproval {
   argumentsPreview?: Record<string, unknown> | null;
   editedArgumentsPreview?: Record<string, unknown> | null;
   editAllowed?: boolean;
+  requestChangesAllowed?: boolean;
   editFields?: IApprovalEditField[] | null;
   live?: boolean;
   reason?: string | null;

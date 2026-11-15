@@ -6,7 +6,14 @@ import {
   useSetChainlitState
 } from '@chainlit-ng/react-client';
 import { MessageContext } from 'contexts/MessageContext';
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -131,12 +138,19 @@ const approvalErrorMessage = (error: unknown): string => {
 
 type FieldValues = Record<string, string | boolean>;
 
+const isServerHeld = (field: IApprovalEditField): boolean =>
+  field.serverHeld === true || field.secret === true;
+
 const initialFieldValues = (
   fields: IApprovalEditField[],
   args: Record<string, unknown>
 ): FieldValues => {
   const values: FieldValues = {};
   for (const field of fields) {
+    if (isServerHeld(field)) {
+      values[field.name] = '';
+      continue;
+    }
     const value = args[field.name] ?? field.default;
     if (field.kind === 'boolean') {
       values[field.name] = Boolean(value);
@@ -156,6 +170,7 @@ const buildEditedArguments = (
 ): Record<string, unknown> | string => {
   const edited: Record<string, unknown> = {};
   for (const field of fields) {
+    if (isServerHeld(field)) continue;
     const raw = values[field.name];
     if (field.kind === 'boolean') {
       edited[field.name] = Boolean(raw);
@@ -202,6 +217,69 @@ const buildEditedArguments = (
   return edited;
 };
 
+const argumentsEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    return (
+      left.length === right.length &&
+      left.every((item, index) => argumentsEqual(item, right[index]))
+    );
+  }
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== 'object' ||
+    typeof right !== 'object'
+  ) {
+    return false;
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  return (
+    leftKeys.length === Object.keys(rightRecord).length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+        argumentsEqual(leftRecord[key], rightRecord[key])
+    )
+  );
+};
+
+const withServerHeldArguments = (
+  values: Record<string, unknown>,
+  fields: IApprovalEditField[],
+  args: Record<string, unknown>
+): Record<string, unknown> => {
+  const merged = { ...values };
+  for (const field of fields) {
+    if (isServerHeld(field) && field.name in args) {
+      merged[field.name] = args[field.name];
+    }
+  }
+  return merged;
+};
+
+// An untouched form must not become an edit: run the live arguments through
+// the same normalisation as the form and compare, merging server-held values
+// back in because the form never renders or submits them.
+const areArgumentsUnchanged = (
+  fields: IApprovalEditField[],
+  args: Record<string, unknown>,
+  edited: Record<string, unknown>
+): boolean => {
+  const baseline = buildEditedArguments(
+    fields,
+    initialFieldValues(fields, args)
+  );
+  if (typeof baseline === 'string') return false;
+  return argumentsEqual(
+    withServerHeldArguments(edited, fields, args),
+    withServerHeldArguments(baseline, fields, args)
+  );
+};
+
 interface Props {
   approval: IApproval;
 }
@@ -218,25 +296,72 @@ export const ApprovalCard = ({ approval }: Props) => {
   const [requestingChanges, setRequestingChanges] = useState(false);
   const [comment, setComment] = useState('');
   const editAreaRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLElement>(null);
+  const editTriggerRef = useRef<HTMLButtonElement>(null);
+  const requestChangesTriggerRef = useRef<HTMLButtonElement>(null);
+  const firstFieldRef = useRef<
+    HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+  >(null);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
+  const jsonEditorRef = useRef<HTMLTextAreaElement>(null);
+  // Where focus should land once the next render unmounts the focused control.
+  const pendingFocusRef = useRef<'card' | 'edit' | 'request' | null>(null);
 
   useEffect(() => {
-    if (editMode) {
-      editAreaRef.current?.scrollIntoView?.({
-        behavior: 'smooth',
-        block: 'start'
-      });
+    if (!editMode) return;
+    editAreaRef.current?.scrollIntoView?.({
+      behavior: 'smooth',
+      block: 'start'
+    });
+    if (editMode === 'form') {
+      firstFieldRef.current?.focus();
+    } else {
+      jsonEditorRef.current?.focus();
     }
   }, [editMode]);
+
+  useEffect(() => {
+    if (requestingChanges) {
+      commentRef.current?.focus();
+    }
+  }, [requestingChanges]);
+
+  useEffect(() => {
+    const target = pendingFocusRef.current;
+    if (!target) return;
+    if (target === 'edit' && editMode) return;
+    if (target === 'request' && requestingChanges) return;
+    pendingFocusRef.current = null;
+    if (target === 'card') {
+      cardRef.current?.focus();
+    } else if (target === 'edit') {
+      (editTriggerRef.current ?? cardRef.current)?.focus();
+    } else {
+      (requestChangesTriggerRef.current ?? cardRef.current)?.focus();
+    }
+  }, [editMode, requestingChanges]);
 
   const fields = Array.isArray(approval.editFields)
     ? approval.editFields
     : null;
   const canEdit = Boolean(approval.editAllowed) && approval.live !== false;
+  // Absent means allowed: older servers never send the flag.
+  const canRequestChanges = approval.requestChangesAllowed !== false;
   const isPending = approval.status === 'pending';
   const diff = useMemo(
     () =>
       diffPreviews(approval.argumentsPreview, approval.editedArgumentsPreview),
     [approval.argumentsPreview, approval.editedArgumentsPreview]
+  );
+  const firstEditableFieldName =
+    fields?.find((field) => !isServerHeld(field))?.name ?? null;
+  const setFirstFieldElement = useCallback(
+    (
+      element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null
+    ) => {
+      firstFieldRef.current = element;
+    },
+    []
   );
 
   const decide = async (
@@ -298,6 +423,13 @@ export const ApprovalCard = ({ approval }: Props) => {
       toast.error(edited);
       return;
     }
+    if (areArgumentsUnchanged(fields, approval.arguments ?? {}, edited)) {
+      pendingFocusRef.current = 'card';
+      setEditMode(null);
+      toast.message('No changes to save');
+      return;
+    }
+    pendingFocusRef.current = 'card';
     setEditMode(null);
     void decide('edit', { editedArguments: edited });
   };
@@ -314,13 +446,24 @@ export const ApprovalCard = ({ approval }: Props) => {
       toast.error('Arguments must be a JSON object');
       return;
     }
+    pendingFocusRef.current = 'card';
     setEditMode(null);
     void decide('edit', { editedArguments: parsed as Record<string, unknown> });
+  };
+
+  const cancelEdit = () => {
+    pendingFocusRef.current = 'edit';
+    setEditMode(null);
   };
 
   const startRequestChanges = () => {
     setComment('');
     setRequestingChanges(true);
+  };
+
+  const cancelRequestChanges = () => {
+    pendingFocusRef.current = 'request';
+    setRequestingChanges(false);
   };
 
   const submitRequestChanges = () => {
@@ -329,6 +472,7 @@ export const ApprovalCard = ({ approval }: Props) => {
       toast.error('A comment is required when requesting changes');
       return;
     }
+    pendingFocusRef.current = 'card';
     setRequestingChanges(false);
     void decide('request_changes', { reason });
   };
@@ -338,9 +482,25 @@ export const ApprovalCard = ({ approval }: Props) => {
     const value = fieldValues[field.name];
     const className =
       'mt-1 w-full rounded border border-border bg-background p-2 text-sm';
+    const ref =
+      field.name === firstEditableFieldName ? setFirstFieldElement : undefined;
+    if (isServerHeld(field)) {
+      return (
+        <input
+          id={id}
+          aria-label={field.label}
+          type="text"
+          className={`${className} text-muted-foreground`}
+          value="Server-held"
+          readOnly
+          disabled
+        />
+      );
+    }
     if (field.kind === 'boolean') {
       return (
         <input
+          ref={ref}
           id={id}
           aria-label={field.label}
           type="checkbox"
@@ -358,6 +518,7 @@ export const ApprovalCard = ({ approval }: Props) => {
     if (field.kind === 'enum') {
       return (
         <select
+          ref={ref}
           id={id}
           aria-label={field.label}
           className={className}
@@ -381,6 +542,7 @@ export const ApprovalCard = ({ approval }: Props) => {
     if (field.kind === 'text' || field.kind === 'string_list') {
       return (
         <textarea
+          ref={ref}
           id={id}
           aria-label={field.label}
           className={`${className} h-28`}
@@ -401,14 +563,13 @@ export const ApprovalCard = ({ approval }: Props) => {
     }
     return (
       <input
+        ref={ref}
         id={id}
         aria-label={field.label}
         type={
-          field.secret
-            ? 'password'
-            : field.kind === 'integer' || field.kind === 'number'
-              ? 'number'
-              : 'text'
+          field.kind === 'integer' || field.kind === 'number'
+            ? 'number'
+            : 'text'
         }
         step={
           field.kind === 'integer'
@@ -431,6 +592,8 @@ export const ApprovalCard = ({ approval }: Props) => {
 
   return (
     <section
+      ref={cardRef}
+      tabIndex={-1}
       data-testid="approval-card"
       data-approval-id={approval.id}
       aria-label={`Approval for ${approval.tool}`}
@@ -523,7 +686,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() => setEditMode(null)}
+              onClick={cancelEdit}
             >
               Cancel
             </Button>
@@ -532,6 +695,7 @@ export const ApprovalCard = ({ approval }: Props) => {
       ) : editMode === 'json' ? (
         <div ref={editAreaRef} className="mt-3 scroll-mt-4">
           <textarea
+            ref={jsonEditorRef}
             aria-label="Edited arguments JSON"
             className="h-40 w-full rounded border border-border bg-background p-2 font-mono text-xs"
             value={draft}
@@ -551,7 +715,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() => setEditMode(null)}
+              onClick={cancelEdit}
             >
               Cancel
             </Button>
@@ -566,6 +730,7 @@ export const ApprovalCard = ({ approval }: Props) => {
             What should change? (required)
           </label>
           <textarea
+            ref={commentRef}
             id={`approval-comment-${approval.id}`}
             aria-label="Comment"
             maxLength={500}
@@ -587,7 +752,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() => setRequestingChanges(false)}
+              onClick={cancelRequestChanges}
             >
               Cancel
             </Button>
@@ -605,6 +770,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           </Button>
           {canEdit ? (
             <Button
+              ref={editTriggerRef}
               type="button"
               size="sm"
               variant="outline"
@@ -623,15 +789,18 @@ export const ApprovalCard = ({ approval }: Props) => {
           >
             Reject
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={startRequestChanges}
-          >
-            Request changes
-          </Button>
+          {canRequestChanges ? (
+            <Button
+              ref={requestChangesTriggerRef}
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={startRequestChanges}
+            >
+              Request changes
+            </Button>
+          ) : null}
         </div>
       ) : (
         <div className="mt-3 text-xs text-muted-foreground">
@@ -643,7 +812,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               data-testid="approval-comment"
               className="mt-1 whitespace-pre-wrap text-xs"
             >
-              {approval.reason}
+              <bdi dir="auto">{approval.reason}</bdi>
             </div>
           ) : null}
         </div>
