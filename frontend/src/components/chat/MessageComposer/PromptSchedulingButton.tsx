@@ -213,7 +213,7 @@ const errorMessage = (error: unknown, fallback: string) => {
 };
 
 const displayDate = (value: string | null) =>
-  value ? new Date(value).toLocaleString() : '—';
+  value ? new Date(value).toLocaleString() : 'Never';
 
 const statusLabel = (status: string, t: (key: string) => string) => {
   const keys: Record<string, string> = {
@@ -907,7 +907,7 @@ export function PromptSchedulingButton({ disabled = false }: Props) {
                       <p className="text-xs" role="status">
                         {t('chat.promptScheduling.lastStatus')}:{' '}
                         {statusLabel(task.lastStatus, t)}
-                        {task.lastError ? ` — ${task.lastError}` : ''}
+                        {task.lastError ? `. ${task.lastError}` : ''}
                       </p>
                     )}
                     <div className="flex items-center gap-2">

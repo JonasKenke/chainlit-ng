@@ -103,7 +103,7 @@ export function SkillReviewDialog({ open, skill, onEnable, onClose }: Props) {
         source: skill.importedFrom,
         date: skill.importedAt
           ? new Date(skill.importedAt).toLocaleString()
-          : '—'
+          : 'Unknown'
       })
     : '';
 

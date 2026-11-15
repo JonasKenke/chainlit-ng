@@ -57,7 +57,7 @@ export function VersionPicker({
           data-testid={testId}
         >
           <span className="font-medium">
-            {selected ? `v${selected.version}` : '—'}
+            {selected ? `v${selected.version}` : 'v?'}
           </span>
           {selected?.createdAt ? (
             <span className="hidden text-muted-foreground sm:inline">

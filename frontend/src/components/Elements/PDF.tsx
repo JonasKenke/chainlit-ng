@@ -86,7 +86,7 @@ export function PDFViewer({
       onMouseLeave={() => setIsHovered(false)}
       onTouchStart={() => setIsHovered(true)}
     >
-      {/* Sticky toolbar — lives in the normal flex flow so it never overlaps content */}
+      {/* Sticky toolbar: lives in the normal flex flow so it never overlaps content */}
       <div
         className={`sticky top-0 z-10 shrink-0 flex flex-wrap items-center justify-between p-2 gap-2 bg-background/80 backdrop-blur-sm border-b border-border rounded-t-md transition-opacity duration-200 ${
           persistentToolbar || isHovered ? 'opacity-100' : 'opacity-0'

@@ -192,9 +192,10 @@ Imported and pinned skills are gated: `PUT /project/skills/{id}` with
 `{"enabled": true}` must include `reviewedContentHash` equal to the current
 version fingerprint from the versions or share endpoint. A mismatch or missing
 hash returns `409 content_changed`. Changing the name, description, or content
-always forces `enabled = false`, even if the same request asks to enable it, so
-a changed body must be reviewed again. Skills created and never imported by the
-owner keep the existing immediate enable path.
+of an imported or pinned skill forces `enabled = false`, even if the same
+request asks to enable it, so a changed body must be reviewed again. Skills
+created and never imported by the owner keep their enabled state across edits
+and use the immediate enable path.
 
 ### Storage and migration
 

@@ -86,13 +86,24 @@ export class ClientError extends Error {
     }
     // A structured 422 (e.g. approvals) carries {error, field, type}; render
     // the path and type instead of "[object Object]".
-    const structured = detail as { field?: unknown; type?: unknown };
+    const structured = detail as {
+      field?: unknown;
+      type?: unknown;
+      message?: unknown;
+      code?: unknown;
+    };
     if (typeof structured.field === 'string') {
       const type =
         typeof structured.type === 'string' ? ` (${structured.type})` : '';
       return `${this.message}: ${structured.field}${type}`;
     }
-    return `${this.message}: ${JSON.stringify(detail)}`;
+    if (typeof structured.message === 'string' && structured.message.trim()) {
+      return `${this.message}: ${structured.message}`;
+    }
+    if (typeof structured.code === 'string') {
+      return `${this.message}: ${structured.code}`;
+    }
+    return this.message;
   }
 }
 

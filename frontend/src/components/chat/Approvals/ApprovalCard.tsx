@@ -738,7 +738,7 @@ export const ApprovalCard = ({ approval }: Props) => {
             }))
           }
         >
-          {field.required ? null : <option value="">—</option>}
+          {field.required ? null : <option value="">None</option>}
           {(field.options ?? []).map((option) => (
             <option key={String(option)} value={String(option)}>
               {String(option)}

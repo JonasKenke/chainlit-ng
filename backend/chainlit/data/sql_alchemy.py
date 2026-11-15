@@ -2496,7 +2496,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             text(
                                 """
                                 SELECT "version", "title", "description", "content",
-                                       "importedFrom", "contentHash"
+                                       "importedFrom", "sourcePromptId", "contentHash"
                                 FROM prompts
                                 WHERE "id" = :id AND "userId" = :userId
                                   AND "kind" = 'skill'
@@ -2521,7 +2521,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     )
                     == digest
                 )
-                if not unchanged:
+                if not unchanged and (
+                    stored["importedFrom"] or stored["sourcePromptId"]
+                ):
                     enabled = False
 
                 # Imported Markdown keep their provenance hash; owned and

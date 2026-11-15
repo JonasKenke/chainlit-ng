@@ -710,6 +710,20 @@ async def test_review_gate_requires_the_current_version_hash(
     assert local_enabled.json()["enabled"] is True
 
 
+async def test_local_skill_edit_keeps_it_enabled(
+    api: AsyncClient, data_layer: SQLAlchemyDataLayer
+):
+    skill = await create_skill(data_layer, enabled=True)
+    with acting_as(OWNER):
+        edited = await api.put(
+            f"/project/skills/{skill['id']}",
+            json={"content": "Locally edited body."},
+        )
+    assert edited.status_code == 200
+    assert edited.json()["enabled"] is True
+    assert edited.json()["version"] == 2
+
+
 async def test_content_edit_disables_and_invalidates_the_review_hash(
     api: AsyncClient, data_layer: SQLAlchemyDataLayer
 ):

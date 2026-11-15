@@ -3025,9 +3025,9 @@ async def update_user_skill(
 ):
     """Edit, share-toggle or enable one of the current user's skills.
 
-    Imported and pinned skills must be reviewed before they are enabled. A
-    content, description or name edit always disables the skill so an edited
-    body can never reach a model without a fresh review.
+    Imported and pinned skills must be reviewed before they are enabled. Their
+    content, description or name edits disable the skill for a fresh review.
+    Local, self-authored skills keep their enabled state across edits.
     """
     data_layer = _skills_data_layer()
     user_id = await _get_user_id(current_user, data_layer)
@@ -3057,12 +3057,16 @@ async def update_user_skill(
         or skill.description != existing.get("description", "")
         or skill.body != existing["content"]
     )
+    imported_or_shared = bool(
+        existing.get("sourcePromptId") or existing.get("importedFrom")
+    )
     if content_changed:
-        updated["enabled"] = False
-    elif payload.enabled is True:
-        imported_or_shared = bool(
-            existing.get("sourcePromptId") or existing.get("importedFrom")
+        # A local, self-authored skill stays enabled across edits. Imported and
+        # linked skills must be reviewed again because their body is untrusted.
+        updated["enabled"] = (
+            False if imported_or_shared else existing.get("enabled", False)
         )
+    elif payload.enabled is True:
         if imported_or_shared:
             expected_hash = await _skill_review_hash(data_layer, existing)
             if not expected_hash or payload.reviewedContentHash != expected_hash:

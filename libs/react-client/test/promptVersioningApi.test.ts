@@ -204,3 +204,15 @@ describe('mergePromptUpdates', () => {
     expect(merged[0].latestVersion).toBe(4);
   });
 });
+
+describe('ClientError', () => {
+  it('renders structured conflict details as text, not JSON', () => {
+    const error = new ClientError('Conflict', 409, {
+      code: 'local_changes',
+      message: 'This skill has local edits'
+    });
+
+    expect(error.toString()).toBe('Conflict: This skill has local edits');
+    expect(error.toString()).not.toContain('{');
+  });
+});
