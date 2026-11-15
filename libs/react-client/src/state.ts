@@ -28,6 +28,7 @@ import {
   IPromptUpdate,
   IScheduledTask,
   ISkill,
+  ISkillUpdateNotice,
   IStep,
   ITasklistElement,
   IUser,
@@ -80,6 +81,7 @@ export interface ChainlitState {
   prompts: IPrompt[];
   promptUpdates: IPromptUpdate[];
   skills: ISkill[];
+  skillUpdates: ISkillUpdateNotice[];
   scheduledTasks: IScheduledTask[];
 }
 
@@ -151,6 +153,7 @@ function initialState(): ChainlitState {
     prompts: [],
     promptUpdates: [],
     skills: [],
+    skillUpdates: [],
     scheduledTasks: []
   };
 }
