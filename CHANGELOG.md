@@ -109,6 +109,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Keep local, self-authored skills enabled when their name, description, or body is edited; imported and linked skills still disable for review. Structured conflict errors now render as readable text instead of JSON, and user-facing copy no longer uses em dashes.
 - Title-case approval tool names (`send_email` → `Send Email`) instead of showing the raw identifier.
 - Give the generated approval edit form a separated "Edit fields" section with bottom spacing, and render embedded newlines in approval diffs as layout instead of JSON escapes. Long review bodies, question controls and edit fields only scroll once they exceed 80% of the viewport height, and the scroll-to-bottom control no longer covers card actions.
+- Compare a pinned prompt's source version instead of its local history counter when listing update notices, so syncing to a newer source and then downgrading cannot hide an unacknowledged update.
+- Label a free-text-only question as "Your answer" instead of "Other", and render question decision times in the viewer's locale rather than raw ISO.
+- Keep dialogs inset from narrow viewports and stack the Library title above its New Prompt action on phones so the header does not overlap or clip.
 
 ### Security
 

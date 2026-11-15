@@ -1,0 +1,10 @@
+/** Render an ISO timestamp in the viewer's locale, or null when unusable. */
+export const formatLocalDateTime = (value?: string | null): string | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(date);
+};

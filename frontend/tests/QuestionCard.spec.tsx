@@ -21,6 +21,8 @@ vi.mock('@/components/i18n/Translator', () => ({
         'chat.question.options': 'Options',
         'chat.question.other': 'Other',
         'chat.question.otherAriaLabel': 'Other answer',
+        'chat.question.answer': 'Your answer',
+        'chat.question.answerAriaLabel': 'Your answer',
         'chat.question.readOnly': 'This question can no longer be answered.',
         'chat.question.answeredPrivately': 'Answered privately',
         'chat.question.by': 'By',
@@ -146,6 +148,17 @@ describe('QuestionCard', () => {
     expect(respondToQuestion.mock.calls[0][0]).not.toHaveProperty('optionId');
   });
 
+  it('labels free text as an answer when there are no options', () => {
+    renderCard({ options: [], allowFreeText: true });
+
+    expect(screen.getByText('Your answer')).toBeInTheDocument();
+    expect(screen.getByLabelText('Your answer')).toHaveAttribute(
+      'placeholder',
+      'Type your answer...'
+    );
+    expect(screen.queryByText('or')).not.toBeInTheDocument();
+  });
+
   it('shows the free-text placeholder and the option/answer separator', () => {
     renderCard();
 
@@ -173,6 +186,10 @@ describe('QuestionCard', () => {
     expect(screen.queryByText('Answered')).toBeNull();
     expect(screen.getByText('Production')).toBeInTheDocument();
     expect(screen.getByText(/alice@example.com/)).toBeInTheDocument();
+    const decidedAt = screen.getByText(/2026/);
+    expect(decidedAt.tagName).toBe('TIME');
+    expect(decidedAt).toHaveAttribute('dateTime', '2026-11-08T15:00:00Z');
+    expect(screen.queryByText('2026-11-08T15:00:00Z')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
   });

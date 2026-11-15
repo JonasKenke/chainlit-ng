@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '@/lib/datetime';
 import {
   ChainlitContext,
   IApproval,
@@ -32,16 +33,6 @@ const displayToolName = (tool: string): string =>
     .trim()
     .replace(/\s+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase());
-
-const formatDecisionTime = (value?: string | null): string | null => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(date);
-};
 
 type Preview = Record<string, unknown> | null | undefined;
 
@@ -560,7 +551,7 @@ export const ApprovalCard = ({ approval }: Props) => {
     [approval.argumentsPreview, approval.editedArgumentsPreview]
   );
   const decidedAtIso = approval.decidedAt ?? null;
-  const decidedAtLabel = formatDecisionTime(decidedAtIso);
+  const decidedAtLabel = formatLocalDateTime(decidedAtIso);
   const diffGroups = useMemo(() => groupDiff(diff), [diff]);
   const firstEditableFieldName =
     fields?.find((field) => !isServerHeld(field))?.name ?? null;
@@ -1029,6 +1020,7 @@ export const ApprovalCard = ({ approval }: Props) => {
             : null}
           {decidedAtLabel ? (
             <time
+              className="whitespace-nowrap"
               dateTime={decidedAtIso ?? undefined}
               title={decidedAtIso ?? ''}
             >
@@ -1040,7 +1032,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           {approval.reason ? (
             <div
               data-testid="approval-comment"
-              className="mt-1 whitespace-pre-wrap text-xs"
+              className="mt-1 whitespace-pre-wrap text-xs text-foreground"
             >
               <bdi dir="auto">{approval.reason}</bdi>
             </div>

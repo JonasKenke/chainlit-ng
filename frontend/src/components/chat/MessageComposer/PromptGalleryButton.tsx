@@ -310,7 +310,7 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
           className="sm:max-w-2xl flex flex-col max-h-[80vh] gap-4"
           aria-describedby={undefined}
         >
-          <DialogHeader className="flex flex-row items-center justify-between pr-8">
+          <DialogHeader className="flex flex-col items-start justify-between gap-2 space-y-0 pr-8 sm:flex-row sm:items-center">
             <DialogTitle>{t('chat.promptGallery.title')}</DialogTitle>
             {tab === 'prompts' && promptsEnabled && (
               <Button

@@ -533,7 +533,9 @@
       },
       "errors": {
         "answer": "Unable to answer question"
-      }
+      },
+      "answer": "Your answer",
+      "answerAriaLabel": "Your answer"
     }
   },
   "threadHistory": {

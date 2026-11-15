@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '@/lib/datetime';
 import {
   ChainlitContext,
   IQuestion,
@@ -40,6 +41,8 @@ export const QuestionCard = ({ question }: Props) => {
   const isLive = question.live === true;
   const canAnswer = isPending && isLive;
   const answer = question.answer;
+  const decidedAtIso = question.decidedAt ?? null;
+  const decidedAtLabel = formatLocalDateTime(decidedAtIso);
   const submitDisabled = busy || (!selected && !text.trim());
 
   const submit = async () => {
@@ -158,11 +161,17 @@ export const QuestionCard = ({ question }: Props) => {
                   htmlFor={`question-${question.id}-other`}
                   className="text-xs font-medium text-muted-foreground"
                 >
-                  {t('chat.question.other')}
+                  {question.options.length
+                    ? t('chat.question.other')
+                    : t('chat.question.answer')}
                 </label>
                 <textarea
                   id={`question-${question.id}-other`}
-                  aria-label={t('chat.question.otherAriaLabel')}
+                  aria-label={
+                    question.options.length
+                      ? t('chat.question.otherAriaLabel')
+                      : t('chat.question.answerAriaLabel')
+                  }
                   placeholder={t('chat.question.otherPlaceholder', {
                     defaultValue: 'Type your answer...'
                   })}
@@ -201,7 +210,18 @@ export const QuestionCard = ({ question }: Props) => {
                 <bdi dir="auto">{question.decidedBy}</bdi>
               </span>
             ) : null}
-            {question.decidedAt ? <span> · {question.decidedAt}</span> : null}
+            {decidedAtLabel ? (
+              <span className="inline-block">
+                {' · '}
+                <time
+                  className="whitespace-nowrap"
+                  dateTime={decidedAtIso ?? undefined}
+                  title={decidedAtIso ?? ''}
+                >
+                  {decidedAtLabel}
+                </time>
+              </span>
+            ) : null}
           </div>
         )}
       </div>
