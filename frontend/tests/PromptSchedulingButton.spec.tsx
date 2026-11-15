@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '@/lib/datetime';
 import { IPrompt, IScheduledTask, useConfig } from '@chainlit-ng/react-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -201,6 +202,23 @@ describe('PromptSchedulingButton', () => {
     expect(
       screen.getByLabelText('chat.promptScheduling.form.time')
     ).toHaveValue('11:10');
+  });
+
+  it('shows a localized next run without a raw ISO string', async () => {
+    currentTasks = [task];
+    renderComponent();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'chat.promptScheduling.button' })
+    );
+    await waitFor(() => screen.getByText('Existing prompt'));
+
+    const nextRun = screen.getByText(
+      (_, node) =>
+        node?.tagName === 'P' &&
+        Boolean(node.textContent?.includes('chat.promptScheduling.nextRun'))
+    );
+    expect(nextRun).toHaveTextContent(formatLocalDateTime(task.nextRunAt)!);
+    expect(nextRun.textContent).not.toContain('2030-01-01T09:00:00Z');
   });
 
   it('runs and pauses an existing schedule', async () => {

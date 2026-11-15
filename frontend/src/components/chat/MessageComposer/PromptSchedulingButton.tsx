@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from '@/lib/datetime';
 import { cn } from '@/lib/utils';
 import {
   ChatProfile,
@@ -213,7 +214,7 @@ const errorMessage = (error: unknown, fallback: string) => {
 };
 
 const displayDate = (value: string | null) =>
-  value ? new Date(value).toLocaleString() : 'Never';
+  formatLocalDateTime(value) ?? 'Never';
 
 const statusLabel = (status: string, t: (key: string) => string) => {
   const keys: Record<string, string> = {
