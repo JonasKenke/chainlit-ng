@@ -148,6 +148,14 @@ const notice: ISkillUpdateNotice = {
 };
 
 describe('SkillsPanel', () => {
+  const openSkillActions = (id: string) => {
+    fireEvent.pointerDown(screen.getByTestId(`skill-actions-${id}`), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: 'mouse'
+    });
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     state.skills = [];
@@ -337,7 +345,8 @@ describe('SkillsPanel', () => {
     expect(pin).toHaveTextContent('cccccccccccc…');
     expect(pin).not.toHaveTextContent('sha256:sha256');
 
-    fireEvent.click(screen.getByTestId('skill-detach-s3'));
+    openSkillActions('s3');
+    fireEvent.click(await screen.findByTestId('skill-detach-s3'));
     await waitFor(() => expect(detachSkill).toHaveBeenCalledWith('s3'));
   });
 
@@ -358,8 +367,12 @@ describe('SkillsPanel', () => {
     render(<SkillsPanel />);
 
     await screen.findByTestId('skill-row');
+    openSkillActions('s2');
     expect(screen.queryByTestId('skill-share-s2')).toBeNull();
     expect(screen.queryByTestId('skill-detach-s2')).toBeNull();
+    expect(
+      screen.getByRole('menuitem', { name: 'chat.skills.edit' })
+    ).toBeInTheDocument();
   });
 
   it('hides share links but keeps editing without authenticated users', async () => {
@@ -369,9 +382,10 @@ describe('SkillsPanel', () => {
     render(<SkillsPanel />);
 
     await screen.findByTestId('skill-row');
+    openSkillActions('s2');
     expect(screen.queryByTestId('skill-share-s2')).toBeNull();
     expect(
-      screen.getByRole('button', { name: 'chat.skills.edit' })
+      screen.getByRole('menuitem', { name: 'chat.skills.edit' })
     ).toBeInTheDocument();
   });
 
@@ -467,8 +481,10 @@ describe('SkillsPanel', () => {
     state.skills = [own];
     render(<SkillsPanel />);
 
+    await screen.findByTestId('skill-row');
+    openSkillActions('s2');
     fireEvent.click(
-      await screen.findByRole('button', { name: 'chat.skills.edit' })
+      await screen.findByRole('menuitem', { name: 'chat.skills.edit' })
     );
     fireEvent.change(screen.getByLabelText('chat.skills.editor.description'), {
       target: { value: 'Updated description' }

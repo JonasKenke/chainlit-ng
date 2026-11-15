@@ -14,6 +14,7 @@ import {
 } from '@chainlit-ng/react-client';
 import {
   Download,
+  Ellipsis,
   Pencil,
   Plus,
   RefreshCw,
@@ -32,6 +33,12 @@ import { SkillUpdateDialog } from '@/components/SkillUpdateDialog';
 import { useTranslation } from '@/components/i18n/Translator';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 
 type EditTarget = ISkill | 'new' | undefined;
@@ -483,68 +490,57 @@ export function SkillsPanel() {
                           <ShieldCheck className="h-3.5 w-3.5" />
                         </Button>
                       ) : null}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        aria-label={t('chat.skills.edit')}
-                        onClick={() => setEditing(skill)}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      {shareLinksEnabled && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className={
-                            skill.isShared
-                              ? 'h-7 w-7 text-blue-500 hover:text-blue-600'
-                              : 'h-7 w-7 text-muted-foreground hover:text-foreground'
-                          }
-                          aria-label={t('chat.skills.share.open', {
-                            name: skill.title
-                          })}
-                          data-testid={`skill-share-${skill.id}`}
-                          onClick={() => setSharing(skill)}
-                        >
-                          <Share2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        aria-label={t('chat.skills.export')}
-                        onClick={() => handleExport(skill)}
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                      </Button>
-                      {sharingEnabled && skill.sourcePromptId && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                          aria-label={t('chat.skills.detach')}
-                          data-testid={`skill-detach-${skill.id}`}
-                          onClick={() => handleDetach(skill)}
-                        >
-                          <RefreshCw className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        aria-label={t('chat.skills.delete')}
-                        onClick={() => handleDelete(skill)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            aria-label={t('chat.skills.menu', {
+                              name: skill.title
+                            })}
+                            data-testid={`skill-actions-${skill.id}`}
+                          >
+                            <Ellipsis className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => setEditing(skill)}>
+                            {t('chat.skills.edit')}
+                            <Pencil className="ml-auto" />
+                          </DropdownMenuItem>
+                          {shareLinksEnabled && (
+                            <DropdownMenuItem
+                              data-testid={`skill-share-${skill.id}`}
+                              onClick={() => setSharing(skill)}
+                            >
+                              {t('chat.skills.share.title')}
+                              <Share2 className="ml-auto" />
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => handleExport(skill)}>
+                            {t('chat.skills.export')}
+                            <Download className="ml-auto" />
+                          </DropdownMenuItem>
+                          {sharingEnabled && skill.sourcePromptId && (
+                            <DropdownMenuItem
+                              data-testid={`skill-detach-${skill.id}`}
+                              onClick={() => handleDetach(skill)}
+                            >
+                              {t('chat.skills.update.detach')}
+                              <RefreshCw className="ml-auto" />
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => handleDelete(skill)}
+                          >
+                            {t('chat.skills.delete')}
+                            <Trash2 className="ml-auto" />
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
                 );

@@ -370,6 +370,7 @@
     "skills": {
       "button": "Library",
       "title": "Skills",
+      "menu": "Actions for {{name}}",
       "tab": "Skills",
       "new": "New skill",
       "import": "Import",
