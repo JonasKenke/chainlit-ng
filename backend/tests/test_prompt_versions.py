@@ -724,6 +724,31 @@ async def test_sync_happy_path_appends_version(api, data_layer):
     assert [item["version"] for item in versions.json()] == [2, 1]
 
 
+async def test_downgrade_keeps_the_newer_source_update_available(api, data_layer):
+    source = await create_row(data_layer, title="Source", content="v1", shared=True)
+    with acting_as(READER):
+        copy = (await add_copy(api, source["id"])).json()
+
+    await update_row(data_layer, source, content="v2")
+    versions = await data_layer.list_prompt_versions(source["id"])
+    v2 = next(item for item in versions if item["version"] == 2)
+    v1 = next(item for item in versions if item["version"] == 1)
+
+    with acting_as(READER):
+        await api.post(
+            f"/project/prompts/{copy['id']}/sync", json={"versionId": v2["id"]}
+        )
+        downgraded = await api.post(
+            f"/project/prompts/{copy['id']}/sync", json={"versionId": v1["id"]}
+        )
+        updates = await api.get("/project/prompts/updates")
+
+    assert downgraded.status_code == 200
+    assert downgraded.json()["pinnedVersion"] == 1
+    assert downgraded.json()["version"] == 3
+    assert [item["latestVersion"] for item in updates.json()] == [2]
+
+
 async def test_sync_requires_confirmation_for_local_changes(api, data_layer):
     source = await create_row(data_layer, title="Source", content="v1", shared=True)
     with acting_as(READER):

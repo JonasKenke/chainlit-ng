@@ -2151,7 +2151,14 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 raise RuntimeError("Could not read prompt update notices")
             notified_version = int(noticed[0]["notifiedVersion"]) if noticed else 0
             local_version = int(prompt.get("version") or 1)
-            baseline = max(local_version, pinned_version or 0, notified_version)
+            # A pinned copy uses its source pin, not its local history counter:
+            # syncing to a newer version and then back to an older one must not
+            # hide the newer source version that is still available.
+            baseline = (
+                max(pinned_version or 0, notified_version)
+                if prompt.get("pinnedVersionId")
+                else max(local_version, notified_version)
+            )
             latest_version = int(head["version"])
             if latest_version <= baseline:
                 continue
