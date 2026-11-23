@@ -1,6 +1,6 @@
-# Contribute to Chainlit
+# Contribute to Chainlit NG
 
-To contribute to Chainlit, you first need to set up the project on your local machine.
+To contribute to Chainlit NG, you first need to set up the project on your local machine.
 
 ## Table of Contents
 
@@ -9,7 +9,7 @@ Generated using https://ecotrust-canada.github.io/markdown-toc/.
 I've copy/pasted the whole document there, and then formatted it with prettier.
 -->
 
-- [Contribute to Chainlit](#contribute-to-chainlit)
+- [Contribute to Chainlit NG](#contribute-to-chainlit-ng)
   - [Table of Contents](#table-of-contents)
   - [Local setup](#local-setup)
     - [Requirements](#requirements)
@@ -39,35 +39,35 @@ I've copy/pasted the whole document there, and then formatted it with prettier.
 
 With this setup you can easily code in your fork and fetch updates from the main repository.
 
-1. Go to [https://github.com/Chainlit/chainlit/fork](https://github.com/Chainlit/chainlit/fork) to fork the chainlit code into your own repository.
+1. Go to [https://github.com/JonasKenke/chainlit-ng/fork](https://github.com/JonasKenke/chainlit-ng/fork) to fork the Chainlit NG code into your own repository.
 2. Clone your fork locally
 
 ```sh
-git clone https://github.com/YOUR_USERNAME/YOUR_FORK.git
+git clone https://github.com/YOUR_USERNAME/chainlit-ng.git
 ```
 
 3. Go into your fork and list the current configured remote repository.
 
 ```sh
 $ git remote -v
-> origin  https://github.com/YOUR_USERNAME/YOUR_FORK.git (fetch)
-> origin  https://github.com/YOUR_USERNAME/YOUR_FORK.git (push)
+> origin  https://github.com/YOUR_USERNAME/chainlit-ng.git (fetch)
+> origin  https://github.com/YOUR_USERNAME/chainlit-ng.git (push)
 ```
 
 4. Specify the new remote upstream repository that will be synced with the fork.
 
 ```sh
-git remote add upstream https://github.com/Chainlit/chainlit.git
+git remote add upstream https://github.com/JonasKenke/chainlit-ng.git
 ```
 
 5. Verify the new upstream repository you've specified for your fork.
 
 ```sh
 $ git remote -v
-> origin    https://github.com/YOUR_USERNAME/YOUR_FORK.git (fetch)
-> origin    https://github.com/YOUR_USERNAME/YOUR_FORK.git (push)
-> upstream  https://github.com/Chainlit/chainlit.git (fetch)
-> upstream  https://github.com/Chainlit/chainlit.git (push)
+> origin    https://github.com/YOUR_USERNAME/chainlit-ng.git (fetch)
+> origin    https://github.com/YOUR_USERNAME/chainlit-ng.git (push)
+> upstream  https://github.com/JonasKenke/chainlit-ng.git (fetch)
+> upstream  https://github.com/JonasKenke/chainlit-ng.git (push)
 ```
 
 ### Install dependencies
@@ -105,16 +105,16 @@ If you visit `http://localhost:5173/`, it should connect to your local server. I
 
 ## Lint & Format
 
-Linting and formatting run from the **repo root** (not from individual packages). This ensures CI, lint-staged, and local commands all use the same tool invocation.
+Linting and formatting run from the **repo root** (not from individual packages). This keeps local checks and lint-staged consistent.
 
 ```sh
-# Lint (CI uses this)
+# Lint (same command the workspace checks use)
 pnpm lint
 
 # Lint and auto-fix
 pnpm lint:fix
 
-# Check formatting (CI uses this)
+# Check formatting (same command the workspace checks use)
 pnpm format-check
 
 # Fix formatting
@@ -185,4 +185,4 @@ For debugging purposes, you can use the **interactive mode** (Cypress UI). Run:
 pnpm test:e2e:interactive # runs `cypress open`
 ```
 
-Once you create a pull request, the tests will automatically run. It is a good practice to run the tests locally before pushing.
+Run the tests locally before opening a pull request.

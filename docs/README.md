@@ -1,5 +1,7 @@
 # Documentation for Chainlit developers, contributors, and AI coding assistants.
 
+Repository, issues, and releases: [JonasKenke/chainlit-ng](https://github.com/JonasKenke/chainlit-ng).
+
 See also:
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — contribution guidelines

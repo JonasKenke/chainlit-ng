@@ -116,6 +116,12 @@ custom-data = [
     "google-cloud-storage>=2.19.0,<4.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/JonasKenke/chainlit-ng"
+Repository = "https://github.com/JonasKenke/chainlit-ng"
+Issues = "https://github.com/JonasKenke/chainlit-ng/issues"
+Changelog = "https://github.com/JonasKenke/chainlit-ng/blob/main/CHANGELOG.md"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

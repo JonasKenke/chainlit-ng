@@ -1,6 +1,6 @@
 ## Overview
 
-The `@chainlit-ng/react-client` package provides a set of React hooks as well as an API client to connect to your [Chainlit](https://github.com/Chainlit/chainlit) application from any React application. The package includes hooks for managing chat sessions, messages, data, and interactions.
+The `@chainlit-ng/react-client` package provides a set of React hooks as well as an API client to connect to your [Chainlit NG](https://github.com/JonasKenke/chainlit-ng) application from any React application. The package includes hooks for managing chat sessions, messages, data, and interactions.
 
 ## Installation
 

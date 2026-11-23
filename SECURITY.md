@@ -1,9 +1,13 @@
 # Security Policy
 
+> **No guarantee:** This fork is maintained on a best-effort basis. Reports,
+> fixes, patches, backports, and disclosure timelines are not guaranteed. Use it
+> at your own risk and assess the code and dependencies before production use.
+
 ## Reporting a Vulnerability
 
-Please use GitHub's private security advisory mechanism to report vulnerabilities.
-On the repository page, go to **Security > Advisories** and click
+Please use GitHub's [private security advisory mechanism](https://github.com/JonasKenke/chainlit-ng/security/advisories/new)
+to report vulnerabilities. On the repository page, go to **Security > Advisories** and click
 **"Report a vulnerability"**. This opens a private channel visible only to maintainers,
 keeping details out of public view until a fix is ready.
 
@@ -15,12 +19,10 @@ of the likely impact. The more context you can provide, the faster we can triage
 
 ## What to Expect
 
-- **Acknowledgement**: we aim to acknowledge reports within **5 business days**. Chainlit is
-  maintained by a small team and we are not always available at the same time, so occasional
-  delays are possible. If you have not heard back after a week, a follow-up nudge is welcome.
-- **Resolution target**: we target a fix or mitigation within **90 days** of the initial
-  report. Complex or architecture-level issues may require more time; we will communicate
-  openly if that is the case.
+- **Best effort**: this fork is maintained independently and as time permits.
+  There is no guaranteed acknowledgement time, response time, fix, patch,
+  backport, or disclosure timeline. If you have not received a response, a
+  follow-up is welcome, but a response is not guaranteed.
 - **Coordinated disclosure**: please do not publish details of the vulnerability until a
   patch has been released or 90 days have passed since the report, whichever comes first.
   If you need to publish sooner for any reason, let us know and we will do our best to

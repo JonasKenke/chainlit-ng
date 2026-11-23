@@ -5,7 +5,7 @@
   Tool-call approvals, agent questions, observability, and a modern React 19 frontend.
 </p>
 
-> **Fork notice:** Chainlit NG is an independent fork of the original [Chainlit](https://github.com/Chainlit/chainlit) project. The upstream project is no longer actively maintained. This line continues development with security fixes and new interaction features.
+> **Fork notice:** Chainlit NG is an independent fork of the original [Chainlit](https://github.com/Chainlit/chainlit) project. The upstream project is no longer actively maintained. This line continues development with security fixes and new interaction features. Source, issues, and releases: [JonasKenke/chainlit-ng](https://github.com/JonasKenke/chainlit-ng).
 
 ## Install
 
@@ -56,14 +56,14 @@ chainlit-ng run demo.py -w
 ## What's new in 3.0
 
 - **Tool-call approvals** with schema-generated edit forms and request-changes feedback.
-- **`cl.ask` questions** with options, free text, and explicit answer provenance.
+- **`cl.ask` questions** with options, free text, typed multi-field forms, checkbox multi-select, optional fields, and explicit answer provenance.
 - **Thread sharing** with opt-in, read-only grants for named users.
 - **Safer MCP**: named servers, a user-server URL allowlist, and per-user OAuth.
 - **OpenTelemetry export** with a fixed redaction allowlist.
 - **Skills, prompt gallery, and scheduled prompts.**
 - **UI improvements**: message timestamps, compact chain-of-thought, side-view by element id, and a configurable upload directory.
 
-Screenshots and the full feature overview are in the [repository README](../README.md).
+Screenshots and the full feature overview are in the [repository README](https://github.com/JonasKenke/chainlit-ng#readme).
 
 ## Security
 

@@ -8,12 +8,13 @@
 <p align="center">
   <a href="https://pypi.org/project/chainlit-ng/"><img alt="PyPI" src="https://img.shields.io/pypi/v/chainlit-ng?label=chainlit-ng" /></a>
   <a href="https://www.npmjs.com/package/@chainlit-ng/react-client"><img alt="npm" src="https://img.shields.io/npm/v/@chainlit-ng/react-client?label=%40chainlit-ng%2Freact-client" /></a>
+  <a href="https://github.com/JonasKenke/chainlit-ng"><img alt="GitHub" src="https://img.shields.io/github/stars/JonasKenke/chainlit-ng?label=GitHub" /></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue" /></a>
 </p>
 
 > **Fork notice**
 >
-> Chainlit NG is an independent fork of the original [Chainlit](https://github.com/Chainlit/chainlit) project. The upstream project is no longer actively maintained. This line continues development with security fixes, a React 19 frontend, and the interaction features below.
+> Chainlit NG is an independent fork of the original [Chainlit](https://github.com/Chainlit/chainlit) project. The upstream project is no longer actively maintained. This line continues development with security fixes, a React 19 frontend, and the interaction features below. The source, issues, and releases live at [JonasKenke/chainlit-ng](https://github.com/JonasKenke/chainlit-ng).
 >
 > The Python import is still `import chainlit as cl`. Only the distribution and CLI names changed.
 
@@ -267,6 +268,17 @@ Security fixes in this line include:
 
 This is not a claim that every upstream bug is fixed. See the [changelog](CHANGELOG.md) for the full list.
 
+## Security and maintenance
+
+This fork is maintained on a best-effort basis. No guarantee is made that
+security patches, upstream fixes, advisories, or compatibility updates will be
+provided, backported, or released on any timeline. The security fix list above
+is historical and does not imply future coverage. Review the code and pin the
+dependencies you have tested before using it in production.
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability. Response and
+fix timelines are not guaranteed.
+
 ## Migrating
 
 Upgrading from upstream Chainlit 2.x or a 2.12 fork build? The [3.0 migration guide](docs/migration-3.0.md) covers the Python and npm renames, the Recoil to Zustand change, and breaking configuration updates.
@@ -285,7 +297,7 @@ npm install @chainlit-ng/react-client@3.0.0
 
 ## Contributing
 
-Contributions are welcome, whether it is a bug report, a documentation fix, or a feature. Start with [CONTRIBUTING.md](CONTRIBUTING.md), then run the backend and frontend checks described there before opening a pull request.
+Contributions are welcome, whether it is a bug report, a documentation fix, or a feature. Open an [issue](https://github.com/JonasKenke/chainlit-ng/issues) or a [pull request](https://github.com/JonasKenke/chainlit-ng/pulls), and start with [CONTRIBUTING.md](CONTRIBUTING.md). Then run the backend and frontend checks described there before opening a pull request.
 
 ## License
 
@@ -293,4 +305,4 @@ Chainlit NG is open source under the [Apache License 2.0](LICENSE).
 
 ## Fork attribution
 
-Chainlit NG is an independent fork of [Chainlit](https://github.com/Chainlit/chainlit). The original project is no longer actively maintained upstream. This repository continues that work under the Apache-2.0 license; the original authors and contributors retain credit for the code and documentation they wrote.
+Chainlit NG is an independent fork of [Chainlit](https://github.com/Chainlit/chainlit), maintained at [JonasKenke/chainlit-ng](https://github.com/JonasKenke/chainlit-ng). The original project is no longer actively maintained upstream. This repository continues that work under the Apache-2.0 license; the original authors and contributors retain credit for the code and documentation they wrote.

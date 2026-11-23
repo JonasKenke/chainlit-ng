@@ -1,4 +1,14 @@
 {
+  "name": "chainlit-ng",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JonasKenke/chainlit-ng.git"
+  },
+  "homepage": "https://github.com/JonasKenke/chainlit-ng#readme",
+  "bugs": {
+    "url": "https://github.com/JonasKenke/chainlit-ng/issues"
+  },
   "devDependencies": {
     "@eslint/compat": "^2.1.1",
     "@eslint/js": "^10.0.1",

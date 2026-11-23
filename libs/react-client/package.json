@@ -9,6 +9,15 @@
     "test": "vitest run"
   },
   "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JonasKenke/chainlit-ng.git",
+    "directory": "libs/react-client"
+  },
+  "homepage": "https://github.com/JonasKenke/chainlit-ng#readme",
+  "bugs": {
+    "url": "https://github.com/JonasKenke/chainlit-ng/issues"
+  },
   "keywords": [
     "llm",
     "ai",
