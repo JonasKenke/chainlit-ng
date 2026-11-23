@@ -38,6 +38,8 @@ describe('Question card', () => {
     cy.wait('@answer').its('response.statusCode').should('eq', 200);
     cy.get('[data-testid="question-card"]').should('not.contain', 'Answered');
     cy.get('[data-testid="question-card"]').should('contain', 'Staging');
+    cy.get('[data-testid="question-card"]').should('not.contain', 'question-user');
+    cy.get('[data-testid="question-card"]').find('time').should('not.exist');
     cy.contains('answered option=staging label=Staging').should('be.visible');
   });
 
