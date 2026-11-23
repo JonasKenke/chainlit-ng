@@ -118,7 +118,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   same-session reconnect keeps a live question answerable.
 - Show only the chosen answer on a resolved question card; the decider's
   identifier and decision time are no longer rendered, so the ask card cannot
-  leak user data.
+  leak user data. A resolved approval card likewise hides the decider's
+  identifier and decision time and now shows the decision itself (approved,
+  approved with edits, rejected, changes requested, expired, superseded or
+  unavailable).
 - Render inline LaTeX math literally when its closer is more than ~254 characters away, and bound both the `\(` and `$` inline lookahead so repeated unclosed openers parse in linear time.
 - Declare `aiohttp` and SQLAlchemy's `asyncio` extra in the `custom-data` extra so the SQLAlchemy and DynamoDB data layers import on a clean install.
 - Verify `azure-ad-hybrid` OAuth state and `id_token`, and generate a per-login nonce.

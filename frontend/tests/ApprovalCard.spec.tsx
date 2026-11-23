@@ -398,31 +398,37 @@ describe('ApprovalCard', () => {
     expect(form.querySelector('.overflow-y-auto')).not.toBeNull();
   });
 
-  it('renders no status label for any terminal state', () => {
-    const labels = [
-      'Approved',
-      'Rejected',
-      'Edited',
-      'Changes requested',
-      'Expired',
-      'Superseded',
-      'Orphaned'
-    ];
-    for (const status of [
-      'approved',
-      'rejected',
-      'edited',
-      'changes_requested',
-      'expired',
-      'superseded',
-      'orphaned'
-    ] as const) {
-      const { unmount } = renderCard({ status });
-      for (const label of labels) {
-        expect(screen.queryByText(label)).toBeNull();
-      }
+  it('labels each terminal state and hides the decider identity and time', () => {
+    const cases = [
+      ['approved', 'Approved'],
+      ['rejected', 'Rejected'],
+      ['edited', 'Approved with edits'],
+      ['changes_requested', 'Changes requested'],
+      ['expired', 'Expired'],
+      ['superseded', 'Superseded'],
+      ['orphaned', 'Unavailable']
+    ] as const;
+    for (const [status, label] of cases) {
+      const { unmount } = renderCard({
+        status,
+        decidedBy: 'test_user_identifier',
+        decidedAt: '2026-01-01T00:00:00Z'
+      });
+      expect(screen.getByTestId('approval-decision')).toHaveTextContent(label);
+      expect(screen.queryByText(/test_user_identifier/)).toBeNull();
+      expect(screen.queryByText(/By /)).toBeNull();
+      expect(document.querySelector('time')).toBeNull();
       unmount();
     }
+  });
+
+  it('humanizes a terminal reason next to the decision label', () => {
+    renderCard({ status: 'orphaned', terminalReason: 'server_restart' });
+
+    expect(screen.getByTestId('approval-decision')).toHaveTextContent(
+      'Unavailable'
+    );
+    expect(screen.getByText(/server restart/)).toBeInTheDocument();
   });
 
   it('renders embedded newlines in diff values as real line breaks', () => {
@@ -814,14 +820,15 @@ describe('ApprovalCard', () => {
       decidedAt: '2026-01-01T00:00:00Z'
     });
 
-    expect(screen.queryByText('Changes requested')).toBeNull();
+    expect(screen.getByTestId('approval-decision')).toHaveTextContent(
+      'Changes requested'
+    );
     expect(screen.getByTestId('approval-comment')).toHaveTextContent(
       'split the ticket'
     );
-    expect(screen.queryByText('2026-01-01T00:00:00Z')).toBeNull();
-    const decidedAt = screen.getByText(/2026/);
-    expect(decidedAt.tagName).toBe('TIME');
-    expect(decidedAt).toHaveAttribute('dateTime', '2026-01-01T00:00:00Z');
+    expect(screen.queryByText(/test_user_identifier/)).toBeNull();
+    expect(screen.queryByText(/By /)).toBeNull();
+    expect(document.querySelector('time')).toBeNull();
   });
 
   it('shows a persisted comment on a rejected card', () => {
@@ -833,7 +840,9 @@ describe('ApprovalCard', () => {
       decidedAt: '2026-01-01T00:00:00Z'
     });
 
-    expect(screen.queryByText('Rejected')).toBeNull();
+    expect(screen.getByTestId('approval-decision')).toHaveTextContent(
+      'Rejected'
+    );
     expect(screen.getByTestId('approval-comment')).toHaveTextContent('not now');
   });
 
@@ -947,7 +956,11 @@ describe('ApprovalCard', () => {
     expect(
       screen.queryByRole('button', { name: 'Request changes' })
     ).toBeNull();
-    expect(screen.queryByText('Approved')).toBeNull();
+    expect(screen.getByTestId('approval-decision')).toHaveTextContent(
+      'Approved'
+    );
+    expect(screen.queryByText(/test_user_identifier/)).toBeNull();
+    expect(document.querySelector('time')).toBeNull();
   });
 
   it('focuses the first editable field, skipping server-held fields', () => {

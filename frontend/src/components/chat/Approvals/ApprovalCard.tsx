@@ -1,4 +1,3 @@
-import { formatLocalDateTime } from '@/lib/datetime';
 import {
   ChainlitContext,
   IApproval,
@@ -309,6 +308,27 @@ const DiffRow = ({
   );
 };
 
+const approvalDecisionLabel = (status: IApproval['status']): string | null => {
+  switch (status) {
+    case 'approved':
+      return 'Approved';
+    case 'edited':
+      return 'Approved with edits';
+    case 'rejected':
+      return 'Rejected';
+    case 'changes_requested':
+      return 'Changes requested';
+    case 'expired':
+      return 'Expired';
+    case 'superseded':
+      return 'Superseded';
+    case 'orphaned':
+      return 'Unavailable';
+    default:
+      return null;
+  }
+};
+
 const approvalErrorMessage = (error: unknown): string => {
   if (typeof error === 'object' && error !== null && 'payload' in error) {
     const payload = error.payload;
@@ -550,8 +570,7 @@ export const ApprovalCard = ({ approval }: Props) => {
       diffPreviews(approval.argumentsPreview, approval.editedArgumentsPreview),
     [approval.argumentsPreview, approval.editedArgumentsPreview]
   );
-  const decidedAtIso = approval.decidedAt ?? null;
-  const decidedAtLabel = formatLocalDateTime(decidedAtIso);
+  const decisionLabel = approvalDecisionLabel(approval.status);
   const diffGroups = useMemo(() => groupDiff(diff), [diff]);
   const firstEditableFieldName =
     fields?.find((field) => !isServerHeld(field))?.name ?? null;
@@ -1013,26 +1032,23 @@ export const ApprovalCard = ({ approval }: Props) => {
           ) : null}
         </div>
       ) : (
-        <div className="mt-3 text-xs text-muted-foreground">
-          {approval.decidedBy ? `By ${approval.decidedBy}` : null}
-          {approval.decidedBy && (decidedAtLabel || approval.terminalReason)
-            ? ' · '
-            : null}
-          {decidedAtLabel ? (
-            <time
-              className="whitespace-nowrap"
-              dateTime={decidedAtIso ?? undefined}
-              title={decidedAtIso ?? ''}
-            >
-              {decidedAtLabel}
-            </time>
-          ) : (
-            (approval.terminalReason ?? null)
-          )}
+        <div className="mt-3 text-xs">
+          <span
+            data-testid="approval-decision"
+            className="font-medium text-foreground"
+          >
+            {decisionLabel}
+          </span>
+          {approval.terminalReason ? (
+            <span className="text-muted-foreground">
+              {' · '}
+              {approval.terminalReason.replace(/_/g, ' ')}
+            </span>
+          ) : null}
           {approval.reason ? (
             <div
               data-testid="approval-comment"
-              className="mt-1 whitespace-pre-wrap text-xs text-foreground"
+              className="mt-1 whitespace-pre-wrap text-foreground"
             >
               <bdi dir="auto">{approval.reason}</bdi>
             </div>
