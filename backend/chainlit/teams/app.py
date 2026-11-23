@@ -245,7 +245,7 @@ async def process_teams_message(
             ),
         )
     )
-    guard_pending_approval(thread_id)
+    await guard_pending_approval(thread_id)
 
     user = await get_user(turn_context.activity.from_property)
 

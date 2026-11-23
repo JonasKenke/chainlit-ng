@@ -336,6 +336,18 @@ def _question_thread(record=None, metadata=None):
     return {"id": "thread-1", "metadata": {"is_shared": True}, "steps": [step]}
 
 
+def test_shared_live_ids_control_pending_question_status():
+    thread = _question_thread(
+        _question_record(status="pending", answer=None, decidedBy=None, decidedAt=None)
+    )
+
+    live = public_thread(thread, live_ids={"question-1"})
+    orphan = public_thread(thread, live_ids=set())
+
+    assert live["steps"][0]["metadata"]["approval"]["status"] == "pending"
+    assert orphan["steps"][0]["metadata"]["approval"]["status"] == "orphaned"
+
+
 def test_shared_thread_redacts_a_free_text_question_answer():
     thread = _question_thread()
 

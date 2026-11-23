@@ -17,7 +17,11 @@ def create_state_store(settings: Optional[StateStoreSettings] = None) -> StateSt
         return MemoryStateStore(prefix=store_settings.prefix)
     if not store_settings.redis_url:
         raise ValueError("state_store.redis_url is required for the redis backend")
-    return RedisStateStore(store_settings.redis_url, prefix=store_settings.prefix)
+    return RedisStateStore(
+        store_settings.redis_url,
+        prefix=store_settings.prefix,
+        socket_connect_timeout=2.0,
+    )
 
 
 def get_state_store() -> StateStore:

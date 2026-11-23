@@ -1,7 +1,7 @@
 """Filter thread metadata at browser response boundaries."""
 
 import json
-from typing import Any, Dict, Mapping, Optional, cast
+from typing import Any, Dict, Mapping, Optional, Set, cast
 
 from chainlit.approval import has_live_interaction
 from chainlit.types import ThreadDict
@@ -95,7 +95,9 @@ def _public_question_answer(answer: Any) -> Any:
     return {"text": None, "redacted": True}
 
 
-def _public_question(record: Mapping[str, Any]) -> Optional[dict]:
+def _public_question(
+    record: Mapping[str, Any], live_ids: Optional[Set[str]] = None
+) -> Optional[dict]:
     """Return the share-safe IQuestion, or None when the shape is not valid."""
     valid = (
         isinstance(record.get("id"), str)
@@ -129,9 +131,12 @@ def _public_question(record: Mapping[str, Any]) -> Optional[dict]:
 
     # A pending record is only answerable while this process holds its live
     # registry entry. Projection only: the stored pending row is not changed.
-    if public.get("status") == "pending" and not has_live_interaction(
-        cast(str, record["id"]), kind="question"
-    ):
+    live = (
+        cast(str, record["id"]) in live_ids
+        if live_ids is not None
+        else has_live_interaction(cast(str, record["id"]), kind="question")
+    )
+    if public.get("status") == "pending" and not live:
         public["status"] = "orphaned"
     return public
 
@@ -178,7 +183,7 @@ def _drop_interaction_trace(step: Mapping[str, Any]) -> dict:
     return {key: value for key, value in step.items() if key not in ("input", "output")}
 
 
-def _public_steps(steps: Any) -> Any:
+def _public_steps(steps: Any, live_ids: Optional[Set[str]] = None) -> Any:
     if not isinstance(steps, list):
         return []
     result = []
@@ -233,7 +238,7 @@ def _public_steps(steps: Any) -> Any:
             )
             continue
         if kind == "question":
-            public_record = _public_question(approval)
+            public_record = _public_question(approval, live_ids)
         else:
             public_record = {
                 key: approval[key] for key in _PUBLIC_APPROVAL_FIELDS if key in approval
@@ -259,7 +264,7 @@ def _public_steps(steps: Any) -> Any:
     return result
 
 
-def _project_owner_steps(steps: Any) -> Any:
+def _project_owner_steps(steps: Any, live_ids: Optional[Set[str]] = None) -> Any:
     """Project orphaned questions for the owner without filtering the record."""
     if not isinstance(steps, list):
         return steps
@@ -279,11 +284,18 @@ def _project_owner_steps(steps: Any) -> Any:
             result.append(step)
             continue
         record = metadata.get("approval")
+        if not isinstance(record, dict):
+            result.append(step)
+            continue
+        live = (
+            cast(str, record.get("id")) in live_ids
+            if live_ids is not None
+            else has_live_interaction(cast(str, record.get("id")), kind="question")
+        )
         if (
-            isinstance(record, dict)
-            and record.get("kind") == "question"
+            record.get("kind") == "question"
             and record.get("status") == "pending"
-            and not has_live_interaction(cast(str, record.get("id")), kind="question")
+            and not live
         ):
             result.append(
                 {
@@ -304,6 +316,7 @@ def public_thread(
     *,
     include_settings: bool = False,
     include_owner: bool = True,
+    live_ids: Optional[Set[str]] = None,
 ) -> Optional[ThreadDict]:
     """Copy a thread with only browser-visible metadata, preserving stored state.
 
@@ -312,6 +325,8 @@ def public_thread(
         include_settings: Include profile and settings for an owner's chat view.
         include_owner: Keep the owner identity. False also drops the DynamoDB
             internal keys that carry the owner's identifier.
+        live_ids: Pending interaction ids with a live owner. When omitted,
+            liveness falls back to this process's local registry.
     """
     if thread is None:
         return None
@@ -334,9 +349,9 @@ def public_thread(
     if "steps" in thread:
         steps = thread.get("steps")
         result["steps"] = (
-            _project_owner_steps(_normalize_steps(steps))
+            _project_owner_steps(_normalize_steps(steps), live_ids)
             if include_settings
-            else _public_steps(steps)
+            else _public_steps(steps, live_ids)
         )
     if not include_owner:
         # A Dynamo thread carries its item keys inside each nested row; the

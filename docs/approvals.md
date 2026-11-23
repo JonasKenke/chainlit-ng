@@ -445,28 +445,35 @@ treated as absent, never as pending.
 
 ## Resume and lifecycle
 
-| Case                                | Outcome                                                                                          | Executes?                  |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------- |
-| Approve now                         | Terminal write succeeds, then the waiter resolves                                                | Yes, once                  |
-| Reject now                          | `rejected`                                                                                       | No                         |
-| Edit now                            | Schema-validated non-secret edits plus original server-held fields; final redacted trace         | Yes, with edited arguments |
-| Same-session socket reconnect       | The waiter survives; the server does not re-emit the card, so Edit is hidden until a fresh event | After a decision, once     |
-| Page reload / new session           | No waiter; resume marks a persisted pending record `orphaned`; the app may ask again             | No                         |
-| Process restart                     | No waiter; resume marks the record `orphaned`                                                    | No                         |
-| Stop while pending                  | Pending approvals in the thread are superseded before the run is cancelled                       | No                         |
-| Thread or bulk delete               | Pending approvals are superseded before the rows are deleted                                     | No                         |
-| Session delete / disconnect timeout | Pending approvals are orphaned                                                                   | No                         |
-| Duplicate decision retry            | The stored terminal result is returned                                                           | No, already decided        |
-| Terminal write fails                | Stays `pending`, the waiter is not resolved, a retry is allowed                                  | No                         |
-| Pending request write fails         | `ApprovalPersistenceError`, no record, no waiter                                                 | No                         |
-| Decision after expiry               | `expired`; the card is read-only                                                                 | No                         |
-| Decision on another worker          | No registry entry; cross-worker decisions are not supported                                      | No                         |
+| Case                                | Outcome                                                                                                                      | Executes?                  |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Approve now                         | Terminal write succeeds, then the waiter resolves                                                                            | Yes, once                  |
+| Reject now                          | `rejected`                                                                                                                   | No                         |
+| Edit now                            | Schema-validated non-secret edits plus original server-held fields; final redacted trace                                     | Yes, with edited arguments |
+| Same-session socket reconnect       | The waiter survives; the server does not re-emit the card, so Edit is hidden until a fresh event                             | After a decision, once     |
+| Page reload / new session           | No waiter; resume marks a persisted pending record `orphaned`; the app may ask again                                         | No                         |
+| Process restart                     | No waiter; resume marks the record `orphaned`                                                                                | No                         |
+| Stop while pending                  | Pending approvals in the thread are superseded before the run is cancelled                                                   | No                         |
+| Thread or bulk delete               | Pending approvals are superseded before the rows are deleted                                                                 | No                         |
+| Session delete / disconnect timeout | Pending approvals are orphaned                                                                                               | No                         |
+| Duplicate decision retry            | The stored terminal result is returned                                                                                       | No, already decided        |
+| Terminal write fails                | Stays `pending`, the waiter is not resolved, a retry is allowed                                                              | No                         |
+| Pending request write fails         | `ApprovalPersistenceError`, no record, no waiter                                                                             | No                         |
+| Decision after expiry               | `expired`; the card is read-only                                                                                             | No                         |
+| Decision on another worker          | With a shared [state store](state-store.md), any worker can decide; the owner resolves via pub/sub. Edits stay on the owner. | Yes, once                  |
 
-Terminal records are also mirrored to the configured [state store](state-store.md)
-with a short TTL. With the Redis backend, a duplicate decision can therefore
-return the stored terminal result on another worker even though pending
-decisions still require the owner worker. The data layer remains authoritative
-when the store is unavailable.
+Pending records and terminal records are mirrored to the configured
+[state store](state-store.md) with short TTLs. With the Redis backend, a first
+decision can arrive on another worker; that worker acquires the interaction
+lock, writes the terminal record, and publishes it to the owner. The owner
+resolves its waiter and emits the card. A missing owner heartbeat marks the
+pending record `orphaned` instead of executing it. Edits are still owner-only
+because the schema and raw arguments never leave the owner. The data layer
+remains authoritative when the store is unavailable.
+
+Sticky routing is still required for the live WebSocket and the waiting run.
+Redis makes decisions, deletes, capacity, and liveness work across workers; it
+does not move the coroutine that executes the tool.
 
 A stale card can receive the terminal state in the 409 response body, so it can
 render the final status without waiting for another event.
@@ -556,8 +563,8 @@ values), never the original arguments.
 - Append-only approval audit table and signatures (needs a migration).
 - Durable run state, checkpointing and automatic continuation.
 - New-session decision handoff and page-reload continuity.
-- Cross-worker / distributed approval registry. Sticky sessions and one worker
-  are required for the ordering guarantees.
+- Cross-worker edits. Edit schemas and raw arguments stay on the owner; sticky
+  sessions should route edit actions there.
 - Admin override, delegated approvers, quorum, approve-on-behalf, remember
   decisions and risk-based auto-approval.
 - Free-form editing and per-argument diff; only typed schemas are supported.

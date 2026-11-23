@@ -83,6 +83,8 @@ class RedisStateStore(StateStore):
     not provided, so a Redis Cluster needs all related keys in one hash slot.
     """
 
+    shared = True
+
     def __init__(
         self,
         url: str,

@@ -226,7 +226,7 @@ def on_message(func: Callable) -> Callable:
     async def guard_then_run(message: Message) -> None:
         # Outside the error-swallowing wrapper: the transports must see the
         # refusal instead of a generic error message.
-        guard_pending_approval(getattr(context.session, "thread_id", None))
+        await guard_pending_approval(getattr(context.session, "thread_id", None))
         await wrapped(message)
 
     config.code.on_message = guard_then_run

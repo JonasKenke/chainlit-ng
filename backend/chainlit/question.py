@@ -28,8 +28,12 @@ from chainlit.approval import (
     _pending_by_approval,
     _pending_by_step,
     _release_reservation,
+    _release_shared_capacity,
     _remember_managed_thread,
     _reserve_capacity,
+    _start_shared_pending,
+    _stop_shared_pending,
+    _store_managed_thread,
     _transition_locked,
     _write,
     step_lock,
@@ -720,6 +724,7 @@ async def ask(
     # Synchronous, before the first await: later Step writes take the lock.
     target._approval_managed = True
     _remember_managed_thread(target.thread_id, user.identifier)
+    await _store_managed_thread(target.thread_id, user.identifier)
     emitter = context.emitter
     key = (target.thread_id, target.id)
     entry = _Entry(
@@ -737,8 +742,9 @@ async def ask(
         payload=deepcopy(payload),
     )
 
-    await _reserve_capacity(generation)
+    await _reserve_capacity(generation, record["id"], max(60.0, timeout + 60.0))
     reserved = True
+    shared_tasks: tuple[Optional[asyncio.Task], Optional[asyncio.Task]] = (None, None)
     try:
         async with step_lock(*key):
             # L4: a terminal record in the one slot must not be overwritten.
@@ -773,9 +779,12 @@ async def ask(
             _commit_reservation(generation)
             reserved = False
 
+        shared_tasks = await _start_shared_pending(entry, record, timeout)
         await _emit(entry, record, {})
         stored = await _ask(entry, timeout)
         return _question_answer_from_record(stored, user, _has_data_layer())
     finally:
         if reserved:
             _release_reservation(generation)
+            await _release_shared_capacity(generation, record["id"])
+        await _stop_shared_pending(shared_tasks)

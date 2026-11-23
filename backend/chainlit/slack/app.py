@@ -316,7 +316,7 @@ async def process_slack_message(
     bind_thread_to_user=False,
     thread_ts: Optional[str] = None,
 ):
-    guard_pending_approval(thread_id)
+    await guard_pending_approval(thread_id)
     await add_reaction_if_enabled(event)
 
     slack_user_id = event.get("user")

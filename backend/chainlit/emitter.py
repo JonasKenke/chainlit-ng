@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Literal, Optional, Union, cast, get_args
 
 from socketio.exceptions import TimeoutError
 
+from chainlit.approval import live_interaction_ids
 from chainlit.chat_context import chat_context
 from chainlit.config import config
 from chainlit.context import ChainlitContextException, context
@@ -257,10 +258,12 @@ class ChainlitEmitter(BaseChainlitEmitter):
         """Get the 'emit_call' property from the session."""
         return self._get_session_property("emit_call")
 
-    def resume_thread(self, thread_dict: ThreadDict):
+    async def resume_thread(self, thread_dict: ThreadDict):
         """Send a thread to the UI with only public metadata."""
-        return self.emit(
-            "resume_thread", public_thread(thread_dict, include_settings=True)
+        live_ids = await live_interaction_ids([thread_dict])
+        return await self.emit(
+            "resume_thread",
+            public_thread(thread_dict, include_settings=True, live_ids=live_ids),
         )
 
     def send_resume_thread_error(self, error: str):

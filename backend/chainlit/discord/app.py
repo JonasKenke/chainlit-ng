@@ -236,7 +236,7 @@ async def process_discord_message(
     channel: "MessageableChannel",
     bind_thread_to_user=False,
 ):
-    guard_pending_approval(thread_id)
+    await guard_pending_approval(thread_id)
     user = await get_user(message.author)
 
     text = clean_content(message)

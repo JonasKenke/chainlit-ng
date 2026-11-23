@@ -501,7 +501,7 @@ def _start_run(session: WebsocketSession, coro) -> asyncio.Task:
 
 async def _refuse_if_approval_pending(session: WebsocketSession, context) -> bool:
     try:
-        guard_pending_approval(session.thread_id)
+        await guard_pending_approval(session.thread_id)
     except ApprovalPending:
         # The pending card is already visible in the client. Refusing a new run
         # is a no-op for the user; do not add a toast that can repeat on every

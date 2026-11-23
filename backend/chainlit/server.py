@@ -47,8 +47,10 @@ from chainlit.approval import (
     ApprovalNotPending,
     ApprovalStatus,
     clear_thread_deleted,
+    live_interaction_ids,
     managed_thread_ids_for,
     mark_thread_deleted,
+    shared_managed_thread_ids,
     supersede_thread_approvals,
     transition,
 )
@@ -1740,8 +1742,11 @@ async def get_user_threads(
 
     res = await data_layer.list_threads(payload.pagination, payload.filter)
     response = res.to_dict()
+    live_ids = await live_interaction_ids(response["data"])
     if not grants_active:
-        response["data"] = [public_thread(thread) for thread in response["data"]]
+        response["data"] = [
+            public_thread(thread, live_ids=live_ids) for thread in response["data"]
+        ]
         return JSONResponse(content=response)
 
     visible_threads = []
@@ -1756,7 +1761,11 @@ async def get_user_threads(
             continue
         visible_ids.append(thread["id"])
         visible_threads.append(
-            public_thread(thread, include_owner=access == ThreadAccess.OWNER)
+            public_thread(
+                thread,
+                include_owner=access == ThreadAccess.OWNER,
+                live_ids=live_ids,
+            )
         )
     response["data"] = visible_threads
     response["pageInfo"]["startCursor"] = visible_ids[0] if visible_ids else None
@@ -1793,7 +1802,12 @@ async def get_thread(
             status_code=500,
             detail="Failed to load conversation history",
         )
-    return _no_store(JSONResponse(content=public_thread(res, include_settings=True)))
+    live_ids = await live_interaction_ids([res]) if res else set()
+    return _no_store(
+        JSONResponse(
+            content=public_thread(res, include_settings=True, live_ids=live_ids)
+        )
+    )
 
 
 @router.get("/project/share/{thread_id}")
@@ -1831,10 +1845,13 @@ async def get_shared_thread(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     # The owner identity is only stripped while the grants feature is active.
+    live_ids = await live_interaction_ids([thread])
     return _no_store(
         JSONResponse(
             content=public_thread(
-                thread, include_owner=not _thread_grants_active(data_layer)
+                thread,
+                include_owner=not _thread_grants_active(data_layer),
+                live_ids=live_ids,
             )
         )
     )
@@ -3847,7 +3864,9 @@ async def delete_user_threads(current_user: UserParam):
     user_id = await _get_user_id(current_user, data_layer)
     start = time.perf_counter()
 
-    pending_thread_ids = managed_thread_ids_for(identifier)
+    pending_thread_ids = managed_thread_ids_for(
+        identifier
+    ) | await shared_managed_thread_ids(identifier)
     for thread_id in pending_thread_ids:
         await supersede_thread_approvals(thread_id)
         mark_thread_deleted(thread_id)

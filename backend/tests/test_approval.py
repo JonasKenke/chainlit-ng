@@ -1520,12 +1520,12 @@ async def test_guard_refuses_a_thread_until_the_approval_is_terminal(
         task, entry = await _pending_ask(step)
 
         with pytest.raises(ApprovalPending):
-            guard_pending_approval(step.thread_id)
-        assert guard_pending_approval("another-thread") is None
+            await guard_pending_approval(step.thread_id)
+        assert await guard_pending_approval("another-thread") is None
 
         await _decide(mock_session, entry)
         await task
-        guard_pending_approval(step.thread_id)
+        await guard_pending_approval(step.thread_id)
 
 
 async def test_session_delete_orphans_its_waiters(

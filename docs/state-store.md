@@ -1,16 +1,16 @@
 # Ephemeral state store
 
 `chainlit.state_store` is a small coordination layer for short-lived state:
-approval terminal memos, capacity counters, idempotency keys, locks, and
-pub/sub notifications. It is deliberately **not** a durable database and not a
-replacement for the data layer.
+pending and terminal interaction records, capacity counters, idempotency keys,
+locks, and pub/sub notifications. It is deliberately **not** a durable database
+and not a replacement for the data layer.
 
 Two backends share one interface:
 
-| Backend            | Scope                     | Use                                           |
-| ------------------ | ------------------------- | --------------------------------------------- |
-| `MemoryStateStore` | One process               | Development, tests, single-worker deployments |
-| `RedisStateStore`  | All workers sharing Redis | Multi-worker coordination                     |
+| Backend            | Scope                     | Use                                                  |
+| ------------------ | ------------------------- | ---------------------------------------------------- |
+| `MemoryStateStore` | One process               | Development, tests, single-worker deployments        |
+| `RedisStateStore`  | All workers sharing Redis | Multi-worker decisions, shared capacity, and pub/sub |
 
 ## Configuration
 
@@ -21,9 +21,11 @@ backend = "memory" # or "redis"
 prefix = "chainlit"
 ```
 
-`backend = "redis"` requires `redis_url`. Terminal memos may contain question
-answers, so protect Redis like the data layer: authentication, TLS, and network
-isolation. Install the optional dependency:
+`backend = "redis"` requires `redis_url`. The memory backend is intentionally
+process-local; multi-worker decisions, shared capacity, and pub/sub require
+Redis. Interaction records may contain question answers, so protect Redis like
+the data layer: authentication, TLS, and network isolation. Install the
+optional dependency:
 
 ```bash
 pip install "chainlit-ng[redis]"
@@ -58,6 +60,9 @@ Values and messages are bytes. Use `set_json` / `get_json` for JSON payloads.
   the durable record still needs a compare-and-set write or read-back check.
 - Pub/sub is best-effort; a worker that is not subscribed at publish time does
   not receive the message.
+- Sticky sessions are still required for the live WebSocket and the waiting
+  approval/question run. The store coordinates decisions and liveness; it does
+  not move the run between workers.
 
 ## Tests
 

@@ -92,16 +92,16 @@ async def test_pending_question_blocks_a_new_run(
         task, entry = await _pending_question(step)
 
         with pytest.raises(ApprovalPending) as pending:
-            guard_pending_approval(step.thread_id)
+            await guard_pending_approval(step.thread_id)
         assert str(pending.value) == (
             "Resolve the pending approval or question before starting a run"
         )
-        assert guard_pending_approval("another-thread") is None
+        assert await guard_pending_approval("another-thread") is None
 
         await _answer(mock_session, entry, text="staging")
         await task
 
-    guard_pending_approval(step.thread_id)
+    await guard_pending_approval(step.thread_id)
 
 
 async def _answer(session, entry, *, option_id=None, text=None):

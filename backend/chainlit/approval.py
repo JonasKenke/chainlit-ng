@@ -22,13 +22,16 @@ from datetime import datetime, timedelta, timezone
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Dict,
     Literal,
     Mapping,
     NoReturn,
     Optional,
     Sequence,
+    TypeVar,
     Union,
+    cast,
 )
 
 from pydantic import (
@@ -44,7 +47,7 @@ from chainlit.context import context
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
 from chainlit.session import WebsocketSession
-from chainlit.state_store import get_state_store
+from chainlit.state_store import LockNotAcquired, get_state_store
 from chainlit.step import Step
 from chainlit.user import PersistedUser, User
 
@@ -258,10 +261,27 @@ class _Entry:
     decided_arguments: Optional[Dict[str, Any]] = None
     kind: InteractionKind = "approval"
     payload: Dict[str, Any] = field(default_factory=dict)
+    remote: bool = False
+    shared: bool = False
 
 
-# Module-level, in-process registry. S1 runs in one worker with sticky
-# sessions (KRE-188 tracks multi-worker).
+@dataclass
+class _RemoteStep:
+    id: str
+    thread_id: str
+    metadata: Dict[str, Any]
+
+
+class _NullEmitter:
+    async def send_approval(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def send_question(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+# Owner-side registry. Shared pending records and terminal memos live in the
+# configured state store; the futures, step objects, and emitters stay here.
 _pending_by_approval: Dict[str, _Entry] = {}
 _pending_by_step: Dict[tuple[str, str], str] = {}
 _step_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = (
@@ -288,6 +308,19 @@ _PROCESS_DIGEST_KEY = secrets.token_bytes(32)
 _JSON_ADAPTER = TypeAdapter(Any)
 # The shared memo is an optimization; never let a slow store hold a decision.
 _STATE_STORE_TIMEOUT = 1.0
+_WORKER_ID = uuid.uuid4().hex
+_PENDING_KEY = "approval:pending:"
+_STEP_KEY = "approval:step:"
+_THREAD_KEY = "approval:thread:"
+_SESSION_KEY = "approval:session:"
+_OWNER_KEY = "approval:owner:"
+_EVENT_KEY = "approval:event:"
+_LOCK_KEY = "approval:lock:"
+_MANAGED_KEY = "approval:managed:"
+_RESERVATION_KEY = "approval:reservation:"
+_OWNER_HEARTBEAT_TTL = 6.0
+_OWNER_HEARTBEAT_INTERVAL = 2.0
+_T = TypeVar("_T")
 
 
 def _cap_lock() -> asyncio.Lock:
@@ -299,7 +332,7 @@ def _cap_lock() -> asyncio.Lock:
     return lock
 
 
-async def _reserve_capacity(generation: str) -> None:
+async def _reserve_capacity(generation: str, approval_id: str, ttl: float) -> None:
     async with _cap_lock():
         pending = sum(
             1
@@ -311,6 +344,16 @@ async def _reserve_capacity(generation: str) -> None:
         ):
             raise ApprovalLimitReached("Too many pending interactions in this session")
         _reservations[generation] = _reservations.get(generation, 0) + 1
+    if not getattr(get_state_store(), "shared", False):
+        return
+    try:
+        await _reserve_shared_capacity(generation, approval_id, ttl)
+    except ApprovalLimitReached:
+        _release_reservation(generation)
+        raise
+    except Exception:
+        # A shared-store outage must not disable the local single-worker path.
+        logger.warning("Failed to reserve shared interaction capacity", exc_info=True)
 
 
 def _release_reservation(generation: str) -> None:
@@ -370,6 +413,28 @@ def managed_thread_ids_for(identifier: str) -> set[str]:
     }
 
 
+async def shared_managed_thread_ids(identifier: str) -> set[str]:
+    """Managed thread ids recorded by any worker, when Redis is configured."""
+    if not getattr(get_state_store(), "shared", False):
+        return set()
+    return await _shared_ids(f"{_MANAGED_KEY}{identifier}")
+
+
+async def _store_managed_thread(thread_id: str, identifier: str) -> None:
+    if not getattr(get_state_store(), "shared", False):
+        return
+    try:
+        await _store_call(
+            get_state_store().set_add(
+                f"{_MANAGED_KEY}{identifier}",
+                thread_id,
+                ttl=float(config.project.user_session_timeout) + 60.0,
+            )
+        )
+    except Exception:
+        logger.warning("Failed to share managed thread state", exc_info=True)
+
+
 def has_live_interaction(
     interaction_id: str, *, kind: Optional[InteractionKind] = None
 ) -> bool:
@@ -384,9 +449,11 @@ def pending_approvals_for_thread(thread_id: str) -> list[_Entry]:
     ]
 
 
-def guard_pending_approval(thread_id: Optional[str]) -> None:
+async def guard_pending_approval(thread_id: Optional[str]) -> None:
     """Refuse a new run while a pending interaction owns the thread."""
-    if thread_id and pending_approvals_for_thread(thread_id):
+    if not thread_id:
+        return
+    if pending_approvals_for_thread(thread_id) or await _shared_live_ids(thread_id):
         raise ApprovalPending(
             "Resolve the pending approval or question before starting a run"
         )
@@ -394,10 +461,13 @@ def guard_pending_approval(thread_id: Optional[str]) -> None:
 
 async def supersede_thread_approvals(thread_id: str, reason: str = "deleted") -> None:
     """Resolve waiters before a delete; the row is gone, so no write is durable."""
-    for entry in pending_approvals_for_thread(thread_id):
+    approval_ids = {
+        entry.approval_id for entry in pending_approvals_for_thread(thread_id)
+    } | await _shared_ids(_thread_key(thread_id))
+    for approval_id in approval_ids:
         try:
             await transition(
-                entry.approval_id,
+                approval_id,
                 "superseded",
                 reason=reason,
                 retry_on_failure=True,
@@ -408,15 +478,15 @@ async def supersede_thread_approvals(thread_id: str, reason: str = "deleted") ->
 
 async def orphan_session_approvals(generation: str) -> None:
     """Drop waiters that belong to a session that no longer exists."""
-    entries = [
-        entry
+    approval_ids = {
+        entry.approval_id
         for entry in _pending_by_approval.values()
         if entry.session_generation == generation
-    ]
-    for entry in entries:
+    } | await _shared_ids(_session_key(generation))
+    for approval_id in approval_ids:
         try:
             await transition(
-                entry.approval_id,
+                approval_id,
                 "orphaned",
                 reason="session_ended",
                 retry_on_failure=True,
@@ -474,6 +544,28 @@ async def orphan_thread_approvals(
             continue
         _set_persisted_approval(thread, entry.step_id, record)
 
+    for approval_id in await _shared_ids(_thread_key(thread_id)):
+        if approval_id in live:
+            continue
+        remote_entry = await _load_pending_entry(approval_id)
+        if remote_entry is None:
+            continue
+        if (
+            keep_generation is not None
+            and remote_entry.session_generation == keep_generation
+        ):
+            continue
+        try:
+            record = await transition(
+                approval_id,
+                "orphaned",
+                reason="server_restart",
+                retry_on_failure=True,
+            )
+        except ApprovalError:
+            continue
+        _set_persisted_approval(thread, remote_entry.step_id, record)
+
     data_layer = get_data_layer()
     if data_layer is None:
         return
@@ -487,10 +579,10 @@ async def orphan_thread_approvals(
             or persisted_record.get("status") != "pending"
         ):
             continue
-        approval_id = persisted_record.get("id")
-        if not isinstance(approval_id, str):
+        persisted_id = persisted_record.get("id")
+        if not isinstance(persisted_id, str):
             continue
-        live_entry = live.get(approval_id)
+        live_entry = live.get(persisted_id)
         if live_entry and live_entry.session_generation == keep_generation:
             continue
         orphaned = deepcopy(persisted_record)
@@ -958,6 +1050,388 @@ async def _raise_missing(
     raise ApprovalNotFound("Interaction not found")
 
 
+def _pending_key(approval_id: str) -> str:
+    return f"{_PENDING_KEY}{approval_id}"
+
+
+def _step_key(thread_id: str, step_id: str) -> str:
+    return f"{_STEP_KEY}{thread_id}:{step_id}"
+
+
+def _thread_key(thread_id: str) -> str:
+    return f"{_THREAD_KEY}{thread_id}"
+
+
+def _session_key(generation: str) -> str:
+    return f"{_SESSION_KEY}{generation}"
+
+
+def _owner_key(approval_id: str) -> str:
+    return f"{_OWNER_KEY}{approval_id}"
+
+
+def _event_key(approval_id: str) -> str:
+    return f"{_EVENT_KEY}{approval_id}"
+
+
+def _reservation_key(approval_id: str) -> str:
+    return f"{_RESERVATION_KEY}{approval_id}"
+
+
+def _lock_key(approval_id: str) -> str:
+    return f"{_LOCK_KEY}{approval_id}"
+
+
+async def _store_call(awaitable: Awaitable[_T]) -> _T:
+    return await asyncio.wait_for(awaitable, timeout=_STATE_STORE_TIMEOUT)
+
+
+async def _store_pending(entry: _Entry, record: Dict[str, Any], ttl: float) -> bool:
+    """Publish the pending record and its lookup keys for other workers."""
+    try:
+        store = get_state_store()
+
+        async def write() -> None:
+            await store.set_json(
+                _pending_key(entry.approval_id),
+                {
+                    "record": deepcopy(record),
+                    "ownerId": _WORKER_ID,
+                    "sessionGeneration": entry.session_generation,
+                    "expiresAtTs": entry.expires_at_ts,
+                    "threadId": entry.thread_id,
+                    "stepId": entry.step_id,
+                    "kind": entry.kind,
+                },
+                ttl=ttl,
+            )
+            await store.set_json(
+                _step_key(entry.thread_id, entry.step_id),
+                {"id": entry.approval_id},
+                ttl=ttl,
+            )
+            await store.set_add(
+                _thread_key(entry.thread_id), entry.approval_id, ttl=ttl
+            )
+            await store.set(
+                _owner_key(entry.approval_id),
+                _WORKER_ID.encode(),
+                ttl=_OWNER_HEARTBEAT_TTL,
+            )
+
+        await asyncio.wait_for(write(), timeout=max(_STATE_STORE_TIMEOUT, 2.0))
+        entry.shared = True
+        try:
+            await _store_call(store.delete(_reservation_key(entry.approval_id)))
+        except Exception:
+            pass
+        return True
+    except Exception:
+        logger.warning("Failed to share pending interaction state", exc_info=True)
+        return False
+
+
+async def _clear_pending_store(entry: _Entry) -> None:
+    if not entry.shared:
+        return
+    try:
+        store = get_state_store()
+
+        async def clear() -> None:
+            step_key = _step_key(entry.thread_id, entry.step_id)
+            current_step = await store.get_json(step_key)
+            if (
+                isinstance(current_step, dict)
+                and current_step.get("id") == entry.approval_id
+            ):
+                await store.delete(step_key)
+            await store.delete(
+                _pending_key(entry.approval_id),
+                _owner_key(entry.approval_id),
+                _reservation_key(entry.approval_id),
+            )
+            await store.set_remove(_thread_key(entry.thread_id), entry.approval_id)
+            await store.set_remove(
+                _session_key(entry.session_generation), entry.approval_id
+            )
+
+        await asyncio.wait_for(clear(), timeout=max(_STATE_STORE_TIMEOUT, 2.0))
+    except Exception:
+        logger.warning(
+            "Failed to clear shared pending interaction state", exc_info=True
+        )
+
+
+async def _owner_alive(approval_id: str) -> bool:
+    try:
+        return await _store_call(get_state_store().exists(_owner_key(approval_id)))
+    except Exception as exc:
+        raise ApprovalPersistenceError("Interaction registry unavailable") from exc
+
+
+async def _owner_heartbeat(approval_id: str) -> None:
+    warned = False
+    while True:
+        try:
+            await _store_call(
+                get_state_store().set(
+                    _owner_key(approval_id),
+                    _WORKER_ID.encode(),
+                    ttl=_OWNER_HEARTBEAT_TTL,
+                )
+            )
+            warned = False
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if not warned:
+                logger.warning("Failed to refresh interaction owner heartbeat")
+                warned = True
+        await asyncio.sleep(_OWNER_HEARTBEAT_INTERVAL)
+
+
+def _question_payload(record: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "prompt": record.get("prompt"),
+        "options": record.get("options") or [],
+        "allowFreeText": bool(record.get("allowFreeText")),
+        "questions": record.get("questions") or [],
+        "structured": record.get("structured") is True,
+        "multi": record.get("multi") is True,
+    }
+
+
+async def _load_pending_entry(approval_id: str) -> Optional[_Entry]:
+    try:
+        payload = await _store_call(
+            get_state_store().get_json(_pending_key(approval_id))
+        )
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    record = payload.get("record")
+    thread_id = payload.get("threadId")
+    step_id = payload.get("stepId")
+    generation = payload.get("sessionGeneration")
+    expires_at_ts = payload.get("expiresAtTs")
+    if (
+        not isinstance(record, dict)
+        or record.get("status") != "pending"
+        or not isinstance(record.get("id"), str)
+        or record["id"] != approval_id
+        or not isinstance(thread_id, str)
+        or not isinstance(step_id, str)
+        or not isinstance(generation, str)
+        or not isinstance(expires_at_ts, (int, float))
+        or not isinstance(record.get("requestedBy"), str)
+    ):
+        return None
+    kind = _kind(record)
+    if kind != payload.get("kind"):
+        return None
+    remote_step = _RemoteStep(
+        id=step_id,
+        thread_id=thread_id,
+        metadata={APPROVAL_METADATA_KEY: deepcopy(record)},
+    )
+    entry = _Entry(
+        approval_id=approval_id,
+        thread_id=thread_id,
+        step_id=step_id,
+        step=cast(Step, remote_step),
+        future=asyncio.get_running_loop().create_future(),
+        emitter=cast("BaseChainlitEmitter", _NullEmitter()),
+        requested_by=record["requestedBy"],
+        session_generation=generation,
+        revision=int(record.get("revision", 1)),
+        expires_at_ts=float(expires_at_ts),
+        kind=kind,
+        payload=_question_payload(record) if kind == "question" else {},
+        remote=True,
+        shared=True,
+    )
+    return entry
+
+
+async def _apply_remote_terminal(entry: _Entry, record: Dict[str, Any]) -> None:
+    """Apply a record another worker persisted to the local waiter."""
+    if entry.future.done():
+        return
+    entry.step.metadata[APPROVAL_METADATA_KEY] = deepcopy(record)
+    entry.revision = int(record.get("revision", entry.revision))
+    _pending_by_approval.pop(entry.approval_id, None)
+    if _pending_by_step.get((entry.thread_id, entry.step_id)) == entry.approval_id:
+        _pending_by_step.pop((entry.thread_id, entry.step_id), None)
+    _remember_terminal(entry.thread_id, record)
+    await _emit(entry, record, entry.arguments)
+    if not entry.future.done():
+        entry.future.set_result(record)
+
+
+async def _watch_interaction(entry: _Entry) -> None:
+    """Resolve an owner waiter when another worker commits the decision."""
+    try:
+        async for raw in get_state_store().subscribe(_event_key(entry.approval_id)):
+            try:
+                event = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            record = event.get("record") if isinstance(event, dict) else None
+            if not isinstance(record, dict) or record.get("id") != entry.approval_id:
+                continue
+            await _apply_remote_terminal(entry, record)
+            return
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Failed to watch interaction %s", entry.approval_id)
+
+
+async def _publish_terminal(record: Dict[str, Any]) -> None:
+    try:
+        await _store_call(
+            get_state_store().publish(
+                _event_key(record["id"]),
+                json.dumps(
+                    {"record": record},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode(),
+            )
+        )
+    except Exception:
+        logger.warning("Failed to publish interaction terminal state", exc_info=True)
+
+
+async def _shared_ids(key: str) -> set[str]:
+    try:
+        return await _store_call(get_state_store().set_members(key))
+    except Exception:
+        return set()
+
+
+async def _shared_live_ids_unbounded(thread_id: str) -> set[str]:
+    ids = await _shared_ids(_thread_key(thread_id))
+    live: set[str] = set()
+    for approval_id in ids:
+        try:
+            if await _owner_alive(approval_id) and await _store_call(
+                get_state_store().exists(_pending_key(approval_id))
+            ):
+                live.add(approval_id)
+        except Exception:
+            continue
+    return live
+
+
+async def _shared_live_ids(thread_id: str) -> set[str]:
+    try:
+        return await asyncio.wait_for(
+            _shared_live_ids_unbounded(thread_id),
+            timeout=_STATE_STORE_TIMEOUT,
+        )
+    except Exception:
+        return set()
+
+
+async def live_interaction_ids(threads: Sequence[Mapping[str, Any]]) -> set[str]:
+    """Ids of pending interactions whose owner worker is still alive."""
+    thread_ids = {
+        thread_id
+        for thread in threads
+        if isinstance((thread_id := thread.get("id")), str)
+    }
+    live = {
+        entry.approval_id
+        for entry in _pending_by_approval.values()
+        if entry.thread_id in thread_ids
+    }
+    if not getattr(get_state_store(), "shared", False) or not thread_ids:
+        return live
+    try:
+        shared = await asyncio.wait_for(
+            asyncio.gather(
+                *(_shared_live_ids_unbounded(thread_id) for thread_id in thread_ids)
+            ),
+            timeout=_STATE_STORE_TIMEOUT * 2,
+        )
+    except Exception:
+        return live
+    for ids in shared:
+        live.update(ids)
+    return live
+
+
+async def _reserve_shared_capacity(
+    generation: str, approval_id: str, ttl: float
+) -> None:
+    store = get_state_store()
+    try:
+        async with store.lock(f"{_SESSION_KEY}lock:{generation}", ttl=5, wait=1):
+            key = _session_key(generation)
+            members = await _store_call(store.set_members(key))
+            for member in members:
+                pending = await _store_call(store.exists(_pending_key(member)))
+                reserved = await _store_call(store.exists(_reservation_key(member)))
+                if not pending and not reserved:
+                    await _store_call(store.set_remove(key, member))
+            members = await _store_call(store.set_members(key))
+            if len(members) >= MAX_PENDING_INTERACTIONS_PER_SESSION:
+                raise ApprovalLimitReached(
+                    "Too many pending interactions in this session"
+                )
+            await _store_call(store.set_add(key, approval_id, ttl=ttl))
+            await _store_call(
+                store.set(
+                    _reservation_key(approval_id),
+                    _WORKER_ID.encode(),
+                    ttl=ttl,
+                )
+            )
+    except LockNotAcquired as exc:
+        raise ApprovalLimitReached(
+            "Too many pending interactions in this session"
+        ) from exc
+
+
+async def _release_shared_capacity(generation: str, approval_id: str) -> None:
+    try:
+        store = get_state_store()
+        await _store_call(store.set_remove(_session_key(generation), approval_id))
+        await _store_call(store.delete(_reservation_key(approval_id)))
+    except Exception:
+        pass
+
+
+async def _start_shared_pending(
+    entry: _Entry, record: Dict[str, Any], timeout: float
+) -> tuple[Optional[asyncio.Task], Optional[asyncio.Task]]:
+    if not getattr(get_state_store(), "shared", False):
+        return None, None
+    ttl = max(60.0, timeout + 60.0)
+    if not await _store_pending(entry, record, ttl):
+        await _release_shared_capacity(entry.session_generation, entry.approval_id)
+        return None, None
+    heartbeat = asyncio.create_task(_owner_heartbeat(entry.approval_id))
+    watcher = asyncio.create_task(_watch_interaction(entry))
+    # Let the subscription register before the card becomes answerable.
+    await asyncio.sleep(0)
+    return heartbeat, watcher
+
+
+async def _stop_shared_pending(
+    tasks: tuple[Optional[asyncio.Task], Optional[asyncio.Task]],
+) -> None:
+    for task in tasks:
+        if task is not None:
+            task.cancel()
+    await asyncio.gather(
+        *(task for task in tasks if task is not None), return_exceptions=True
+    )
+
+
 async def _write(
     entry: _Entry, record: Dict[str, Any], expected_revision: Optional[int]
 ) -> bool:
@@ -1225,11 +1699,140 @@ async def _transition_locked(
         _pending_by_step.pop((entry.thread_id, entry.step_id), None)
     _remember_terminal(entry.thread_id, record)
     await _store_terminal(entry.thread_id, record)
+    await _clear_pending_store(entry)
+
+    if entry.remote:
+        await _publish_terminal(record)
+        return record
 
     if not entry.future.done():
         entry.future.set_result(record)
     await _emit(entry, record, final_arguments)
     return record
+
+
+def _validate_transition_target(
+    entry: _Entry,
+    *,
+    expected_kind: Optional[InteractionKind],
+    thread_id: Optional[str],
+    session_generation: Optional[str],
+) -> None:
+    if expected_kind is not None and entry.kind != expected_kind:
+        raise ApprovalNotFound("Interaction not found")
+    if thread_id is not None and entry.thread_id != thread_id:
+        raise ApprovalNotFound("Interaction not found")
+    if (
+        session_generation is not None
+        and entry.session_generation != session_generation
+    ):
+        raise ApprovalSessionMismatch("Interaction belongs to another session")
+
+
+async def _transition_serialized(
+    approval_id: str,
+    to_status: InteractionStatus,
+    *,
+    actor: Optional[User] = None,
+    thread_id: Optional[str] = None,
+    session_generation: Optional[str] = None,
+    reason: Optional[str] = None,
+    decision_request_id: Optional[str] = None,
+    retry_on_failure: bool = False,
+    edited_arguments: Optional[Mapping[str, Any]] = None,
+    expected_kind: Optional[InteractionKind] = None,
+    answer: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    entry = _pending_by_approval.get(approval_id)
+    if entry is None:
+        entry = await _load_pending_entry(approval_id)
+        if entry is None:
+            await _raise_missing(approval_id, thread_id, expected_kind)
+    _validate_transition_target(
+        entry,
+        expected_kind=expected_kind,
+        thread_id=thread_id,
+        session_generation=session_generation,
+    )
+    if entry.remote and to_status in _ALL_USER_STATUSES:
+        if not await _owner_alive(approval_id):
+            record = await _transition_locked(
+                entry,
+                "orphaned",
+                reason="server_restart",
+                retry_on_failure=True,
+            )
+            raise ApprovalNotPending("Interaction is no longer pending", record=record)
+    if entry.remote:
+        return await _transition_locked(
+            entry,
+            to_status,
+            actor=actor,
+            reason=reason,
+            decision_request_id=decision_request_id,
+            retry_on_failure=retry_on_failure,
+            edited_arguments=edited_arguments,
+            answer=answer,
+        )
+
+    async with step_lock(entry.thread_id, entry.step_id):
+        current = _pending_by_approval.get(approval_id)
+        if current is None:
+            remote = await _load_pending_entry(approval_id)
+            if remote is None:
+                await _raise_missing(approval_id, thread_id, expected_kind)
+            _validate_transition_target(
+                remote,
+                expected_kind=expected_kind,
+                thread_id=thread_id,
+                session_generation=session_generation,
+            )
+            if to_status in _ALL_USER_STATUSES and not await _owner_alive(approval_id):
+                record = await _transition_locked(
+                    remote,
+                    "orphaned",
+                    reason="server_restart",
+                    retry_on_failure=True,
+                )
+                raise ApprovalNotPending(
+                    "Interaction is no longer pending", record=record
+                )
+            return await _transition_locked(
+                remote,
+                to_status,
+                actor=actor,
+                reason=reason,
+                decision_request_id=decision_request_id,
+                retry_on_failure=retry_on_failure,
+                edited_arguments=edited_arguments,
+                answer=answer,
+            )
+        _validate_transition_target(
+            current,
+            expected_kind=expected_kind,
+            thread_id=thread_id,
+            session_generation=session_generation,
+        )
+        if current.shared:
+            terminal = _terminal_records.get(approval_id)
+            if terminal is None:
+                terminal = await _load_terminal(approval_id, thread_id, current.kind)
+            if terminal is not None:
+                # Another worker won while this one waited for the lock.
+                await _apply_remote_terminal(current, terminal[2])
+                raise ApprovalNotPending(
+                    "Interaction is no longer pending", record=terminal[2]
+                )
+        return await _transition_locked(
+            current,
+            to_status,
+            actor=actor,
+            reason=reason,
+            decision_request_id=decision_request_id,
+            retry_on_failure=retry_on_failure,
+            edited_arguments=edited_arguments,
+            answer=answer,
+        )
 
 
 async def transition(
@@ -1253,43 +1856,23 @@ async def transition(
     if to_status not in _ALL_USER_STATUSES and to_status not in _SYSTEM_STATUSES:
         raise ValueError(f"Cannot transition an interaction to {to_status}")
 
-    entry = _pending_by_approval.get(approval_id)
-    if entry is None:
-        await _raise_missing(approval_id, thread_id, expected_kind)
-    if expected_kind is not None and entry.kind != expected_kind:
-        raise ApprovalNotFound("Interaction not found")
-
-    if thread_id is not None and entry.thread_id != thread_id:
-        raise ApprovalNotFound("Interaction not found")
-    if (
-        session_generation is not None
-        and entry.session_generation != session_generation
-    ):
-        raise ApprovalSessionMismatch("Interaction belongs to another session")
-
-    async with step_lock(entry.thread_id, entry.step_id):
-        current = _pending_by_approval.get(approval_id)
-        if current is None:
-            await _raise_missing(approval_id, thread_id, expected_kind)
-        if expected_kind is not None and current.kind != expected_kind:
-            raise ApprovalNotFound("Interaction not found")
-        if thread_id is not None and current.thread_id != thread_id:
-            raise ApprovalNotFound("Interaction not found")
-        if (
-            session_generation is not None
-            and current.session_generation != session_generation
-        ):
-            raise ApprovalSessionMismatch("Interaction belongs to another session")
-        return await _transition_locked(
-            current,
-            to_status,
-            actor=actor,
-            reason=reason,
-            decision_request_id=decision_request_id,
-            retry_on_failure=retry_on_failure,
-            edited_arguments=edited_arguments,
-            answer=answer,
-        )
+    try:
+        async with get_state_store().lock(_lock_key(approval_id), ttl=10, wait=2):
+            return await _transition_serialized(
+                approval_id,
+                to_status,
+                actor=actor,
+                thread_id=thread_id,
+                session_generation=session_generation,
+                reason=reason,
+                decision_request_id=decision_request_id,
+                retry_on_failure=retry_on_failure,
+                edited_arguments=edited_arguments,
+                expected_kind=expected_kind,
+                answer=answer,
+            )
+    except LockNotAcquired as exc:
+        raise ApprovalNotPending("Interaction is busy; retry") from exc
 
 
 def _decision_from_record(
@@ -1361,12 +1944,26 @@ async def _ask(entry: _Entry, timeout: float) -> Dict[str, Any]:
         raise
 
     if not done:
-        await transition(
-            entry.approval_id,
-            "expired",
-            reason="timeout",
-            retry_on_failure=True,
-        )
+        terminal = _terminal_records.get(entry.approval_id)
+        if terminal is None:
+            terminal = await _load_terminal(
+                entry.approval_id, entry.thread_id, entry.kind
+            )
+        if terminal is not None:
+            # Pub/sub is best-effort; the shared terminal record is the fallback.
+            await _apply_remote_terminal(entry, terminal[2])
+        else:
+            try:
+                await transition(
+                    entry.approval_id,
+                    "expired",
+                    reason="timeout",
+                    retry_on_failure=True,
+                )
+            except ApprovalNotPending as exc:
+                if exc.record is None or exc.record.get("status") == "pending":
+                    raise
+                await _apply_remote_terminal(entry, exc.record)
     return entry.future.result()
 
 
@@ -1485,11 +2082,16 @@ class Approval:
         # Synchronous, before the first await: later Step writes take the lock.
         self.step._approval_managed = True
         _remember_managed_thread(self.step.thread_id, user.identifier)
+        await _store_managed_thread(self.step.thread_id, user.identifier)
         emitter = context.emitter
         key = (self.step.thread_id, self.step.id)
 
-        await _reserve_capacity(generation)
+        await _reserve_capacity(generation, record["id"], max(60.0, timeout + 60.0))
         reserved = True
+        shared_tasks: tuple[Optional[asyncio.Task], Optional[asyncio.Task]] = (
+            None,
+            None,
+        )
         try:
             async with step_lock(*key):
                 previous_id = _pending_by_step.get(key)
@@ -1532,11 +2134,14 @@ class Approval:
                 _commit_reservation(generation)
                 reserved = False
 
+            shared_tasks = await _start_shared_pending(entry, record, timeout)
             await _emit(entry, record, self.arguments)
             stored = await _ask(entry, timeout)
         finally:
             if reserved:
                 _release_reservation(generation)
+                await _release_shared_capacity(generation, record["id"])
+            await _stop_shared_pending(shared_tasks)
 
         if stored["status"] == "edited":
             # Persist the final-argument trace; the record write already landed.

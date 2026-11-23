@@ -22,6 +22,9 @@ class StateStore(ABC):
     restart, or TTL expiry may lose entries.
     """
 
+    # True only when the backend is shared by multiple workers.
+    shared: bool = False
+
     @abstractmethod
     async def get(self, key: str) -> Optional[bytes]:
         """Return the value, or None when missing or expired."""
