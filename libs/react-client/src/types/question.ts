@@ -14,9 +14,10 @@ export interface IQuestionField {
   id: string;
   prompt: string;
   type: QuestionFieldType;
+  multiple?: boolean;
   options: IQuestionOption[];
   allowFreeText: boolean;
-  default?: string | null;
+  default?: string | string[] | null;
   required: boolean;
   placeholder?: string | null;
   multiline?: boolean;
@@ -26,6 +27,8 @@ export interface IQuestionFieldAnswer {
   questionId: string;
   optionId?: string | null;
   label?: string | null;
+  optionIds?: string[] | null;
+  labels?: string[] | null;
   text?: string | null;
   redacted?: boolean;
 }
@@ -65,6 +68,7 @@ export interface IQuestion {
 export interface IQuestionAnswerItem {
   questionId: string;
   optionId?: string;
+  optionIds?: string[];
   text?: string;
 }
 

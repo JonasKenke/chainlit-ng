@@ -58,21 +58,54 @@ print(answer.answers["env"].label)
 
 Supported `type` values:
 
-| Type     | Control                                                 | Server validation                               |
-| -------- | ------------------------------------------------------- | ----------------------------------------------- |
-| `text`   | textarea, or a single-line input with `multiline=False` | plain text rules only                           |
-| `email`  | email input                                             | `name@domain.tld` shape, at most 254 characters |
-| `date`   | calendar picker                                         | `YYYY-MM-DD` and a real calendar date           |
-| `number` | numeric input                                           | finite decimal                                  |
-| `url`    | URL input                                               | `http` or `https` scheme with a host            |
-| `tel`    | phone input                                             | digits, spaces, `+`, `-`, `.`, `(`, `)`         |
-| `choice` | radio list plus optional Other textarea                 | server option id or allowed free text           |
+| Type     | Control                                                  | Server validation                               |
+| -------- | -------------------------------------------------------- | ----------------------------------------------- |
+| `text`   | textarea, or a single-line input with `multiline=False`  | plain text rules only                           |
+| `email`  | email input                                              | `name@domain.tld` shape, at most 254 characters |
+| `date`   | calendar picker                                          | `YYYY-MM-DD` and a real calendar date           |
+| `number` | numeric input                                            | finite decimal                                  |
+| `url`    | URL input                                                | `http` or `https` scheme with a host            |
+| `tel`    | phone input                                              | digits, spaces, `+`, `-`, `.`, `(`, `)`         |
+| `choice` | radio list or checkbox list with optional Other textarea | server option ids or allowed free text          |
 
 `default` is an option id for `choice` and a typed value otherwise. A
 `required=False` field may be left blank; the answer is omitted. The card
 validates each field before Next and the review step re-checks every field
 before Submit, and the server repeats every check against the ask-time
 snapshot.
+
+### Multiple choice
+
+Set `multiple=True` on a `choice` question to render checkboxes instead of
+radios. `default` may be one option id or a list of ids.
+
+```python
+answer = await cl.ask(
+    questions=[
+        cl.Question(
+            "Which environments?",
+            id="envs",
+            type="choice",
+            multiple=True,
+            options=[
+                cl.QuestionOption("staging", "Staging"),
+                cl.QuestionOption("prod", "Production"),
+                cl.QuestionOption("preview", "Preview"),
+            ],
+            default=["staging", "prod"],
+            allow_free_text=True,
+        )
+    ]
+)
+
+field = answer.answers["envs"]
+print(field.option_ids, field.labels, field.text)
+```
+
+Free text is additive for a multi-select question: the user can tick options
+and type an extra answer. With `allow_free_text=False` the textarea is hidden
+and the server refuses text. Single-select questions keep `option_id`/`label`
+and still cannot combine an option with text.
 
 `cl.ask(question=...)` keeps its original contract. Do not combine it with
 `questions=`.
@@ -81,7 +114,8 @@ snapshot.
 
 `answer.text` is the user's raw, plain text for the single-question form. For
 `questions=`, read `answer.answers[question_id]`; each value has `option_id`,
-`label` and `text`. The server trims text, normalizes
+`label` and `text`, and a `multiple=True` answer adds `option_ids` and
+`labels`. The server trims text, normalizes
 line endings, and rejects NUL/C0 controls (except newline and tab), C1 controls,
 Unicode bidi controls (`U+061C`, `U+200E`, `U+200F`, `U+202A`–`U+202E`,
 `U+2066`–`U+2069`), zero-width characters (`U+200B`–`U+200D`, `U+FEFF`),
@@ -106,6 +140,9 @@ tool_result = answer.as_tool_result()
 #   "answers": [
 #       {"questionId": "email", "optionId": None, "text": "..."},
 #       {"questionId": "env", "optionId": "prod", "text": None},
+#       {"questionId": "envs", "optionId": None,
+#        "optionIds": ["staging", "prod"],
+#        "labels": ["Staging", "Production"], "text": None},
 #   ],
 # }
 ```

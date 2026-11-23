@@ -77,6 +77,7 @@ _QUESTION_SPEC_KEYS = frozenset(
         "id",
         "prompt",
         "type",
+        "multiple",
         "options",
         "allowFreeText",
         "allow_free_text",
@@ -272,9 +273,10 @@ class Question:
     prompt: str
     id: Optional[str] = None
     type: QuestionType = "text"
+    multiple: bool = False
     options: Sequence[QuestionOption] = ()
     allow_free_text: bool = True
-    default: Optional[str] = None
+    default: Optional[Union[str, Sequence[str]]] = None
     required: bool = True
     placeholder: Optional[str] = None
     multiline: bool = True
@@ -286,6 +288,8 @@ class QuestionFieldAnswer:
     option_id: Optional[str] = None
     label: Optional[str] = None
     text: Optional[str] = None
+    option_ids: tuple[str, ...] = ()
+    labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -318,14 +322,17 @@ class QuestionAnswer:
             "durable": self.durable,
         }
         if self.answers:
-            result["answers"] = [
-                {
+            result["answers"] = []
+            for answer in self.answers.values():
+                item: Dict[str, Any] = {
                     "questionId": answer.question_id,
                     "optionId": answer.option_id,
                     "text": answer.text,
                 }
-                for answer in self.answers.values()
-            ]
+                if answer.option_ids:
+                    item["optionIds"] = list(answer.option_ids)
+                    item["labels"] = list(answer.labels)
+                result["answers"].append(item)
         return result
 
 
@@ -1089,14 +1096,55 @@ def _normalize_comment(value: str) -> str:
 def _normalize_field_answer(
     spec: Mapping[str, Any], answer: Mapping[str, Any]
 ) -> Dict[str, Any]:
-    unknown = set(answer) - {"questionId", "optionId", "text"}
+    unknown = set(answer) - {"questionId", "optionId", "optionIds", "text"}
     if unknown:
         raise QuestionInvalid("unknown answer field")
     option_id = answer.get("optionId")
+    option_ids = answer.get("optionIds")
     text = answer.get("text")
+    question_id = spec["id"]
+
+    if spec["type"] == "choice" and spec.get("multiple"):
+        if option_id is not None:
+            raise QuestionInvalid("this question accepts optionIds, not optionId")
+        if option_ids is None and text is None:
+            raise QuestionInvalid("select at least one option or type an answer")
+        selected_ids: list[str] = []
+        labels: list[str] = []
+        if option_ids is not None:
+            if isinstance(option_ids, (str, bytes)) or not isinstance(
+                option_ids, Sequence
+            ):
+                raise QuestionInvalid("optionIds must be a sequence")
+            for candidate in option_ids:
+                if not isinstance(candidate, str):
+                    raise QuestionInvalid("invalid option id")
+                match = next(
+                    (option for option in spec["options"] if option["id"] == candidate),
+                    None,
+                )
+                if match is None:
+                    raise QuestionInvalid("unknown option")
+                if match["id"] in selected_ids:
+                    raise QuestionInvalid("duplicate option id")
+                selected_ids.append(match["id"])
+                labels.append(match["label"])
+        result: Dict[str, Any] = {"questionId": question_id}
+        if selected_ids:
+            result["optionIds"] = selected_ids
+            result["labels"] = labels
+        if text is not None:
+            if not spec["allowFreeText"]:
+                raise QuestionInvalid("free text is not allowed for this question")
+            result["text"] = _normalize_question_text(text)
+        if not selected_ids and "text" not in result:
+            raise QuestionInvalid("select at least one option or type an answer")
+        return result
+
+    if option_ids is not None:
+        raise QuestionInvalid("this question accepts a single option")
     if (option_id is None) == (text is None):
         raise QuestionInvalid("exactly one of optionId or text is required")
-    question_id = spec["id"]
     if spec["type"] == "choice":
         if option_id is not None:
             match = next(
@@ -1604,9 +1652,34 @@ def _validate_typed_text(question_type: str, text: str) -> None:
     raise QuestionInvalid("unsupported question type")
 
 
-def _normalize_default(spec: Mapping[str, Any], value: Any) -> Optional[str]:
+def _normalize_default(
+    spec: Mapping[str, Any], value: Any
+) -> Optional[Union[str, list[str]]]:
     if value is None:
         return None
+    if spec["type"] == "choice" and spec.get("multiple"):
+        if isinstance(value, (str, bytes)):
+            values: Sequence[Any] = [value]
+        elif isinstance(value, Sequence):
+            values = value
+        else:
+            raise QuestionInvalid("default must be a string or a list of strings")
+        if not values:
+            return []
+        selected: list[str] = []
+        for candidate in values:
+            if not isinstance(candidate, str):
+                raise QuestionInvalid("default must be a string or a list of strings")
+            match = next(
+                (option for option in spec["options"] if option["id"] == candidate),
+                None,
+            )
+            if match is None:
+                raise QuestionInvalid("default must be a known option id")
+            if match["id"] in selected:
+                raise QuestionInvalid("duplicate default option")
+            selected.append(match["id"])
+        return selected
     if not isinstance(value, str):
         raise QuestionInvalid("default must be a string")
     if not value.strip():
@@ -1628,6 +1701,7 @@ def _normalized_question_spec(item: Any, index: int) -> Dict[str, Any]:
     prompt: Any
     question_id: Any
     question_type: Any
+    multiple: Any
     options: Any
     allow_free_text: Any
     default: Any
@@ -1638,6 +1712,7 @@ def _normalized_question_spec(item: Any, index: int) -> Dict[str, Any]:
         prompt = item.prompt
         question_id = item.id
         question_type = item.type
+        multiple = item.multiple
         options = item.options
         allow_free_text = item.allow_free_text
         default = item.default
@@ -1651,6 +1726,7 @@ def _normalized_question_spec(item: Any, index: int) -> Dict[str, Any]:
         prompt = item.get("prompt")
         question_id = item.get("id")
         question_type = item.get("type")
+        multiple = item.get("multiple", False)
         options = item.get("options") or ()
         allow_free_text = item.get("allowFreeText", item.get("allow_free_text", True))
         default = item.get("default")
@@ -1665,6 +1741,8 @@ def _normalized_question_spec(item: Any, index: int) -> Dict[str, Any]:
         question_id = f"q{index + 1}"
     if not isinstance(question_id, str) or not _OPTION_ID_PATTERN.match(question_id):
         raise QuestionInvalid("invalid question id")
+    if not isinstance(multiple, bool):
+        raise QuestionInvalid("multiple must be a boolean")
     if not isinstance(allow_free_text, bool):
         raise QuestionInvalid("allow_free_text must be a boolean")
     if not isinstance(required, bool):
@@ -1680,6 +1758,8 @@ def _normalized_question_spec(item: Any, index: int) -> Dict[str, Any]:
     if question_type == "choice":
         if not normalized_options:
             raise QuestionInvalid("a choice question needs at least one option")
+    elif multiple:
+        raise QuestionInvalid("multiple is only supported for choice questions")
     elif normalized_options:
         raise QuestionInvalid("options require type='choice'")
     else:
@@ -1698,6 +1778,7 @@ def _normalized_question_spec(item: Any, index: int) -> Dict[str, Any]:
         "id": question_id,
         "prompt": prompt,
         "type": question_type,
+        "multiple": multiple,
         "options": normalized_options,
         "allowFreeText": allow_free_text,
         "default": None,
@@ -1725,6 +1806,7 @@ def _validated_question_payload(
         "id": "q1",
         "prompt": prompt,
         "type": "choice" if normalized else "text",
+        "multiple": False,
         "options": normalized,
         "allowFreeText": allow_free_text,
         "default": None,
@@ -1782,13 +1864,24 @@ def _question_answer_from_record(
                 option_id=item.get("optionId"),
                 label=item.get("label"),
                 text=item.get("text"),
+                option_ids=tuple(
+                    value
+                    for value in (item.get("optionIds") or ())
+                    if isinstance(value, str)
+                ),
+                labels=tuple(
+                    value
+                    for value in (item.get("labels") or ())
+                    if isinstance(value, str)
+                ),
             )
     option_id = answer.get("optionId")
     label = answer.get("label")
     text = answer.get("text")
     if len(field_answers) == 1 and option_id is None and text is None:
         only = next(iter(field_answers.values()))
-        option_id, label, text = only.option_id, only.label, only.text
+        if not only.option_ids:
+            option_id, label, text = only.option_id, only.label, only.text
     return QuestionAnswer(
         question_id=record["id"],
         thread_id=record["threadId"],

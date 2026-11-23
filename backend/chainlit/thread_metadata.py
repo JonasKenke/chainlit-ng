@@ -1,7 +1,7 @@
 """Filter thread metadata at browser response boundaries."""
 
 import json
-from typing import Any, Mapping, Optional, cast
+from typing import Any, Dict, Mapping, Optional, cast
 
 from chainlit.approval import has_live_interaction
 from chainlit.types import ThreadDict
@@ -59,17 +59,32 @@ def _public_question_answer(answer: Any) -> Any:
                 item.get("questionId"), str
             ):
                 continue
-            if isinstance(item.get("optionId"), str) and item.get("text") is None:
+            question_id = item["questionId"]
+            option_ids = item.get("optionIds")
+            if isinstance(option_ids, list) and all(
+                isinstance(option_id, str) for option_id in option_ids
+            ):
+                labels = item.get("labels")
+                public_item: Dict[str, Any] = {
+                    "questionId": question_id,
+                    "optionIds": option_ids,
+                    "labels": labels if isinstance(labels, list) else [],
+                }
+                if item.get("text") is not None:
+                    public_item["text"] = None
+                    public_item["redacted"] = True
+                public_answers.append(public_item)
+            elif isinstance(item.get("optionId"), str) and item.get("text") is None:
                 public_answers.append(
                     {
-                        "questionId": item["questionId"],
+                        "questionId": question_id,
                         "optionId": item["optionId"],
                         "label": item.get("label"),
                     }
                 )
             else:
                 public_answers.append(
-                    {"questionId": item["questionId"], "text": None, "redacted": True}
+                    {"questionId": question_id, "text": None, "redacted": True}
                 )
         return {"answers": public_answers}
     if isinstance(answer.get("optionId"), str) and answer.get("text") is None:

@@ -457,3 +457,54 @@ def test_public_share_redacts_each_typed_answer_and_drops_defaults():
 
     owner = public_thread(_question_thread(record), include_settings=True)
     assert secret in json.dumps(owner)
+
+
+def test_public_share_keeps_multi_options_and_redacts_other_text():
+    secret = "sk-live-pasted-secret"
+    record = _question_record(
+        structured=True,
+        questions=[
+            {
+                "id": "envs",
+                "prompt": "Environments",
+                "type": "choice",
+                "multiple": True,
+                "options": [
+                    {"id": "staging", "label": "Staging"},
+                    {"id": "prod", "label": "Production"},
+                ],
+                "allowFreeText": True,
+                "default": ["staging"],
+                "required": True,
+                "placeholder": None,
+                "multiline": True,
+            }
+        ],
+        answer={
+            "answers": [
+                {
+                    "questionId": "envs",
+                    "optionIds": ["staging", "prod"],
+                    "labels": ["Staging", "Production"],
+                    "text": secret,
+                }
+            ]
+        },
+    )
+
+    public = public_thread(_question_thread(record))
+    approval = public["steps"][0]["metadata"]["approval"]
+
+    assert approval["answer"] == {
+        "answers": [
+            {
+                "questionId": "envs",
+                "optionIds": ["staging", "prod"],
+                "labels": ["Staging", "Production"],
+                "text": None,
+                "redacted": True,
+            }
+        ]
+    }
+    assert "default" not in approval["questions"][0]
+    assert secret not in json.dumps(public)

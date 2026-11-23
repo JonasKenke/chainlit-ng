@@ -8,6 +8,7 @@ import { format, isValid, parseISO } from 'date-fns';
 
 export interface QuestionFieldValue {
   optionId?: string;
+  optionIds: string[];
   text: string;
 }
 
@@ -20,14 +21,22 @@ const NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 const TEL_PATTERN = /^[0-9+().\-\s]{3,32}$/;
 
 export const emptyFieldValue = (field: IQuestionField): QuestionFieldValue => {
-  const fallback = field.default ?? '';
+  const defaults = Array.isArray(field.default)
+    ? field.default
+    : field.default
+      ? [field.default]
+      : [];
   if (field.type === 'choice') {
-    return {
-      optionId: fallback || undefined,
-      text: ''
-    };
+    if (field.multiple) {
+      return { optionId: undefined, optionIds: defaults, text: '' };
+    }
+    return { optionId: defaults[0], optionIds: [], text: '' };
   }
-  return { optionId: undefined, text: fallback };
+  return {
+    optionId: undefined,
+    optionIds: [],
+    text: typeof field.default === 'string' ? field.default : ''
+  };
 };
 
 export const validateField = (
@@ -36,7 +45,9 @@ export const validateField = (
 ): QuestionFieldError | null => {
   const text = value.text.trim();
   if (field.type === 'choice') {
-    if (value.optionId) return null;
+    if (field.multiple ? value.optionIds.length > 0 : value.optionId) {
+      return null;
+    }
     if (text) return null;
     return field.required ? 'required' : null;
   }
@@ -75,11 +86,21 @@ export const buildAnswerItems = (
   for (const field of fields) {
     const value = values[field.id];
     if (!value) continue;
+    const text = value.text.trim();
+    if (field.type === 'choice' && field.multiple) {
+      if (value.optionIds.length || text) {
+        answers.push({
+          questionId: field.id,
+          ...(value.optionIds.length ? { optionIds: value.optionIds } : {}),
+          ...(text ? { text } : {})
+        });
+      }
+      continue;
+    }
     if (field.type === 'choice' && value.optionId) {
       answers.push({ questionId: field.id, optionId: value.optionId });
       continue;
     }
-    const text = value.text.trim();
     if (text) answers.push({ questionId: field.id, text });
   }
   return answers;
@@ -90,9 +111,19 @@ export const fieldSummary = (
   value: QuestionFieldValue | undefined
 ): string | null => {
   if (!value) return null;
-  if (field.type === 'choice' && value.optionId) {
-    const option = field.options.find((item) => item.id === value.optionId);
-    return option?.label ?? value.optionId;
+  if (field.type === 'choice') {
+    if (field.multiple) {
+      const labels = value.optionIds.map(
+        (id) => field.options.find((item) => item.id === id)?.label ?? id
+      );
+      const text = value.text.trim();
+      const parts = [...labels, ...(text ? [text] : [])];
+      return parts.length ? parts.join(', ') : null;
+    }
+    if (value.optionId) {
+      const option = field.options.find((item) => item.id === value.optionId);
+      return option?.label ?? value.optionId;
+    }
   }
   const text = value.text.trim();
   return text || null;
@@ -112,6 +143,13 @@ export const fieldAnswerSummary = (
   notAnswered: string
 ): { text: string; muted: boolean } => {
   if (!item) return { text: notAnswered, muted: true };
+  const selected = item.labels?.length ? item.labels : (item.optionIds ?? []);
+  if (selected.length) {
+    const parts = [...selected];
+    if (item.redacted) parts.push(answeredPrivately);
+    else if (item.text) parts.push(item.text);
+    return { text: parts.join(', '), muted: false };
+  }
   if (item.redacted || (item.text == null && item.optionId == null)) {
     return { text: answeredPrivately, muted: true };
   }

@@ -163,16 +163,37 @@ export const QuestionField = ({
                     className="flex min-h-11 cursor-pointer items-start gap-2 rounded-md border border-border p-2.5 text-sm transition-colors hover:bg-muted/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
                   >
                     <input
-                      type="radio"
+                      type={field.multiple ? 'checkbox' : 'radio'}
                       name={`${formId}-${field.id}`}
                       value={option.id}
-                      checked={value.optionId === option.id}
+                      checked={
+                        field.multiple
+                          ? value.optionIds.includes(option.id)
+                          : value.optionId === option.id
+                      }
                       disabled={disabled}
                       aria-describedby={descriptionId}
-                      onChange={() =>
-                        onChange({ optionId: option.id, text: '' })
-                      }
-                      className={`mt-0.5 accent-primary ${focusRing}`}
+                      onChange={() => {
+                        if (field.multiple) {
+                          const optionIds = value.optionIds.includes(option.id)
+                            ? value.optionIds.filter((id) => id !== option.id)
+                            : [...value.optionIds, option.id];
+                          onChange({
+                            optionId: undefined,
+                            optionIds,
+                            text: value.text
+                          });
+                          return;
+                        }
+                        onChange({
+                          optionId: option.id,
+                          optionIds: [],
+                          text: ''
+                        });
+                      }}
+                      className={`mt-0.5 accent-primary ${
+                        field.multiple ? 'h-4 w-4 rounded' : ''
+                      } ${focusRing}`}
                     />
                     <span className="min-w-0">
                       <bdi dir="auto" className="break-words">
@@ -216,6 +237,7 @@ export const QuestionField = ({
                 onChange={(event) =>
                   onChange({
                     optionId: undefined,
+                    optionIds: field.multiple ? value.optionIds : [],
                     text: event.target.value
                   })
                 }
@@ -254,7 +276,12 @@ export const QuestionField = ({
       value: value.text,
       onChange: (
         event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-      ) => onChange({ optionId: undefined, text: event.target.value })
+      ) =>
+        onChange({
+          optionId: undefined,
+          optionIds: [],
+          text: event.target.value
+        })
     };
 
     if (field.type === 'text' && field.multiline !== false) {
@@ -298,6 +325,11 @@ export const QuestionField = ({
           </span>
         )}
       </div>
+      {field.multiple ? (
+        <div className="mt-1 text-xs text-muted-foreground">
+          {t('chat.question.selectMultiple')}
+        </div>
+      ) : null}
       {control}
       {error ? (
         <div

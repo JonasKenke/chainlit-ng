@@ -83,6 +83,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `1/4` progress, Back and Next, a review step, and per-field answers on
   `QuestionAnswer.answers` and `as_tool_result()["answers"]`. The existing
   single-question form is unchanged. See [the questions guide](docs/questions.md).
+- Add multi-select choice questions with `cl.Question(..., multiple=True)`:
+  checkboxes instead of radios, list defaults, option ids and labels in the
+  answer, and additive Other text when `allow_free_text` is enabled. See
+  [the questions guide](docs/questions.md).
 - Add `[features.spontaneous_file_upload] directory` to store uploaded files outside `APP_ROOT`. Relative paths resolve against `APP_ROOT`, absolute paths are used as-is, and startup fails with an actionable error when uploads are enabled and the directory is not writable. Only the legacy default `.files` directory is removed on shutdown; a configured directory is preserved.
 - Add opt-in OpenTelemetry trace export from the Step tree (`feat(otel)`):
   `[features.telemetry] enabled = true` plus the new `chainlit[otel]` extra

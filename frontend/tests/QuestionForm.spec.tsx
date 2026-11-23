@@ -1,7 +1,8 @@
 import {
   type ChainlitAPI,
   ChainlitContext,
-  type IQuestion
+  type IQuestion,
+  type IQuestionField
 } from '@chainlit-ng/react-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MessageContext, defaultMessageContext } from 'contexts/MessageContext';
@@ -32,6 +33,8 @@ vi.mock('@/components/i18n/Translator', () => ({
           'chat.question.reviewTitle': 'Review your answers',
           'chat.question.edit': 'Edit',
           'chat.question.optional': 'Optional',
+          'chat.question.selectMultiple': 'Select all that apply',
+          'chat.question.otherAriaLabel': 'Other answer',
           'chat.question.notAnswered': 'Not answered',
           'chat.question.datePlaceholder': 'Pick a date',
           'chat.question.clear': 'Clear',
@@ -240,6 +243,95 @@ describe('QuestionForm', () => {
     expect(respondToQuestion.mock.calls[0][0].answers).toEqual([
       { questionId: 'name', text: 'Ada' }
     ]);
+  });
+
+  it('selects checkboxes and submits optionIds with other text', async () => {
+    respondToQuestion.mockResolvedValue({
+      questionId: 'question-1',
+      status: 'answered',
+      answer: { answers: [] },
+      revision: 2,
+      durable: true
+    });
+    const environments: IQuestionField = {
+      id: 'envs',
+      prompt: 'Environments',
+      type: 'choice',
+      multiple: true,
+      options: [
+        { id: 'staging', label: 'Staging' },
+        { id: 'prod', label: 'Production' },
+        { id: 'preview', label: 'Preview' }
+      ],
+      allowFreeText: true,
+      default: ['staging', 'prod'],
+      required: true
+    };
+    renderCard({ questions: [environments], multi: false });
+
+    expect(screen.getByText('Select all that apply')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Staging/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Production/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Preview/ })).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Production/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Preview/ }));
+    fireEvent.change(screen.getByLabelText('Other answer'), {
+      target: { value: '  also blue  ' }
+    });
+    click('Submit');
+
+    await waitFor(() => expect(respondToQuestion).toHaveBeenCalledTimes(1));
+    expect(respondToQuestion.mock.calls[0][0].answers).toEqual([
+      {
+        questionId: 'envs',
+        optionIds: ['staging', 'preview'],
+        text: 'also blue'
+      }
+    ]);
+  });
+
+  it('summarizes a multi-select answer on the review step', async () => {
+    renderCard({
+      questions: [
+        {
+          id: 'envs',
+          prompt: 'Environments',
+          type: 'choice',
+          multiple: true,
+          options: [
+            { id: 'staging', label: 'Staging' },
+            { id: 'prod', label: 'Production' },
+            { id: 'preview', label: 'Preview' }
+          ],
+          allowFreeText: true,
+          default: ['staging', 'prod'],
+          required: true
+        },
+        {
+          id: 'notes',
+          prompt: 'Notes',
+          type: 'text',
+          options: [],
+          allowFreeText: true,
+          required: false
+        }
+      ],
+      multi: true
+    });
+
+    expect(screen.getByRole('checkbox', { name: /Staging/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Production/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Preview/ }));
+    fireEvent.change(screen.getByLabelText('Other answer'), {
+      target: { value: 'also blue' }
+    });
+    click('Next');
+    click('Next');
+
+    expect(screen.getByText('Review your answers')).toBeInTheDocument();
+    expect(screen.getByText('Staging, Preview, also blue')).toBeInTheDocument();
+    expect(screen.getByText('Not answered')).toBeInTheDocument();
   });
 
   it('submits a single structured question without a wizard', async () => {

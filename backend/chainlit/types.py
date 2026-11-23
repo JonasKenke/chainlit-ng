@@ -336,12 +336,27 @@ class QuestionAnswerItem(BaseModel):
 
     questionId: str = Field(min_length=1, max_length=64)
     optionId: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    optionIds: Optional[List[str]] = Field(default=None, max_length=8)
     text: Optional[str] = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def validate_single_value(self) -> "QuestionAnswerItem":
-        if (self.optionId is None) == (self.text is None):
+        if self.optionId is None and self.optionIds is None and self.text is None:
+            raise ValueError("one of optionId, optionIds or text is required")
+        if self.optionId is not None and self.optionIds is not None:
+            raise ValueError("pass optionId or optionIds, not both")
+        if self.optionId is not None and self.text is not None:
             raise ValueError("exactly one of optionId or text is required")
+        if self.optionIds is not None:
+            if any(
+                not isinstance(item, str) or not item or len(item) > 64
+                for item in self.optionIds
+            ):
+                raise ValueError("optionIds must contain non-empty strings")
+            if len(set(self.optionIds)) != len(self.optionIds):
+                raise ValueError("optionIds must be unique")
+            if not self.optionIds and self.text is None:
+                raise ValueError("optionIds must not be empty")
         if self.text is not None and not self.text.strip():
             raise ValueError("text must not be blank")
         return self

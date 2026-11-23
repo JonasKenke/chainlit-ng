@@ -1451,6 +1451,43 @@ async def test_multi_question_input_validation():
     with pytest.raises(QuestionInvalid):
         await ask(questions=[Question("Site", type="url", default="ftp://x")])
     with pytest.raises(QuestionInvalid):
+        await ask(questions=[Question("Text", type="text", multiple=True)])
+    with pytest.raises(QuestionInvalid):
+        await ask(
+            questions=[
+                Question(
+                    "Pick",
+                    type="choice",
+                    options=[QuestionOption("a", "A")],
+                    default=["a"],
+                )
+            ]
+        )
+    with pytest.raises(QuestionInvalid):
+        await ask(
+            questions=[
+                Question(
+                    "Pick",
+                    type="choice",
+                    multiple=True,
+                    options=[QuestionOption("a", "A")],
+                    default=["a", "a"],
+                )
+            ]
+        )
+    with pytest.raises(QuestionInvalid):
+        await ask(
+            questions=[
+                Question(
+                    "Pick",
+                    type="choice",
+                    multiple=True,
+                    options=[QuestionOption("a", "A")],
+                    default=["a", "z"],
+                )
+            ]
+        )
+    with pytest.raises(QuestionInvalid):
         await ask(questions=[Question(f"Question {index}") for index in range(11)])
     with pytest.raises(QuestionInvalid):
         await ask(
@@ -1501,3 +1538,244 @@ async def test_route_answers_multi_question(
         {"questionId": "start", "text": "2026-11-23"},
     ]
     assert answer.answers["env"].label == "Production"
+
+
+async def test_multi_select_question_round_trips_option_ids(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="environments", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(
+            step,
+            [
+                Question(
+                    "Which environments?",
+                    id="envs",
+                    type="choice",
+                    multiple=True,
+                    options=[
+                        QuestionOption("staging", "Staging"),
+                        QuestionOption("prod", "Production"),
+                        QuestionOption("preview", "Preview"),
+                    ],
+                    default=["staging", "prod"],
+                    allow_free_text=True,
+                )
+            ],
+        )
+
+        record = step.metadata["approval"]
+        assert record["questions"][0]["multiple"] is True
+        assert record["questions"][0]["default"] == ["staging", "prod"]
+
+        await transition(
+            entry.approval_id,
+            "answered",
+            actor=mock_session.user,
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            expected_kind="question",
+            answer={
+                "answers": [
+                    {
+                        "questionId": "envs",
+                        "optionIds": ["staging", "preview"],
+                        "text": "  also blue  ",
+                    }
+                ]
+            },
+        )
+        answer = await task
+
+    field = answer.answers["envs"]
+    assert field.option_ids == ("staging", "preview")
+    assert field.labels == ("Staging", "Preview")
+    assert field.text == "also blue"
+    assert answer.option_id is None
+    assert answer.label is None
+    assert answer.text is None
+    assert answer.as_tool_result()["answers"] == [
+        {
+            "questionId": "envs",
+            "optionId": None,
+            "text": "also blue",
+            "optionIds": ["staging", "preview"],
+            "labels": ["Staging", "Preview"],
+        }
+    ]
+    persisted = layer.steps[step.id]["metadata"]["approval"]
+    assert persisted["answer"] == {
+        "answers": [
+            {
+                "questionId": "envs",
+                "optionIds": ["staging", "preview"],
+                "labels": ["Staging", "Preview"],
+                "text": "also blue",
+            }
+        ]
+    }
+
+
+async def test_multi_select_rejects_invalid_answers(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="environments", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(
+            step,
+            [
+                Question(
+                    "Which environments?",
+                    id="envs",
+                    type="choice",
+                    multiple=True,
+                    options=[
+                        QuestionOption("staging", "Staging"),
+                        QuestionOption("prod", "Production"),
+                    ],
+                )
+            ],
+        )
+        writes = layer.write_calls
+
+        invalid_answers = [
+            {"answers": [{"questionId": "envs", "optionId": "staging"}]},
+            {"answers": [{"questionId": "envs", "optionIds": ["unknown"]}]},
+            {"answers": [{"questionId": "envs", "optionIds": ["staging", "staging"]}]},
+            {"answers": [{"questionId": "envs", "optionIds": []}]},
+        ]
+        for answer in invalid_answers:
+            with pytest.raises(QuestionInvalid):
+                await transition(
+                    entry.approval_id,
+                    "answered",
+                    actor=mock_session.user,
+                    thread_id=mock_session.thread_id,
+                    session_generation=mock_session.generation,
+                    expected_kind="question",
+                    answer=answer,
+                )
+        assert layer.write_calls == writes
+        assert step.metadata["approval"]["status"] == "pending"
+
+        await transition(
+            entry.approval_id,
+            "answered",
+            actor=mock_session.user,
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            expected_kind="question",
+            answer={
+                "answers": [{"questionId": "envs", "optionIds": ["staging", "prod"]}]
+            },
+        )
+        await task
+
+    persisted = layer.steps[step.id]["metadata"]["approval"]["answer"]
+    assert persisted == {
+        "answers": [
+            {
+                "questionId": "envs",
+                "optionIds": ["staging", "prod"],
+                "labels": ["Staging", "Production"],
+            }
+        ]
+    }
+
+
+async def test_closed_multi_select_rejects_free_text(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="closed", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(
+            step,
+            [
+                Question(
+                    "Which environments?",
+                    id="envs",
+                    type="choice",
+                    multiple=True,
+                    options=[QuestionOption("staging", "Staging")],
+                    allow_free_text=False,
+                )
+            ],
+        )
+        with pytest.raises(QuestionInvalid):
+            await transition(
+                entry.approval_id,
+                "answered",
+                actor=mock_session.user,
+                thread_id=mock_session.thread_id,
+                session_generation=mock_session.generation,
+                expected_kind="question",
+                answer={"answers": [{"questionId": "envs", "text": "other"}]},
+            )
+        await transition(
+            entry.approval_id,
+            "answered",
+            actor=mock_session.user,
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            expected_kind="question",
+            answer={"answers": [{"questionId": "envs", "optionIds": ["staging"]}]},
+        )
+        await task
+
+
+async def test_single_choice_rejects_option_ids(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="single", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(
+            step,
+            [
+                Question(
+                    "Which environment?",
+                    id="env",
+                    type="choice",
+                    options=[QuestionOption("staging", "Staging")],
+                )
+            ],
+        )
+        with pytest.raises(QuestionInvalid):
+            await transition(
+                entry.approval_id,
+                "answered",
+                actor=mock_session.user,
+                thread_id=mock_session.thread_id,
+                session_generation=mock_session.generation,
+                expected_kind="question",
+                answer={"answers": [{"questionId": "env", "optionIds": ["staging"]}]},
+            )
+        await transition(
+            entry.approval_id,
+            "answered",
+            actor=mock_session.user,
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            expected_kind="question",
+            answer={"answers": [{"questionId": "env", "optionId": "staging"}]},
+        )
+        await task
