@@ -9,7 +9,7 @@ import {
   getUsedLabelKey,
   hasErrorStep,
   stripMessages
-} from '@/components/chat/Messages/compactSteps';
+} from '@/components/chat/Messages/compact-steps';
 
 const step = (
   id: string,

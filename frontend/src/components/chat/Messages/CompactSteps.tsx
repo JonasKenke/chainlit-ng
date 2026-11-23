@@ -24,7 +24,7 @@ import {
   getUsedLabelKey,
   hasErrorStep,
   stripMessages
-} from './compactSteps';
+} from './compact-steps';
 
 interface Props {
   steps: IStep[];
