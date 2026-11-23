@@ -73,9 +73,13 @@ chainlit-ng = "chainlit.cli:cli"
 chainlit = "chainlit.cli:cli"
 
 [project.optional-dependencies]
+redis = [
+    "redis>=5.0,<7.0",
+]
 tests = [
     "pytest>=8.3.2,<10.0.0",
     "pytest-asyncio>=1.0.0,<2.0.0",
+    "redis>=5.0,<7.0",
     "pytest-cov>=7.1.0,<8.0.0",
     "openai>=2.0.0,<3.0.0",
     "langchain>=1.0.0",

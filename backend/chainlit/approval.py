@@ -44,6 +44,7 @@ from chainlit.context import context
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
 from chainlit.session import WebsocketSession
+from chainlit.state_store import get_state_store
 from chainlit.step import Step
 from chainlit.user import PersistedUser, User
 
@@ -285,6 +286,8 @@ _managed_thread_users: Dict[str, str] = {}
 
 _PROCESS_DIGEST_KEY = secrets.token_bytes(32)
 _JSON_ADAPTER = TypeAdapter(Any)
+# The shared memo is an optimization; never let a slow store hold a decision.
+_STATE_STORE_TIMEOUT = 1.0
 
 
 def _cap_lock() -> asyncio.Lock:
@@ -874,12 +877,74 @@ def _remember_terminal(thread_id: str, record: Dict[str, Any]) -> None:
         _terminal_records.pop(next(iter(_terminal_records)))
 
 
-def _raise_missing(
+def _terminal_store_key(approval_id: str) -> str:
+    return f"approval:terminal:{approval_id}"
+
+
+async def _store_terminal(thread_id: str, record: Dict[str, Any]) -> None:
+    try:
+        await asyncio.wait_for(
+            get_state_store().set_json(
+                _terminal_store_key(record["id"]),
+                {
+                    "threadId": thread_id,
+                    "kind": _kind(record),
+                    "record": record,
+                },
+                ttl=max(60.0, float(config.project.session_timeout) + 60.0),
+            ),
+            timeout=_STATE_STORE_TIMEOUT,
+        )
+    except Exception:
+        # The data layer remains authoritative; a shared memo is an optimization.
+        logger.warning(
+            "Failed to store interaction terminal state",
+            exc_info=True,
+        )
+
+
+async def _load_terminal(
+    approval_id: str,
+    thread_id: Optional[str],
+    expected_kind: Optional[InteractionKind],
+) -> Optional[tuple[str, InteractionKind, Dict[str, Any]]]:
+    try:
+        stored = await asyncio.wait_for(
+            get_state_store().get_json(_terminal_store_key(approval_id)),
+            timeout=_STATE_STORE_TIMEOUT,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to read interaction terminal state",
+            exc_info=True,
+        )
+        return None
+    if not isinstance(stored, dict):
+        return None
+    record = stored.get("record")
+    stored_thread = stored.get("threadId")
+    kind = stored.get("kind")
+    if (
+        not isinstance(record, dict)
+        or not isinstance(stored_thread, str)
+        or kind not in ("approval", "question")
+    ):
+        return None
+    if expected_kind is not None and kind != expected_kind:
+        return None
+    if thread_id is not None and thread_id != stored_thread:
+        return None
+    return stored_thread, kind, record
+
+
+async def _raise_missing(
     approval_id: str,
     thread_id: Optional[str],
     expected_kind: Optional[InteractionKind] = None,
 ) -> NoReturn:
     terminal = _terminal_records.get(approval_id)
+    if terminal is None:
+        terminal = await _load_terminal(approval_id, thread_id, expected_kind)
     if terminal:
         stored_thread, kind, record = terminal
         if is_thread_deleted(stored_thread):
@@ -1159,6 +1224,7 @@ async def _transition_locked(
     if _pending_by_step.get((entry.thread_id, entry.step_id)) == entry.approval_id:
         _pending_by_step.pop((entry.thread_id, entry.step_id), None)
     _remember_terminal(entry.thread_id, record)
+    await _store_terminal(entry.thread_id, record)
 
     if not entry.future.done():
         entry.future.set_result(record)
@@ -1189,7 +1255,7 @@ async def transition(
 
     entry = _pending_by_approval.get(approval_id)
     if entry is None:
-        _raise_missing(approval_id, thread_id, expected_kind)
+        await _raise_missing(approval_id, thread_id, expected_kind)
     if expected_kind is not None and entry.kind != expected_kind:
         raise ApprovalNotFound("Interaction not found")
 
@@ -1204,7 +1270,7 @@ async def transition(
     async with step_lock(entry.thread_id, entry.step_id):
         current = _pending_by_approval.get(approval_id)
         if current is None:
-            _raise_missing(approval_id, thread_id, expected_kind)
+            await _raise_missing(approval_id, thread_id, expected_kind)
         if expected_kind is not None and current.kind != expected_kind:
             raise ApprovalNotFound("Interaction not found")
         if thread_id is not None and current.thread_id != thread_id:

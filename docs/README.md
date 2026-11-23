@@ -21,6 +21,7 @@ See also:
 - [Thread resume with unavailable chat profiles](thread-resume.md)
 - [Tool-call approvals](approvals.md)
 - [Agent questions (`cl.ask`)](questions.md)
+- [Ephemeral state store](state-store.md)
 - [OpenTelemetry traces](telemetry.md)
 - [Feature and test inventory after 2.12.0](features-after-2.12.0.md)
 

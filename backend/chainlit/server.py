@@ -133,6 +133,7 @@ from chainlit.skill import (
     skill_content_hash,
     skill_to_markdown,
 )
+from chainlit.state_store import close_state_store
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AckPromptUpdateRequest,
@@ -321,6 +322,11 @@ async def lifespan(app: FastAPI):
 
             if data_layer := get_data_layer():
                 await data_layer.close()
+
+            try:
+                await asyncio.wait_for(close_state_store(), timeout=2)
+            except asyncio.TimeoutError:
+                logger.warning("Timed out while closing the state store")
         except asyncio.exceptions.CancelledError:
             pass
 

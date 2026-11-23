@@ -462,6 +462,12 @@ treated as absent, never as pending.
 | Decision after expiry               | `expired`; the card is read-only                                                                 | No                         |
 | Decision on another worker          | No registry entry; cross-worker decisions are not supported                                      | No                         |
 
+Terminal records are also mirrored to the configured [state store](state-store.md)
+with a short TTL. With the Redis backend, a duplicate decision can therefore
+return the stored terminal result on another worker even though pending
+decisions still require the owner worker. The data layer remains authoritative
+when the store is unavailable.
+
 A stale card can receive the terminal state in the 409 response body, so it can
 render the final status without waiting for another event.
 

@@ -88,6 +88,13 @@ mask_user_env = false
 # Authorized origins
 allow_origins = ["*"]
 
+# Ephemeral coordination store. Use "redis" only when every worker shares
+# the same Redis instance.
+[project.state_store]
+backend = "memory"
+# redis_url = "redis://localhost:6379/0"
+prefix = "chainlit"
+
 [features]
 # Process and display HTML in messages. This can be a security risk (see https://stackoverflow.com/questions/19603097/why-is-it-dangerous-to-render-user-generated-html-or-javascript)
 unsafe_allow_html = false
@@ -639,6 +646,18 @@ class CodeSettings(BaseModel):
     data_layer: Optional[Callable[[], BaseDataLayer]] = None
 
 
+class StateStoreSettings(BaseModel):
+    backend: Literal["memory", "redis"] = "memory"
+    redis_url: Optional[str] = None
+    prefix: str = "chainlit"
+
+    @model_validator(mode="after")
+    def _require_redis_url(self):
+        if self.backend == "redis" and not self.redis_url:
+            raise ValueError("state_store.redis_url is required for redis")
+        return self
+
+
 class ProjectSettings(BaseModel):
     allow_origins: List[str] = Field(default_factory=lambda: ["*"])
     # Socket.io client transports option
@@ -658,6 +677,8 @@ class ProjectSettings(BaseModel):
     persist_user_env: Optional[bool] = False
     # Whether to mask user environment variables (API keys) in the UI with password type
     mask_user_env: Optional[bool] = False
+    # Ephemeral coordination state. Redis is required when workers share state.
+    state_store: StateStoreSettings = Field(default_factory=StateStoreSettings)
 
 
 class ChainlitConfigOverrides(BaseModel):

@@ -1481,6 +1481,32 @@ async def test_delete_all_threads_after_decision_never_resurrects(
         assert step.id not in layer.steps
 
 
+async def test_terminal_state_survives_local_registry_loss(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task, entry = await _pending_ask(step)
+        record = await _decide(mock_session, entry)
+        await task
+
+        # Another worker has no local cache; the shared terminal record is
+        # the idempotent answer for a retry.
+        approval_module._terminal_records.clear()
+        approval_module._pending_by_approval.clear()
+        approval_module._pending_by_step.clear()
+
+        with pytest.raises(ApprovalNotPending) as duplicate:
+            await _decide(mock_session, entry)
+
+    assert duplicate.value.record == record
+
+
 async def test_guard_refuses_a_thread_until_the_approval_is_terminal(
     layer, mock_chainlit_context, mock_session
 ):
