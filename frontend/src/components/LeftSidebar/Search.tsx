@@ -64,7 +64,12 @@ export default function SearchChats() {
           );
           setThreads(data || []);
         } catch (error) {
-          toast.error('Error fetching threads: ' + error);
+          toast.error(
+            t('threadHistory.errors.fetch', {
+              defaultValue: 'Error fetching threads: {{error}}',
+              error: String(error)
+            })
+          );
         } finally {
           setLoading(false);
         }

@@ -6,7 +6,9 @@
       "continue": "متابعة",
       "goBack": "رجوع",
       "reset": "إعادة تعيين",
-      "submit": "إرسال"
+      "submit": "إرسال",
+      "close": "إغلاق",
+      "save": "حفظ"
     },
     "status": {
       "loading": "جاري التحميل...",
@@ -14,7 +16,9 @@
         "default": "حدث خطأ",
         "serverConnection": "تعذر الاتصال بالخادم"
       }
-    }
+    },
+    "latest": "الأحدث",
+    "current": "الحالي"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "إرسال الرسالة",
         "stop": "إيقاف المهمة",
         "attachFiles": "إرفاق ملفات"
+      },
+      "errors": {
+        "tooLarge": "الرسالة كبيرة جدًا. الحد الأقصى لحجم الرسالة هو 1 ميغابايت."
       }
     },
     "favorites": {
@@ -71,7 +78,8 @@
       "empty": {
         "title": "لا توجد رسائل محفوظة بعد",
         "description": "ابدأ بإرسال رسالة وقم بتمييزها بنجمة أو ميّز رسالة من محادثاتك السابقة"
-      }
+      },
+      "remove": "إزالة من المفضلة"
     },
     "commands": {
       "button": "أدوات",
@@ -122,7 +130,8 @@
           "updating": "جاري التحديث",
           "updated": "تم تحديث التعليق"
         }
-      }
+      },
+      "output": "الإخراج"
     },
     "history": {
       "title": "المدخلات الأخيرة",
@@ -145,7 +154,11 @@
         "adding": "جارٍ الإضافة…",
         "goHome": "العودة إلى الرئيسية",
         "notFound": "لم يتم العثور على المطالبة أو لم تعد مشاركة.",
-        "addError": "فشلت الإضافة إلى المعرض"
+        "addError": "فشلت الإضافة إلى المعرض",
+        "version": "الإصدار",
+        "latestVersion": "v{{version}} (الأحدث)",
+        "addVersion": "أضف v{{version}} إلى معرضي",
+        "openCopy": "افتح نسختي"
       },
       "unshare": "إلغاء المشاركة",
       "delete": "حذف",
@@ -165,7 +178,426 @@
       "new": "مطالبة جديدة",
       "search": "البحث في المطالبات...",
       "saved": "تم حفظ المطالبة!",
-      "unshared": "تم إلغاء المشاركة"
+      "unshared": "تم إلغاء المشاركة",
+      "tab": "الموجّهات",
+      "updateAvailable": "يتوفر تحديث v{{version}}",
+      "versions": "سجل الإصدارات (v{{version}})",
+      "updatesToast": "{{count}} موجّه محفوظ له إصدار مشترك أحدث",
+      "updatesToastAction": "مراجعة",
+      "diff": {
+        "title": "تحديث الموجّه",
+        "historyTitle": "سجل الإصدارات",
+        "description": "اختر إصدارًا، ثم حدّث نسختك.",
+        "historyDescription": "اختر إصدارًا لعرض ما تغيّر.",
+        "version": "الإصدار",
+        "unified": "موحّد",
+        "split": "جنبًا إلى جنب",
+        "localChanges": "يحتوي هذا الموجّه على تعديلات محلية",
+        "localChangesHint": "يستبدل التحديث المحتوى المحلي بالإصدار المشترك. يظل تعديلك متاحًا في سجل الموجّه.",
+        "confirmUpdate": "استبدال المحتوى المحلي",
+        "stale": "تغيّر هذا الموجّه بعد تحميل المعاينة. تم تحديث الفرق؛ راجعه مرة أخرى.",
+        "sourceUnavailable": "المصدر المشترك لم يعد متاحًا",
+        "sourceUnavailableHint": "تحتفظ هذه النسخة بمحتواها الحالي. افصلها لإيقاف البحث عن التحديثات.",
+        "detach": "فصل عن المصدر",
+        "detached": "تم الفصل عن المصدر المشترك",
+        "alreadyCurrent": "هذا الموجّه مطابق بالفعل للإصدار المشترك.",
+        "noChanges": "لا توجد تغييرات في الأسطر.",
+        "truncated": "الفرق مبتور؛ يُعرض الجزء الأول فقط.",
+        "updated": "تم تحديث الموجّه من الإصدار المشترك",
+        "update": "تحديث إلى v{{version}}",
+        "updateFallback": "تحديث",
+        "updateError": "تعذّر تحديث هذا الموجّه",
+        "loadError": "تعذّر تحميل مقارنة الإصدارات.",
+        "currentVersion": "هذا إصدارك الحالي.",
+        "noVersions": "لا توجد إصدارات أخرى متاحة.",
+        "versionUnavailable": "هذا الإصدار لم يعد متاحًا. اختر إصدارًا آخر.",
+        "downgrade": "التراجع إلى v{{version}}",
+        "downgraded": "تم تخفيض الموجّه إلى v{{version}}"
+      },
+      "updatesToast_one": "يوجد إصدار مشترك أحدث لـ {{count}} موجّه محفوظ",
+      "updatesToast_other": "يوجد إصدار مشترك أحدث لـ {{count}} موجّهات محفوظة"
+    },
+    "mcp": {
+      "title": "خوادم MCP",
+      "tabs": {
+        "connect": "الاتصال بـ MCP",
+        "list": "خوادم MCP الخاصة بي"
+      },
+      "configured": {
+        "title": "الخوادم المكوّنة"
+      },
+      "connect": "اتصال",
+      "reconnect": "إعادة الاتصال",
+      "add": {
+        "title": "إضافة خادمك الخاص"
+      },
+      "form": {
+        "name": "الاسم",
+        "namePlaceholder": "مثال: Stripe",
+        "type": "النوع",
+        "url": "عنوان URL للخادم",
+        "urlPlaceholder": "مثال: http://localhost:8000/mcp",
+        "headers": "الترويسات (JSON، اختياري)",
+        "headersPlaceholder": "مثال: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "يجب أن تكون الترويسات كائن JSON بقيم نصية",
+        "add": "إضافة",
+        "useOAuth": "تسجيل الدخول عبر OAuth (HTTP القابل للبث فقط)"
+      },
+      "list": {
+        "empty": "لا توجد خوادم MCP متصلة",
+        "addFirst": "أضف أول خادم MCP لديك",
+        "url": "URL",
+        "tools": "الأدوات",
+        "removeTitle": "هل أنت متأكد؟",
+        "removeDescription": "سيؤدي هذا إلى قطع اتصال خادم MCP \"{{name}}\". لا يمكن التراجع عن هذا الإجراء.",
+        "signIn": "تسجيل الدخول إلى {{host}}",
+        "remove": "إزالة خادم MCP"
+      },
+      "messages": {
+        "connecting": "جارٍ الاتصال بـ MCP...",
+        "connected": "تم الاتصال بـ MCP!",
+        "adding": "جارٍ إضافة MCP...",
+        "added": "تمت إضافة MCP!",
+        "reconnecting": "جارٍ إعادة الاتصال بـ MCP...",
+        "reconnected": "تمت إعادة الاتصال بـ MCP!",
+        "removing": "جارٍ إزالة MCP...",
+        "removed": "تمت إزالة MCP!",
+        "authorizationRequired": "سجّل الدخول لإكمال الاتصال"
+      },
+      "errors": {
+        "connect": "تعذّر الاتصال بخادم MCP"
+      },
+      "library": {
+        "button": "موجّهات MCP وموارده",
+        "title": "مكتبة MCP",
+        "tabs": {
+          "prompts": "الموجّهات",
+          "resources": "الموارد"
+        },
+        "prompts": {
+          "empty": "لا توجد موجّهات من خوادم MCP المتصلة"
+        },
+        "resources": {
+          "empty": "لا توجد موارد من خوادم MCP المتصلة"
+        },
+        "promptInsert": "إدراج",
+        "promptInserted": "تم إدراج الموجّه في محرّر الرسائل",
+        "promptFailed": "تعذّر جلب الموجّه من خادم MCP",
+        "resourceAdded": "تمت إضافة المورد إلى المحادثة",
+        "resourceFailed": "تعذّرت قراءة المورد من خادم MCP"
+      }
+    },
+    "promptScheduling": {
+      "button": "المطالبات المجدولة",
+      "title": "المطالبات المجدولة",
+      "create": "إنشاء مطالبة مجدولة",
+      "edit": "تعديل مطالبة مجدولة",
+      "new": "جدولة جديدة",
+      "empty": "لا توجد مطالبات مجدولة بعد",
+      "nextRun": "التشغيل التالي",
+      "lastRun": "آخر تشغيل",
+      "lastStatus": "آخر حالة",
+      "status": {
+        "active": "نشطة",
+        "paused": "متوقفة مؤقتًا",
+        "success": "نجاح",
+        "failure": "فشل",
+        "successWithWarnings": "نجاح مع تحذيرات"
+      },
+      "actions": {
+        "edit": "تعديل الجدولة",
+        "pause": "إيقاف الجدولة مؤقتًا",
+        "resume": "استئناف الجدولة",
+        "delete": "حذف الجدولة",
+        "runNow": "تشغيل الآن",
+        "viewThread": "عرض أحدث تشغيل"
+      },
+      "form": {
+        "prompt": "المطالبة",
+        "chooseGallery": "اختيار من معرض المطالبات",
+        "profile": "النموذج",
+        "chatProfile": "ملف الدردشة",
+        "defaultAssistant": "المساعد الافتراضي",
+        "timezone": "المنطقة الزمنية",
+        "recurrence": "نمط التكرار",
+        "customFrequency": "التكرار",
+        "interval": "كل",
+        "hours": "ساعات",
+        "time": "الوقت",
+        "weekday": "يوم الأسبوع",
+        "dayOfMonth": "يوم الشهر",
+        "afterHooks": "إجراءات بعد الاكتمال",
+        "unavailable": "غير متاح"
+      },
+      "presets": {
+        "daily": "يوميًا الساعة 09:00",
+        "weekdays": "أيام الأسبوع الساعة 09:00",
+        "weekly": "أسبوعيًا يوم الاثنين",
+        "monthly": "شهريًا في الأول",
+        "custom": "مخصص"
+      },
+      "custom": {
+        "everyHours": "كل N ساعات",
+        "daily": "كل يوم",
+        "weekly": "كل أسبوع",
+        "monthly": "كل شهر"
+      },
+      "weekdays": {
+        "monday": "الاثنين",
+        "tuesday": "الثلاثاء",
+        "wednesday": "الأربعاء",
+        "thursday": "الخميس",
+        "friday": "الجمعة",
+        "saturday": "السبت",
+        "sunday": "الأحد"
+      },
+      "overview": {
+        "dailyAt": "يوميًا في {time}",
+        "weekdaysAt": "أيام الأسبوع في {time}",
+        "weeklyAt": "كل {weekday} في {time}",
+        "monthlyAt": "شهريًا يوم {day} في {time}",
+        "everyHours": "كل {interval} ساعات",
+        "everyMinutes": "كل {interval} دقائق",
+        "custom": "جدولة مخصصة"
+      },
+      "galleryTitle": "اختر مطالبة من المعرض",
+      "galleryEmpty": "لا توجد مطالبات متاحة في المعرض",
+      "delete": {
+        "title": "حذف الموجّه المجدول؟",
+        "description": "سيُحذف هذا الجدول والتشغيل المُدرج في قائمة الانتظار."
+      },
+      "errors": {
+        "load": "تعذّر تحميل الموجّهات المجدولة",
+        "required": "الموجّه وتعبير cron مطلوبان",
+        "save": "تعذّر حفظ الموجّه المجدول",
+        "update": "تعذّر تحديث الموجّه المجدول",
+        "delete": "تعذّر حذف الموجّه المجدول",
+        "run": "تعذّر إدراج الموجّه المجدول في قائمة الانتظار"
+      }
+    },
+    "skills": {
+      "button": "المكتبة",
+      "title": "المهارات",
+      "menu": "إجراءات {{name}}",
+      "tab": "المهارات",
+      "new": "مهارة جديدة",
+      "import": "استيراد",
+      "importing": "جارٍ الاستيراد...",
+      "imported": "تم استيراد المهارة",
+      "created": "تم إنشاء المهارة",
+      "saved": "تم حفظ المهارة",
+      "loading": "جارٍ تحميل المهارات...",
+      "importedBadge": "مستوردة",
+      "importedBadgeTitle": "مهارة مستوردة. راجعها قبل التمكين.",
+      "reviewBeforeEnabling": "معطّلة. راجعها قبل التمكين.",
+      "toggle": "تبديل {{name}}",
+      "edit": "تعديل المهارة",
+      "export": "تصدير المهارة",
+      "delete": "حذف المهارة",
+      "importedBy": "استوردتها أنت من {{source}} · {{date}}",
+      "fromLinkBadge": "من رابط",
+      "sharedBadge": "مشتركة",
+      "detached": "منفصلة عن المصدر المشترك",
+      "libraryUnavailable": "مكتبة المهارات غير متاحة لطبقة البيانات هذه.",
+      "updateAvailable": "تحديث متاح v{{version}}",
+      "updatesToast": "تتوفر نسخة أحدث لـ {{count}} مهارة مشتركة",
+      "updatesToastAction": "مراجعة",
+      "filter": {
+        "current": "تصفية المهارات: {{filter}}"
+      },
+      "sections": {
+        "label": "أقسام المهارات",
+        "all": "الكل",
+        "active": "نشطة",
+        "review": "بحاجة إلى مراجعة",
+        "updates": "التحديثات",
+        "empty": "لا توجد مهارات في هذا القسم"
+      },
+      "review": {
+        "title": "مراجعة المهارة",
+        "description": "راجع التعليمات قبل تفعيل هذه المهارة.",
+        "fromLink": "تم النسخ من رابط مشترك",
+        "warning": "إذا بدا أي شيء غير صحيح، فعدّل المهارة بدلًا من تفعيلها.",
+        "enable": "تفعيل المهارة",
+        "enabling": "جارٍ التفعيل...",
+        "enabled": "تم تفعيل المهارة",
+        "changed": "تغيّرت المهارة منذ فتحها. راجع الإصدار الحالي مرة أخرى."
+      },
+      "share": {
+        "title": "مشاركة المهارة",
+        "description": "يمكن لأي شخص لديه الرابط معاينة المهارة وإضافة نسخة منها.",
+        "descriptionOff": "أنشئ رابطًا لمشاركة هذه المهارة.",
+        "link": "رابط المشاركة",
+        "copy": "نسخ الرابط",
+        "copied": "تم نسخ الرابط!",
+        "unshare": "إلغاء المشاركة",
+        "unshared": "تمت إزالة المشاركة",
+        "submit": "إنشاء رابط",
+        "error": "تعذّر تحديث المشاركة",
+        "open": "مشاركة {{name}}",
+        "notFound": "المهارة غير موجودة أو لم تعد مشتركة.",
+        "goHome": "العودة للرئيسية",
+        "by": "بواسطة {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "الإصدار",
+        "latestVersion": "v{{version}} (الأحدث)",
+        "addVersion": "أضف v{{version}} إلى مكتبتي",
+        "add": "أضف إلى مكتبتي",
+        "adding": "جارٍ الإضافة...",
+        "openCopy": "افتح نسختي",
+        "openLibrary": "افتح مكتبتي",
+        "added": "تمت إضافة المهارة إلى مكتبتك",
+        "addedReview": "أُضيفت كنسخة معطّلة. راجعها في مكتبتك قبل تفعيلها.",
+        "addError": "تعذّرت إضافة المهارة",
+        "alreadyAdded": "هذه المهارة موجودة بالفعل في مكتبتك.",
+        "nameTaken": "توجد مهارة بهذا الاسم بالفعل. أعد تسمية مهارتك، ثم أضف هذه المهارة مرة أخرى.",
+        "disabledNote": "تُضاف النسخ وهي معطّلة. لا تفعّل أي نسخة إلا بعد مراجعة تعليماتها.",
+        "unavailable": "مكتبة المهارات غير متاحة في هذا التطبيق."
+      },
+      "update": {
+        "title": "تحديث المهارة",
+        "description": "اختر إصدارًا، ثم حدّث نسختك.",
+        "version": "الإصدار",
+        "unified": "موحّد",
+        "split": "جنبًا إلى جنب",
+        "localChanges": "تحتوي هذه النسخة على تعديلات محلية",
+        "localChangesHint": "يستبدل التحديث المحتوى المحلي بالإصدار المشترك. يبقى تعديلك متاحًا في سجل المهارة.",
+        "confirmUpdate": "استبدال المحتوى المحلي",
+        "stale": "تغيّرت المهارة بعد تحميل المعاينة. تم تحديث المقارنة؛ راجعها مرة أخرى.",
+        "sourceUnavailable": "المصدر المشترك لم يعد متاحًا",
+        "sourceUnavailableHint": "تحتفظ هذه النسخة بمحتواها الحالي. افصلها عن المصدر لإيقاف البحث عن التحديثات.",
+        "detach": "افصل عن المصدر",
+        "detached": "تم فصلها عن المصدر المشترك",
+        "alreadyCurrent": "هذه المهارة مطابقة بالفعل للنسخة المشتركة.",
+        "noChanges": "لا توجد تغييرات في الأسطر.",
+        "truncated": "تم اقتطاع الفرق؛ يُعرض الجزء الأول فقط.",
+        "updated": "تم تحديث المهارة من النسخة المشتركة؛ راجعها قبل التمكين",
+        "update": "التحديث إلى v{{version}}",
+        "updateFallback": "تحديث",
+        "error": "تعذّر تحديث هذه المهارة",
+        "loadError": "تعذّر تحميل النسخ المشتركة.",
+        "versionConflict": "هذه النسخة لا تنتمي إلى المصدر المشترك.",
+        "historyTitle": "سجل الإصدارات",
+        "historyDescription": "اختر نسخة لرؤية ما تغيّر.",
+        "currentVersion": "هذه هي نسختك الحالية.",
+        "noVersions": "لا توجد نسخ أخرى متاحة.",
+        "versionUnavailable": "هذه النسخة لم تعد متاحة. اختر نسخة أخرى.",
+        "downgrade": "الرجوع إلى v{{version}}",
+        "downgraded": "تم إرجاع المهارة إلى v{{version}}"
+      },
+      "empty": {
+        "title": "لا توجد مهارات بعد",
+        "description": "أنشئ مهارة أو استورد ملف Markdown"
+      },
+      "editor": {
+        "createTitle": "مهارة جديدة",
+        "editTitle": "تعديل المهارة",
+        "name": "الاسم",
+        "nameHint": "حروف صغيرة وأرقام وشرطات؛ يجب أن يكون فريدًا.",
+        "description": "الوصف",
+        "descriptionHint": "يرى النموذج هذا السطر ليقرر متى يستخدم المهارة.",
+        "body": "التعليمات (Markdown)",
+        "preview": "معاينة",
+        "previewEmpty": "لا يوجد شيء للمعاينة بعد.",
+        "save": "حفظ المهارة",
+        "saving": "جارٍ الحفظ...",
+        "cancel": "إلغاء"
+      },
+      "validation": {
+        "nameRequired": "الاسم مطلوب.",
+        "namePattern": "استخدم حروفًا إنجليزية صغيرة وأرقامًا وشرطات، بدءًا بحرف أو رقم (بحد أقصى 64).",
+        "descriptionRequired": "الوصف مطلوب.",
+        "descriptionSingleLine": "يجب أن يكون الوصف في سطر واحد.",
+        "descriptionTooLarge": "حجم الوصف {{size}} بايت؛ الحد الأقصى {{max}}.",
+        "bodyTooLarge": "حجم التعليمات {{size}} بايت؛ الحد الأقصى {{max}}.",
+        "fileTooLarge": "حجم الملف {{size}} بايت؛ الحد الأقصى {{max}}."
+      },
+      "updatesToast_one": "{{count}} مهارة مشتركة لديها إصدار أحدث",
+      "updatesToast_other": "{{count}} مهارات مشتركة لديها إصدارات أحدث",
+      "versions": "سجل الإصدارات (v{{version}})",
+      "enable": "تفعيل {{name}}"
+    },
+    "question": {
+      "title": "سؤال",
+      "ariaLabel": "سؤال من المساعد",
+      "options": "خيارات",
+      "other": "أخرى",
+      "and": "و",
+      "otherAriaLabel": "إجابة أخرى",
+      "otherPlaceholder": "اكتب إجابتك...",
+      "progress": "{{current}}/{{total}}",
+      "next": "التالي",
+      "back": "رجوع",
+      "reviewTitle": "راجع إجاباتك",
+      "edit": "تعديل",
+      "optional": "اختياري",
+      "selectMultiple": "حدد كل ما ينطبق",
+      "notAnswered": "لم تتم الإجابة",
+      "datePlaceholder": "اختر تاريخًا",
+      "clear": "مسح",
+      "answeredPrivately": "تمت الإجابة بشكل خاص",
+      "status": {
+        "pending": "بانتظار إجابتك",
+        "answered": "تمت الإجابة",
+        "expired": "منتهي الصلاحية",
+        "superseded": "مستبدَل",
+        "orphaned": "غير متاح"
+      },
+      "errors": {
+        "answer": "تعذر الإجابة عن السؤال",
+        "required": "هذا السؤال مطلوب",
+        "email": "أدخل عنوان بريد إلكتروني صالحًا",
+        "date": "اختر تاريخًا صالحًا",
+        "number": "أدخل رقمًا صالحًا",
+        "url": "أدخل عنوان URL صالحًا",
+        "tel": "أدخل رقم هاتف صالحًا"
+      },
+      "answer": "إجابتك",
+      "answerAriaLabel": "إجابتك"
+    },
+    "approval": {
+      "ariaLabel": "الموافقة على {{tool}}",
+      "approve": "موافقة",
+      "reject": "رفض",
+      "edit": "تعديل",
+      "requestChanges": "طلب تغييرات",
+      "saveAndApprove": "حفظ وموافقة",
+      "saveEdit": "حفظ التعديل",
+      "editFields": "تعديل الحقول",
+      "editedArgumentsJson": "JSON الوسائط المعدلة",
+      "comment": "تعليق",
+      "commentRequired": "ما الذي يجب تغييره؟ (مطلوب)",
+      "commentRequiredError": "التعليق مطلوب عند طلب تغييرات",
+      "none": "لا شيء",
+      "onePerLine": "واحد في كل سطر أو مفصول بفواصل",
+      "serverHeld": "محتجز لدى server",
+      "noChanges": "لا توجد تغييرات للحفظ",
+      "invalidJson": "يجب أن تكون الوسائط بتنسيق JSON صالح",
+      "jsonObjectRequired": "يجب أن تكون الوسائط كائن JSON",
+      "editedContentNote": "محتوى معدّل؛ التغييرات المعتمدة موجودة في الفرق.",
+      "originalToEdited": "الأصلي → المعدّل",
+      "added": "مضاف",
+      "removed": "محذوف",
+      "replaced": "مستبدل",
+      "before": "قبل:",
+      "after": "بعد:",
+      "errors": {
+        "decide": "تعذّر اتخاذ قرار الموافقة"
+      },
+      "fieldErrors": {
+        "required": "{{field}} مطلوب",
+        "wholeNumber": "يجب أن يكون {{field}} عددًا صحيحًا",
+        "number": "يجب أن يكون {{field}} رقمًا"
+      },
+      "status": {
+        "approved": "تمت الموافقة",
+        "edited": "تمت الموافقة مع تعديلات",
+        "rejected": "مرفوض",
+        "changesRequested": "طُلبت تغييرات",
+        "expired": "منتهي الصلاحية",
+        "superseded": "مُستبدَل",
+        "orphaned": "غير متاح"
+      }
     }
   },
   "threadHistory": {
@@ -235,6 +667,11 @@
       "success": "تم حذف جميع المحادثات",
       "inProgress": "جاري حذف جميع المحادثات",
       "error": "فشل حذف جميع المحادثات"
+    },
+    "errors": {
+      "fetch": "خطأ في جلب المحادثات: {{error}}",
+      "resume": "تعذّر استئناف المحادثة",
+      "resumeDetail": "تعذّر استئناف المحادثة: {{error}}"
     }
   },
   "navigation": {
@@ -245,7 +682,9 @@
         "light": "السمة الفاتحة",
         "dark": "السمة الداكنة",
         "system": "متابعة النظام"
-      }
+      },
+      "toggleTheme": "تبديل السمة",
+      "selectProfile": "اختر الملف الشخصي"
     },
     "newChat": {
       "button": "محادثة جديدة",
@@ -262,7 +701,8 @@
         "apiKeys": "مفاتيح API",
         "logout": "تسجيل الخروج",
         "clearAll": "مسح جميع المحادثات"
-      }
+      },
+      "imageAlt": "صورة المستخدم"
     }
   },
   "apiKeys": {
@@ -298,6 +738,47 @@
         "single": "اختر تاريخاً",
         "range": "اختر نطاقاً من التواريخ"
       }
+    },
+    "audio": {
+      "listening": "جارٍ الاستماع"
+    },
+    "copy": {
+      "failed": "فشل النسخ: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "لا توجد نتائج."
+    },
+    "image": {
+      "closeLightbox": "إغلاق العارض"
+    },
+    "pdf": {
+      "printOpen": "طباعة/فتح PDF",
+      "download": "تنزيل PDF",
+      "loading": "جارٍ تحميل PDF...",
+      "openLarger": "فتح PDF في عرض أكبر",
+      "loadingPreview": "جارٍ تحميل المعاينة...",
+      "view": "عرض PDF",
+      "document": "مستند PDF",
+      "modalDescription": "نافذة تعرض PDF بعرض أكبر."
+    },
+    "plotly": {
+      "loading": "جارٍ التحميل...",
+      "error": "حدث خطأ"
+    },
+    "share": {
+      "unshare": "إلغاء المشاركة"
+    },
+    "tasklist": {
+      "title": "المهام"
+    },
+    "text": {
+      "loadError": "حدث خطأ أثناء تحميل المحتوى"
+    },
+    "thread": {
+      "loadError": "فشل تحميل المحادثة: {{error}}"
+    },
+    "video": {
+      "unsupported": "متصفحك لا يدعم وسم الفيديو."
     }
   }
 }

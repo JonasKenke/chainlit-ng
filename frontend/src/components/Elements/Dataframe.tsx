@@ -14,6 +14,7 @@ import { useCallback, useMemo } from 'react';
 
 import Alert from '@/components/Alert';
 import { Loader } from '@/components/Loader';
+import { useTranslation } from '@/components/i18n/Translator';
 import {
   Pagination,
   PaginationContent,
@@ -50,6 +51,7 @@ const features = tableFeatures({
 const columnHelper = createColumnHelper<typeof features, DataframeRow>();
 
 const _DataframeElement = ({ data }: { data: DataframeData }) => {
+  const { t } = useTranslation();
   const { index, columns, data: rowData } = data;
 
   const tableColumns = useMemo(
@@ -150,7 +152,9 @@ const _DataframeElement = ({ data }: { data: DataframeData }) => {
                   colSpan={columns.length}
                   className="h-24 text-center"
                 >
-                  No results.
+                  {t('components.dataframe.noResults', {
+                    defaultValue: 'No results.'
+                  })}
                 </TableCell>
               </TableRow>
             )}

@@ -16,7 +16,7 @@ export const Logo = ({ className }: Props) => {
   return (
     <img
       src={apiClient.getLogoEndpoint(variant, config?.ui?.logo_file_url)}
-      alt="logo"
+      alt=""
       className={cn('logo', className)}
     />
   );

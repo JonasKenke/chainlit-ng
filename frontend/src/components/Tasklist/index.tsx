@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils';
 import { useChatData, useConfig } from '@chainlit-ng/react-client';
 import useSWR from 'swr';
 
+import { useTranslation } from '@/components/i18n/Translator';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 
@@ -15,9 +16,12 @@ const fetcher = (url: string) =>
   fetch(url, { credentials: 'include' }).then((r) => r.json());
 
 const Header = ({ status }: HeaderProps) => {
+  const { t } = useTranslation();
   return (
     <CardHeader className="flex flex-row items-center justify-between gap-2 p-3">
-      <div className="font-semibold">Tasks</div>
+      <div className="font-semibold">
+        {t('components.tasklist.title', { defaultValue: 'Tasks' })}
+      </div>
       <Badge variant="secondary">{status || '?'}</Badge>
     </CardHeader>
   );

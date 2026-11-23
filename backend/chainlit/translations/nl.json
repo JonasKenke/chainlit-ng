@@ -6,7 +6,9 @@
       "continue": "Doorgaan",
       "goBack": "Terug",
       "reset": "Herstellen",
-      "submit": "Versturen"
+      "submit": "Versturen",
+      "close": "Sluiten",
+      "save": "Opslaan"
     },
     "status": {
       "loading": "Laden...",
@@ -14,7 +16,9 @@
         "default": "Er is een fout opgetreden",
         "serverConnection": "Kon geen verbinding maken met de server"
       }
-    }
+    },
+    "latest": "Nieuwste",
+    "current": "Huidige"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "Bericht versturen",
         "stop": "Taak stoppen",
         "attachFiles": "Bestanden bijvoegen"
+      },
+      "errors": {
+        "tooLarge": "Bericht is te groot. De maximale berichtgrootte is 1 MB."
       }
     },
     "speech": {
@@ -123,7 +130,8 @@
           "updating": "Bijwerken",
           "updated": "Feedback bijgewerkt"
         }
-      }
+      },
+      "output": "Uitvoer"
     },
     "history": {
       "title": "Laatste invoer",
@@ -146,7 +154,11 @@
         "adding": "Toevoegen…",
         "goHome": "Naar startpagina",
         "notFound": "Prompt niet gevonden of niet langer gedeeld.",
-        "addError": "Prompt toevoegen mislukt"
+        "addError": "Prompt toevoegen mislukt",
+        "version": "Versie",
+        "latestVersion": "v{{version}} (nieuwste)",
+        "addVersion": "v{{version}} aan mijn galerij toevoegen",
+        "openCopy": "Mijn kopie openen"
       },
       "unshare": "Delen ongedaan maken",
       "delete": "Verwijderen",
@@ -166,7 +178,426 @@
       "new": "Nieuwe prompt",
       "search": "Prompts zoeken...",
       "saved": "Prompt opgeslagen!",
-      "unshared": "Delen verwijderd"
+      "unshared": "Delen verwijderd",
+      "tab": "Prompts",
+      "updateAvailable": "Update beschikbaar: v{{version}}",
+      "versions": "Versiegeschiedenis (v{{version}})",
+      "updatesToast": "Nieuwere gedeelde versie voor {{count}} opgeslagen prompt(s)",
+      "updatesToastAction": "Bekijken",
+      "diff": {
+        "title": "Prompt bijwerken",
+        "historyTitle": "Versiegeschiedenis",
+        "description": "Kies een versie en werk daarna je kopie bij.",
+        "historyDescription": "Kies een versie om te zien wat er is gewijzigd.",
+        "version": "Versie",
+        "unified": "Gecombineerd",
+        "split": "Naast elkaar",
+        "localChanges": "Deze prompt heeft lokale wijzigingen",
+        "localChangesHint": "Bij bijwerken wordt de lokale inhoud vervangen door de gedeelde versie. Je wijziging blijft beschikbaar in de promptgeschiedenis.",
+        "confirmUpdate": "Lokale inhoud vervangen",
+        "stale": "Deze prompt is gewijzigd nadat de preview is geladen. De diff is vernieuwd; controleer deze opnieuw.",
+        "sourceUnavailable": "De gedeelde bron is niet meer beschikbaar",
+        "sourceUnavailableHint": "Deze kopie behoudt de huidige inhoud. Ontkoppel deze om niet meer naar updates te zoeken.",
+        "detach": "Ontkoppelen van bron",
+        "detached": "Ontkoppeld van de gedeelde bron",
+        "alreadyCurrent": "Deze prompt komt al overeen met de gedeelde versie.",
+        "noChanges": "Geen regelwijzigingen.",
+        "truncated": "De diff is afgekapt; alleen het eerste deel wordt weergegeven.",
+        "updated": "Prompt bijgewerkt vanuit gedeelde versie",
+        "update": "Bijwerken naar v{{version}}",
+        "updateFallback": "Bijwerken",
+        "updateError": "Kon deze prompt niet bijwerken",
+        "loadError": "Kon de versievergelijking niet laden.",
+        "currentVersion": "Dit is je huidige versie.",
+        "noVersions": "Er zijn geen andere versies beschikbaar.",
+        "versionUnavailable": "Die versie is niet meer beschikbaar. Kies een andere.",
+        "downgrade": "Terugzetten naar v{{version}}",
+        "downgraded": "Prompt teruggezet naar v{{version}}"
+      },
+      "updatesToast_one": "{{count}} opgeslagen prompt heeft een nieuwere gedeelde versie",
+      "updatesToast_other": "{{count}} opgeslagen prompts hebben een nieuwere gedeelde versie"
+    },
+    "mcp": {
+      "title": "MCP-servers",
+      "tabs": {
+        "connect": "Een MCP verbinden",
+        "list": "Mijn MCP's"
+      },
+      "configured": {
+        "title": "Geconfigureerde servers"
+      },
+      "connect": "Verbinden",
+      "reconnect": "Opnieuw verbinden",
+      "add": {
+        "title": "Eigen server toevoegen"
+      },
+      "form": {
+        "name": "Naam",
+        "namePlaceholder": "Voorbeeld: Stripe",
+        "type": "Type",
+        "url": "Server-URL",
+        "urlPlaceholder": "Voorbeeld: http://localhost:8000/mcp",
+        "headers": "Headers (JSON, optioneel)",
+        "headersPlaceholder": "Voorbeeld: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "Headers moeten een JSON-object met stringwaarden zijn",
+        "add": "Toevoegen",
+        "useOAuth": "Aanmelden met OAuth (alleen streamable HTTP)"
+      },
+      "list": {
+        "empty": "Geen MCP-servers verbonden",
+        "addFirst": "Voeg je eerste MCP-server toe",
+        "url": "URL",
+        "tools": "Tools",
+        "removeTitle": "Weet je het zeker?",
+        "removeDescription": "Hiermee wordt de MCP-server \"{{name}}\" losgekoppeld. Deze actie kan niet ongedaan worden gemaakt.",
+        "signIn": "Aanmelden bij {{host}}",
+        "remove": "MCP-server verwijderen"
+      },
+      "messages": {
+        "connecting": "Bezig met MCP verbinden...",
+        "connected": "MCP verbonden!",
+        "adding": "MCP toevoegen...",
+        "added": "MCP toegevoegd!",
+        "reconnecting": "MCP opnieuw verbinden...",
+        "reconnected": "MCP opnieuw verbonden!",
+        "removing": "MCP verwijderen...",
+        "removed": "MCP verwijderd!",
+        "authorizationRequired": "Log in om de verbinding te voltooien"
+      },
+      "errors": {
+        "connect": "Kan geen verbinding maken met de MCP-server"
+      },
+      "library": {
+        "button": "MCP-prompts en resources",
+        "title": "MCP-bibliotheek",
+        "tabs": {
+          "prompts": "Prompts",
+          "resources": "Resources"
+        },
+        "prompts": {
+          "empty": "Geen prompts van verbonden MCP-servers"
+        },
+        "resources": {
+          "empty": "Geen resources van verbonden MCP-servers"
+        },
+        "promptInsert": "Invoegen",
+        "promptInserted": "Prompt ingevoegd in het invoerveld",
+        "promptFailed": "Kan de prompt niet ophalen van de MCP-server",
+        "resourceAdded": "Resource aan de chat toegevoegd",
+        "resourceFailed": "Kan de resource niet lezen van de MCP-server"
+      }
+    },
+    "promptScheduling": {
+      "button": "Geplande prompts",
+      "title": "Geplande prompts",
+      "create": "Geplande prompt maken",
+      "edit": "Geplande prompt bewerken",
+      "new": "Nieuwe planning",
+      "empty": "Nog geen geplande prompts",
+      "nextRun": "Volgende uitvoering",
+      "lastRun": "Laatste uitvoering",
+      "lastStatus": "Laatste status",
+      "status": {
+        "active": "Actief",
+        "paused": "Gepauzeerd",
+        "success": "Geslaagd",
+        "failure": "Mislukt",
+        "successWithWarnings": "Geslaagd met waarschuwingen"
+      },
+      "actions": {
+        "edit": "Planning bewerken",
+        "pause": "Planning pauzeren",
+        "resume": "Planning hervatten",
+        "delete": "Planning verwijderen",
+        "runNow": "Nu uitvoeren",
+        "viewThread": "Laatste uitvoering bekijken"
+      },
+      "form": {
+        "prompt": "Prompt",
+        "chooseGallery": "Kies uit Prompt Gallery",
+        "profile": "Model",
+        "chatProfile": "Chatprofiel",
+        "defaultAssistant": "Standaardassistent",
+        "timezone": "Tijdzone",
+        "recurrence": "Herhaling",
+        "customFrequency": "Herhalen",
+        "interval": "Elke",
+        "hours": "uur",
+        "time": "Tijd",
+        "weekday": "Dag van de week",
+        "dayOfMonth": "Dag van de maand",
+        "afterHooks": "Acties na voltooiing",
+        "unavailable": "niet beschikbaar"
+      },
+      "presets": {
+        "daily": "Dagelijks om 09:00",
+        "weekdays": "Op werkdagen om 09:00",
+        "weekly": "Wekelijks op maandag",
+        "monthly": "Maandelijks op de eerste",
+        "custom": "Aangepast"
+      },
+      "custom": {
+        "everyHours": "Elke N uur",
+        "daily": "Elke dag",
+        "weekly": "Elke week",
+        "monthly": "Elke maand"
+      },
+      "weekdays": {
+        "monday": "maandag",
+        "tuesday": "dinsdag",
+        "wednesday": "woensdag",
+        "thursday": "donderdag",
+        "friday": "vrijdag",
+        "saturday": "zaterdag",
+        "sunday": "zondag"
+      },
+      "overview": {
+        "dailyAt": "Dagelijks om {time}",
+        "weekdaysAt": "Op werkdagen om {time}",
+        "weeklyAt": "Elke {weekday} om {time}",
+        "monthlyAt": "Maandelijks op dag {day} om {time}",
+        "everyHours": "Elke {interval} uur",
+        "everyMinutes": "Elke {interval} minuten",
+        "custom": "Aangepast schema"
+      },
+      "galleryTitle": "Kies een galerijprompt",
+      "galleryEmpty": "Geen galerijprompts beschikbaar",
+      "delete": {
+        "title": "Geplande prompt verwijderen?",
+        "description": "Dit schema en de geplande uitvoering worden verwijderd."
+      },
+      "errors": {
+        "load": "Kan geplande prompts niet laden",
+        "required": "Prompt en cron zijn verplicht",
+        "save": "Kan geplande prompt niet opslaan",
+        "update": "Kan geplande prompt niet bijwerken",
+        "delete": "Kan geplande prompt niet verwijderen",
+        "run": "Kan geplande prompt niet in wachtrij plaatsen"
+      }
+    },
+    "skills": {
+      "button": "Bibliotheek",
+      "title": "Vaardigheden",
+      "menu": "Acties voor {{name}}",
+      "tab": "Vaardigheden",
+      "new": "Nieuwe vaardigheid",
+      "import": "Importeren",
+      "importing": "Importeren...",
+      "imported": "Vaardigheid geïmporteerd",
+      "created": "Vaardigheid aangemaakt",
+      "saved": "Vaardigheid opgeslagen",
+      "loading": "Vaardigheden laden...",
+      "importedBadge": "Geïmporteerd",
+      "importedBadgeTitle": "Geïmporteerde vaardigheid. Controleer voordat je inschakelt.",
+      "reviewBeforeEnabling": "Uitgeschakeld. Controleer voordat je inschakelt.",
+      "toggle": "{{name}} in-/uitschakelen",
+      "edit": "Vaardigheid bewerken",
+      "export": "Vaardigheid exporteren",
+      "delete": "Vaardigheid verwijderen",
+      "importedBy": "Door jou geïmporteerd uit {{source}} · {{date}}",
+      "fromLinkBadge": "Via link",
+      "sharedBadge": "Gedeeld",
+      "detached": "Losgekoppeld van de gedeelde bron",
+      "libraryUnavailable": "De vaardighedenbibliotheek is niet beschikbaar voor deze datalaag.",
+      "updateAvailable": "Update beschikbaar v{{version}}",
+      "updatesToast": "{{count}} gedeelde skill heeft een nieuwere versie",
+      "updatesToastAction": "Beoordelen",
+      "filter": {
+        "current": "Filter skills: {{filter}}"
+      },
+      "sections": {
+        "label": "Skill-secties",
+        "all": "Alle",
+        "active": "Actief",
+        "review": "Te beoordelen",
+        "updates": "Updates",
+        "empty": "Geen skills in deze sectie"
+      },
+      "review": {
+        "title": "Skill beoordelen",
+        "description": "Controleer de instructies voordat je deze skill inschakelt.",
+        "fromLink": "Gekopieerd van een gedeelde link",
+        "warning": "Als er iets niet klopt, bewerk je de skill in plaats van deze in te schakelen.",
+        "enable": "Skill inschakelen",
+        "enabling": "Inschakelen...",
+        "enabled": "Skill ingeschakeld",
+        "changed": "De skill is gewijzigd sinds deze is geopend. Beoordeel de huidige versie opnieuw."
+      },
+      "share": {
+        "title": "Skill delen",
+        "description": "Iedereen met de link kan een voorbeeld bekijken en een kopie toevoegen.",
+        "descriptionOff": "Maak een link om deze skill te delen.",
+        "link": "Deellink",
+        "copy": "Link kopiëren",
+        "copied": "Link gekopieerd!",
+        "unshare": "Delen stoppen",
+        "unshared": "Delen gestopt",
+        "submit": "Link maken",
+        "error": "Delen bijwerken mislukt",
+        "open": "{{name}} delen",
+        "notFound": "Skill niet gevonden of wordt niet meer gedeeld.",
+        "goHome": "Naar start",
+        "by": "Door {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "Versie",
+        "latestVersion": "v{{version}} (nieuwste)",
+        "addVersion": "Voeg v{{version}} toe aan mijn bibliotheek",
+        "add": "Toevoegen aan mijn bibliotheek",
+        "adding": "Toevoegen...",
+        "openCopy": "Mijn kopie openen",
+        "openLibrary": "Mijn bibliotheek openen",
+        "added": "Skill toegevoegd aan je bibliotheek",
+        "addedReview": "Toegevoegd als uitgeschakelde kopie. Controleer deze in je bibliotheek voordat je deze inschakelt.",
+        "addError": "Skill toevoegen mislukt",
+        "alreadyAdded": "Deze skill staat al in je bibliotheek.",
+        "nameTaken": "Er bestaat al een skill met deze naam. Hernoem je skill en voeg deze daarna opnieuw toe.",
+        "disabledNote": "Kopieën worden uitgeschakeld toegevoegd. Schakel een kopie pas in nadat je de instructies hebt gecontroleerd.",
+        "unavailable": "De skillbibliotheek is niet beschikbaar in deze app."
+      },
+      "update": {
+        "title": "Skill bijwerken",
+        "description": "Kies een versie en werk daarna je kopie bij.",
+        "version": "Versie",
+        "unified": "Uniform",
+        "split": "Naast elkaar",
+        "localChanges": "Deze kopie heeft lokale wijzigingen",
+        "localChangesHint": "Bijwerken vervangt de lokale inhoud door de gedeelde versie. Je bewerking blijft beschikbaar in de skillgeschiedenis.",
+        "confirmUpdate": "Lokale inhoud vervangen",
+        "stale": "De skill is gewijzigd nadat het voorbeeld is geladen. De vergelijking is vernieuwd; controleer deze opnieuw.",
+        "sourceUnavailable": "De gedeelde bron is niet meer beschikbaar",
+        "sourceUnavailableHint": "Deze kopie behoudt de huidige inhoud. Ontkoppel deze om te stoppen met zoeken naar updates.",
+        "detach": "Ontkoppelen van bron",
+        "detached": "Ontkoppeld van de gedeelde bron",
+        "alreadyCurrent": "Deze skill komt al overeen met de gedeelde versie.",
+        "noChanges": "Geen regelwijzigingen.",
+        "truncated": "De diff is afgekapt; alleen het eerste deel wordt weergegeven.",
+        "updated": "Skill bijgewerkt vanuit de gedeelde versie; controleer voordat je deze inschakelt",
+        "update": "Bijwerken naar v{{version}}",
+        "updateFallback": "Bijwerken",
+        "error": "Deze skill kon niet worden bijgewerkt",
+        "loadError": "Kan de gedeelde versies niet laden.",
+        "versionConflict": "Die versie hoort niet bij de gedeelde bron.",
+        "historyTitle": "Versiegeschiedenis",
+        "historyDescription": "Kies een versie om te zien wat er is gewijzigd.",
+        "currentVersion": "Dit is je huidige versie.",
+        "noVersions": "Er zijn geen andere versies beschikbaar.",
+        "versionUnavailable": "Die versie is niet meer beschikbaar. Kies een andere.",
+        "downgrade": "Downgraden naar v{{version}}",
+        "downgraded": "Skill teruggezet naar v{{version}}"
+      },
+      "empty": {
+        "title": "Nog geen skills",
+        "description": "Maak een skill of importeer een Markdown-bestand"
+      },
+      "editor": {
+        "createTitle": "Nieuwe skill",
+        "editTitle": "Skill bewerken",
+        "name": "Naam",
+        "nameHint": "Kleine letters, cijfers en koppeltekens; moet uniek zijn.",
+        "description": "Beschrijving",
+        "descriptionHint": "Het model ziet deze regel om te bepalen wanneer de skill moet worden gebruikt.",
+        "body": "Instructies (Markdown)",
+        "preview": "Voorbeeld",
+        "previewEmpty": "Nog niets om te bekijken.",
+        "save": "Skill opslaan",
+        "saving": "Opslaan...",
+        "cancel": "Annuleren"
+      },
+      "validation": {
+        "nameRequired": "Naam is verplicht.",
+        "namePattern": "Gebruik kleine letters, cijfers en koppeltekens, beginnend met een letter of cijfer (max. 64).",
+        "descriptionRequired": "Beschrijving is verplicht.",
+        "descriptionSingleLine": "Beschrijving moet één regel zijn.",
+        "descriptionTooLarge": "Beschrijving is {{size}} bytes; maximaal {{max}}.",
+        "bodyTooLarge": "Instructies zijn {{size}} bytes; maximaal {{max}}.",
+        "fileTooLarge": "Bestand is {{size}} bytes; maximaal {{max}}."
+      },
+      "updatesToast_one": "{{count}} gedeelde skill heeft een nieuwere versie",
+      "updatesToast_other": "{{count}} gedeelde skills hebben een nieuwere versie",
+      "versions": "Versiegeschiedenis (v{{version}})",
+      "enable": "{{name}} inschakelen"
+    },
+    "question": {
+      "title": "Vraag",
+      "ariaLabel": "Vraag van de assistent",
+      "options": "Opties",
+      "other": "Anders",
+      "and": "en",
+      "otherAriaLabel": "Ander antwoord",
+      "otherPlaceholder": "Typ je antwoord...",
+      "progress": "{{current}}/{{total}}",
+      "next": "Volgende",
+      "back": "Terug",
+      "reviewTitle": "Controleer je antwoorden",
+      "edit": "Bewerken",
+      "optional": "Optioneel",
+      "selectMultiple": "Selecteer alles wat van toepassing is",
+      "notAnswered": "Niet beantwoord",
+      "datePlaceholder": "Kies een datum",
+      "clear": "Wissen",
+      "answeredPrivately": "Privé beantwoord",
+      "status": {
+        "pending": "Wachten op je antwoord",
+        "answered": "Beantwoord",
+        "expired": "Verlopen",
+        "superseded": "Vervangen",
+        "orphaned": "Niet beschikbaar"
+      },
+      "errors": {
+        "answer": "Kan vraag niet beantwoorden",
+        "required": "Deze vraag is verplicht",
+        "email": "Voer een geldig e-mailadres in",
+        "date": "Kies een geldige datum",
+        "number": "Voer een geldig getal in",
+        "url": "Voer een geldige URL in",
+        "tel": "Voer een geldig telefoonnummer in"
+      },
+      "answer": "Je antwoord",
+      "answerAriaLabel": "Je antwoord"
+    },
+    "approval": {
+      "ariaLabel": "Goedkeuring voor {{tool}}",
+      "approve": "Goedkeuren",
+      "reject": "Afwijzen",
+      "edit": "Bewerken",
+      "requestChanges": "Wijzigingen aanvragen",
+      "saveAndApprove": "Opslaan en goedkeuren",
+      "saveEdit": "Bewerking opslaan",
+      "editFields": "Velden bewerken",
+      "editedArgumentsJson": "Bewerkte argumenten-JSON",
+      "comment": "Opmerking",
+      "commentRequired": "Wat moet er worden gewijzigd? (verplicht)",
+      "commentRequiredError": "Een opmerking is verplicht bij het aanvragen van wijzigingen",
+      "none": "Geen",
+      "onePerLine": "Eén per regel of door komma's gescheiden",
+      "serverHeld": "Door server beheerd",
+      "noChanges": "Geen wijzigingen om op te slaan",
+      "invalidJson": "Argumenten moeten geldige JSON zijn",
+      "jsonObjectRequired": "Argumenten moeten een JSON-object zijn",
+      "editedContentNote": "Bewerkte inhoud; de goedgekeurde wijzigingen staan in de diff.",
+      "originalToEdited": "Origineel → bewerkt",
+      "added": "Toegevoegd",
+      "removed": "Verwijderd",
+      "replaced": "Vervangen",
+      "before": "Voor:",
+      "after": "Na:",
+      "errors": {
+        "decide": "Kan niet over goedkeuring beslissen"
+      },
+      "fieldErrors": {
+        "required": "{{field}} is verplicht",
+        "wholeNumber": "{{field}} moet een geheel getal zijn",
+        "number": "{{field}} moet een getal zijn"
+      },
+      "status": {
+        "approved": "Goedgekeurd",
+        "edited": "Goedgekeurd met wijzigingen",
+        "rejected": "Afgewezen",
+        "changesRequested": "Wijzigingen aangevraagd",
+        "expired": "Verlopen",
+        "superseded": "Achterhaald",
+        "orphaned": "Niet beschikbaar"
+      }
     }
   },
   "threadHistory": {
@@ -236,6 +667,11 @@
       "success": "Alle chats verwijderd",
       "inProgress": "Alle chats verwijderen",
       "error": "Alle chats verwijderen is mislukt"
+    },
+    "errors": {
+      "fetch": "Fout bij ophalen threads: {{error}}",
+      "resume": "Kan chat niet hervatten",
+      "resumeDetail": "Kan chat niet hervatten: {{error}}"
     }
   },
   "navigation": {
@@ -246,7 +682,9 @@
         "light": "Light Theme",
         "dark": "Dark Theme",
         "system": "Follow System"
-      }
+      },
+      "toggleTheme": "Thema wisselen",
+      "selectProfile": "Profiel selecteren"
     },
     "newChat": {
       "button": "Nieuwe chat",
@@ -263,7 +701,8 @@
         "apiKeys": "API-sleutels",
         "logout": "Uitloggen",
         "clearAll": "Alle chats verwijderen"
-      }
+      },
+      "imageAlt": "gebruikersafbeelding"
     }
   },
   "apiKeys": {
@@ -299,6 +738,47 @@
         "single": "Kies een datum",
         "range": "Kies een datumbereik"
       }
+    },
+    "audio": {
+      "listening": "Luisteren"
+    },
+    "copy": {
+      "failed": "Kopiëren mislukt: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "Geen resultaten."
+    },
+    "image": {
+      "closeLightbox": "Lightbox sluiten"
+    },
+    "pdf": {
+      "printOpen": "PDF afdrukken/openen",
+      "download": "PDF downloaden",
+      "loading": "PDF laden...",
+      "openLarger": "PDF in een grotere weergave openen",
+      "loadingPreview": "Voorbeeld laden...",
+      "view": "PDF bekijken",
+      "document": "PDF-document",
+      "modalDescription": "Een dialoogvenster met een grotere weergave van de PDF."
+    },
+    "plotly": {
+      "loading": "Laden...",
+      "error": "Er is een fout opgetreden"
+    },
+    "share": {
+      "unshare": "Delen ongedaan maken"
+    },
+    "tasklist": {
+      "title": "Taken"
+    },
+    "text": {
+      "loadError": "Er is een fout opgetreden bij het laden van de inhoud"
+    },
+    "thread": {
+      "loadError": "Kan thread niet laden: {{error}}"
+    },
+    "video": {
+      "unsupported": "Uw browser ondersteunt de video-tag niet."
     }
   }
 }

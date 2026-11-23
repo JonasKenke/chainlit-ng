@@ -1,6 +1,7 @@
 import { Suspense, lazy, useMemo } from 'react';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { useTranslation } from '@/components/i18n/Translator';
 import { Skeleton } from '@/components/ui/skeleton';
 
 import { useFetch } from 'hooks/useFetch';
@@ -14,6 +15,7 @@ interface Props {
 }
 
 const _PlotlyElement = ({ element }: Props) => {
+  const { t } = useTranslation();
   const { data, error, isLoading } = useFetch(element.url || null);
 
   // deep-clone SWR data so Plotly.js mutations don't corrupt the cache.
@@ -30,8 +32,20 @@ const _PlotlyElement = ({ element }: Props) => {
     };
   }, [data]);
 
-  if (isLoading) return <div>Loading...</div>;
-  if (error) return <div>An error occurred</div>;
+  if (isLoading)
+    return (
+      <div>
+        {t('components.plotly.loading', { defaultValue: 'Loading...' })}
+      </div>
+    );
+  if (error)
+    return (
+      <div>
+        {t('components.plotly.error', {
+          defaultValue: 'An error occurred'
+        })}
+      </div>
+    );
   if (!plotly) return null;
 
   return (

@@ -12,7 +12,10 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/components/i18n/Translator', () => ({
   useTranslation: () => ({
-    t: (key: string) => ({ 'common.actions.submit': 'Submit' })[key] ?? key
+    t: (key: string, options?: { defaultValue?: string }) =>
+      ({ 'common.actions.submit': 'Submit' })[key] ??
+      options?.defaultValue ??
+      key
   })
 }));
 

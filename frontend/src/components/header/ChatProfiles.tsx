@@ -9,6 +9,7 @@ import { useContext, useEffect, useState } from 'react';
 
 import { Markdown } from '@/components/Markdown';
 import PendingInteractionDialog from '@/components/PendingInteractionDialog';
+import { useTranslation } from '@/components/i18n/Translator';
 import {
   HoverCard,
   HoverCardContent,
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export default function ChatProfiles({ navigate }: Props) {
+  const { t } = useTranslation();
   const apiClient = useContext(ChainlitContext);
   const { config } = useConfig();
   const { chatProfile, setChatProfile } = useChatSession();
@@ -107,7 +109,11 @@ export default function ChatProfiles({ navigate }: Props) {
           id="chat-profiles"
           className="w-fit border-none bg-transparent text-muted-foreground font-semibold text-lg hover:bg-accent"
         >
-          <SelectValue placeholder="Select profile" />
+          <SelectValue
+            placeholder={t('navigation.header.selectProfile', {
+              defaultValue: 'Select profile'
+            })}
+          />
         </SelectTrigger>
         <SelectContent>
           {config.chatProfiles.map((profile) => {

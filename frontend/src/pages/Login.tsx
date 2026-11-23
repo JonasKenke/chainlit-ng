@@ -9,9 +9,7 @@ import { useQuery } from 'hooks/query';
 
 import { ChainlitContext, useAuth } from 'client-types/*';
 
-export const LoginError = new Error(
-  'Error logging in. Please try again later.'
-);
+export const LoginError = new Error('default');
 
 export default function Login() {
   const query = useQuery();
@@ -113,7 +111,7 @@ export default function Login() {
                   : config.ui.login_page_image
                 : apiClient.buildEndpoint('/favicon')
             }
-            alt="Image"
+            alt=""
             className={`absolute inset-0 h-full w-full object-cover ${
               isDarkMode
                 ? config?.ui?.login_page_image_dark_filter ||

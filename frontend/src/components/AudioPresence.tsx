@@ -3,6 +3,7 @@ import { WavRenderer, useAudio } from '@chainlit-ng/react-client';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { useTheme } from '@/components/ThemeProvider';
+import { useTranslation } from '@/components/i18n/Translator';
 
 interface Props {
   type: 'client' | 'server';
@@ -20,6 +21,7 @@ export default function AudioPresence({
   barSpacing
 }: Props) {
   const { variant } = useTheme();
+  const { t } = useTranslation();
   const { wavRecorder, wavStreamPlayer, isAiSpeaking } = useAudio();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -126,7 +128,9 @@ export default function AudioPresence({
   return (
     <div className="flex items-center gap-1">
       {type === 'server' && !isAiSpeaking ? (
-        <div className="text-muted-foreground">Listening</div>
+        <div className="text-muted-foreground">
+          {t('components.audio.listening', { defaultValue: 'Listening' })}
+        </div>
       ) : null}
       <canvas ref={canvasRef} />
     </div>

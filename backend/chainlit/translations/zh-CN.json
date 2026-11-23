@@ -6,7 +6,9 @@
       "continue": "继续",
       "goBack": "返回",
       "reset": "重置",
-      "submit": "提交"
+      "submit": "提交",
+      "close": "关闭",
+      "save": "保存"
     },
     "status": {
       "loading": "加载中...",
@@ -14,7 +16,9 @@
         "default": "发生错误",
         "serverConnection": "无法连接到服务器"
       }
-    }
+    },
+    "latest": "最新",
+    "current": "当前"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "发送消息",
         "stop": "停止任务",
         "attachFiles": "附加文件"
+      },
+      "errors": {
+        "tooLarge": "消息过大。最大消息大小为 1 MB。"
       }
     },
     "speech": {
@@ -123,7 +130,8 @@
           "updating": "更新中",
           "updated": "反馈已更新"
         }
-      }
+      },
+      "output": "输出"
     },
     "history": {
       "title": "最近输入",
@@ -146,7 +154,11 @@
         "adding": "添加中…",
         "goHome": "返回首页",
         "notFound": "未找到提示或已取消分享。",
-        "addError": "添加提示失败"
+        "addError": "添加提示失败",
+        "version": "版本",
+        "latestVersion": "v{{version}}（最新）",
+        "addVersion": "将 v{{version}} 添加到我的提示词库",
+        "openCopy": "打开我的副本"
       },
       "unshare": "取消分享",
       "delete": "删除",
@@ -166,7 +178,426 @@
       "new": "新建提示词",
       "search": "搜索提示词...",
       "saved": "提示词已保存！",
-      "unshared": "已取消分享"
+      "unshared": "已取消分享",
+      "tab": "提示词",
+      "updateAvailable": "有可用更新 v{{version}}",
+      "versions": "版本历史（v{{version}}）",
+      "updatesToast": "{{count}} 个已保存提示词有更新的共享版本",
+      "updatesToastAction": "查看",
+      "diff": {
+        "title": "更新提示词",
+        "historyTitle": "版本历史",
+        "description": "选择版本后更新你的副本。",
+        "historyDescription": "选择版本以查看更改。",
+        "version": "版本",
+        "unified": "统一视图",
+        "split": "并排视图",
+        "localChanges": "此提示词有本地编辑",
+        "localChangesHint": "更新会用共享版本替换本地内容。你的编辑仍会保留在提示词历史中。",
+        "confirmUpdate": "替换本地内容",
+        "stale": "预览加载后此提示词已更改。差异已刷新，请重新检查。",
+        "sourceUnavailable": "共享源已不可用",
+        "sourceUnavailableHint": "此副本将保留当前内容。将其分离以停止查找更新。",
+        "detach": "从源分离",
+        "detached": "已从共享源分离",
+        "alreadyCurrent": "此提示词已与共享版本一致。",
+        "noChanges": "没有行更改。",
+        "truncated": "差异已截断，仅显示第一部分。",
+        "updated": "提示词已从共享版本更新",
+        "update": "更新到 v{{version}}",
+        "updateFallback": "更新",
+        "updateError": "无法更新此提示词",
+        "loadError": "无法加载版本比较。",
+        "currentVersion": "这是你的当前版本。",
+        "noVersions": "没有其他可用版本。",
+        "versionUnavailable": "该版本已不可用。请选择其他版本。",
+        "downgrade": "降级到 v{{version}}",
+        "downgraded": "提示词已降级到 v{{version}}"
+      },
+      "updatesToast_one": "{{count}} 个已保存提示词有更新的共享版本",
+      "updatesToast_other": "{{count}} 个已保存提示词有更新的共享版本"
+    },
+    "mcp": {
+      "title": "MCP 服务器",
+      "tabs": {
+        "connect": "连接 MCP",
+        "list": "我的 MCP"
+      },
+      "configured": {
+        "title": "已配置的服务器"
+      },
+      "connect": "连接",
+      "reconnect": "重新连接",
+      "add": {
+        "title": "添加自己的服务器"
+      },
+      "form": {
+        "name": "名称",
+        "namePlaceholder": "示例：Stripe",
+        "type": "类型",
+        "url": "服务器 URL",
+        "urlPlaceholder": "示例：http://localhost:8000/mcp",
+        "headers": "请求头（JSON，可选）",
+        "headersPlaceholder": "示例：{\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "请求头必须是字符串值组成的 JSON 对象",
+        "add": "添加",
+        "useOAuth": "使用 OAuth 登录（仅限流式 HTTP）"
+      },
+      "list": {
+        "empty": "未连接任何 MCP 服务器",
+        "addFirst": "添加第一个 MCP 服务器",
+        "url": "URL",
+        "tools": "工具",
+        "removeTitle": "确定吗？",
+        "removeDescription": "这将断开 MCP 服务器“{{name}}”。此操作无法撤销。",
+        "signIn": "登录到 {{host}}",
+        "remove": "移除 MCP 服务器"
+      },
+      "messages": {
+        "connecting": "正在连接 MCP...",
+        "connected": "MCP 已连接！",
+        "adding": "正在添加 MCP...",
+        "added": "MCP 已添加！",
+        "reconnecting": "正在重新连接 MCP...",
+        "reconnected": "MCP 已重新连接！",
+        "removing": "正在移除 MCP...",
+        "removed": "MCP 已移除！",
+        "authorizationRequired": "登录以完成连接"
+      },
+      "errors": {
+        "connect": "无法连接到 MCP server"
+      },
+      "library": {
+        "button": "MCP 提示词和资源",
+        "title": "MCP 库",
+        "tabs": {
+          "prompts": "提示词",
+          "resources": "资源"
+        },
+        "prompts": {
+          "empty": "已连接的 MCP server 无提示词"
+        },
+        "resources": {
+          "empty": "已连接的 MCP server 无资源"
+        },
+        "promptInsert": "插入",
+        "promptInserted": "提示词已插入输入框",
+        "promptFailed": "无法从 MCP server 获取提示词",
+        "resourceAdded": "资源已添加到聊天",
+        "resourceFailed": "无法从 MCP server 读取资源"
+      }
+    },
+    "promptScheduling": {
+      "button": "定时提示词",
+      "title": "定时提示词",
+      "create": "创建定时提示词",
+      "edit": "编辑定时提示词",
+      "new": "新建计划",
+      "empty": "暂无定时提示词",
+      "nextRun": "下次运行",
+      "lastRun": "上次运行",
+      "lastStatus": "上次状态",
+      "status": {
+        "active": "启用",
+        "paused": "已暂停",
+        "success": "成功",
+        "failure": "失败",
+        "successWithWarnings": "成功但有警告"
+      },
+      "actions": {
+        "edit": "编辑计划",
+        "pause": "暂停计划",
+        "resume": "恢复计划",
+        "delete": "删除计划",
+        "runNow": "立即运行",
+        "viewThread": "查看最新运行"
+      },
+      "form": {
+        "prompt": "提示词",
+        "chooseGallery": "从提示词库中选择",
+        "profile": "模型",
+        "chatProfile": "聊天配置",
+        "defaultAssistant": "默认助手",
+        "timezone": "时区",
+        "recurrence": "重复",
+        "customFrequency": "重复",
+        "interval": "每",
+        "hours": "小时",
+        "time": "时间",
+        "weekday": "星期几",
+        "dayOfMonth": "每月第几天",
+        "afterHooks": "完成后的操作",
+        "unavailable": "不可用"
+      },
+      "presets": {
+        "daily": "每天 09:00",
+        "weekdays": "工作日 09:00",
+        "weekly": "每周一",
+        "monthly": "每月 1 日",
+        "custom": "自定义"
+      },
+      "custom": {
+        "everyHours": "每 N 小时",
+        "daily": "每天",
+        "weekly": "每周",
+        "monthly": "每月"
+      },
+      "weekdays": {
+        "monday": "星期一",
+        "tuesday": "星期二",
+        "wednesday": "星期三",
+        "thursday": "星期四",
+        "friday": "星期五",
+        "saturday": "星期六",
+        "sunday": "星期日"
+      },
+      "overview": {
+        "dailyAt": "每天 {time}",
+        "weekdaysAt": "工作日 {time}",
+        "weeklyAt": "每{weekday} {time}",
+        "monthlyAt": "每月 {day} 日 {time}",
+        "everyHours": "每 {interval} 小时",
+        "everyMinutes": "每 {interval} 分钟",
+        "custom": "自定义计划"
+      },
+      "galleryTitle": "选择 Gallery 提示词",
+      "galleryEmpty": "没有可用的 Gallery 提示词",
+      "delete": {
+        "title": "删除定时提示词？",
+        "description": "此计划及其排队运行将被删除。"
+      },
+      "errors": {
+        "load": "无法加载定时提示词",
+        "required": "提示词和 cron 为必填项",
+        "save": "无法保存定时提示词",
+        "update": "无法更新定时提示词",
+        "delete": "无法删除定时提示词",
+        "run": "无法将定时提示词加入队列"
+      }
+    },
+    "skills": {
+      "button": "技能库",
+      "title": "技能",
+      "menu": "{{name}} 的操作",
+      "tab": "技能",
+      "new": "新建技能",
+      "import": "导入",
+      "importing": "正在导入...",
+      "imported": "技能已导入",
+      "created": "技能已创建",
+      "saved": "技能已保存",
+      "loading": "正在加载技能...",
+      "importedBadge": "已导入",
+      "importedBadgeTitle": "已导入的技能。启用前请检查。",
+      "reviewBeforeEnabling": "已禁用。启用前请检查。",
+      "toggle": "切换 {{name}}",
+      "edit": "编辑技能",
+      "export": "导出技能",
+      "delete": "删除技能",
+      "importedBy": "由你从 {{source}} 导入 · {{date}}",
+      "fromLinkBadge": "来自链接",
+      "sharedBadge": "共享",
+      "detached": "已与共享源分离",
+      "libraryUnavailable": "此数据层无法使用技能库。",
+      "updateAvailable": "有可用更新 v{{version}}",
+      "updatesToast": "{{count}} 个共享技能有新版本",
+      "updatesToastAction": "审核",
+      "filter": {
+        "current": "筛选技能：{{filter}}"
+      },
+      "sections": {
+        "label": "技能分区",
+        "all": "全部",
+        "active": "已启用",
+        "review": "待审核",
+        "updates": "更新",
+        "empty": "此分区中没有技能"
+      },
+      "review": {
+        "title": "审核技能",
+        "description": "启用此技能前，请检查说明。",
+        "fromLink": "复制自共享链接",
+        "warning": "如果发现任何异常，请编辑技能，而不要启用它。",
+        "enable": "启用技能",
+        "enabling": "正在启用...",
+        "enabled": "技能已启用",
+        "changed": "技能在打开后已发生变化。请重新审核当前版本。"
+      },
+      "share": {
+        "title": "共享技能",
+        "description": "任何拥有链接的人都可以预览并添加副本。",
+        "descriptionOff": "创建链接以共享此技能。",
+        "link": "共享链接",
+        "copy": "复制链接",
+        "copied": "链接已复制！",
+        "unshare": "取消共享",
+        "unshared": "已取消共享",
+        "submit": "创建链接",
+        "error": "无法更新共享设置",
+        "open": "共享 {{name}}",
+        "notFound": "未找到技能或该技能已不再共享。",
+        "goHome": "返回首页",
+        "by": "作者：{{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "版本",
+        "latestVersion": "v{{version}}（最新）",
+        "addVersion": "将 v{{version}} 添加到我的技能库",
+        "add": "添加到我的技能库",
+        "adding": "正在添加...",
+        "openCopy": "打开我的副本",
+        "openLibrary": "打开我的技能库",
+        "added": "技能已添加到你的技能库",
+        "addedReview": "已添加为禁用副本。启用前请在技能库中查看。",
+        "addError": "添加技能失败",
+        "alreadyAdded": "该技能已在你的技能库中。",
+        "nameTaken": "已存在同名技能。请重命名你的技能，然后再次添加此技能。",
+        "disabledNote": "副本添加后处于禁用状态。请先查看其说明再启用。",
+        "unavailable": "此应用未提供技能库。"
+      },
+      "update": {
+        "title": "更新技能",
+        "description": "选择版本，然后更新你的副本。",
+        "version": "版本",
+        "unified": "统一",
+        "split": "并排",
+        "localChanges": "此副本有本地修改",
+        "localChangesHint": "更新会用共享版本替换本地内容。你的修改仍可在技能历史中查看。",
+        "confirmUpdate": "替换本地内容",
+        "stale": "预览加载后技能已变更。对比已刷新，请重新查看。",
+        "sourceUnavailable": "共享源已不可用",
+        "sourceUnavailableHint": "此副本将保留当前内容。将其分离可停止查找更新。",
+        "detach": "从源分离",
+        "detached": "已从共享源分离",
+        "alreadyCurrent": "此技能已与共享版本一致。",
+        "noChanges": "没有行变更。",
+        "truncated": "差异已截断，仅显示第一部分。",
+        "updated": "技能已从共享版本更新；启用前请检查",
+        "update": "更新至 v{{version}}",
+        "updateFallback": "更新",
+        "error": "无法更新此技能",
+        "loadError": "无法加载共享版本。",
+        "versionConflict": "该版本不属于共享源。",
+        "historyTitle": "版本历史",
+        "historyDescription": "选择版本以查看更改。",
+        "currentVersion": "这是你的当前版本。",
+        "noVersions": "没有其他可用版本。",
+        "versionUnavailable": "该版本已不可用。请选择其他版本。",
+        "downgrade": "降级到 v{{version}}",
+        "downgraded": "技能已降级到 v{{version}}"
+      },
+      "empty": {
+        "title": "尚无技能",
+        "description": "创建技能或导入 Markdown 文件"
+      },
+      "editor": {
+        "createTitle": "新建技能",
+        "editTitle": "编辑技能",
+        "name": "名称",
+        "nameHint": "小写字母、数字和连字符；必须唯一。",
+        "description": "描述",
+        "descriptionHint": "模型会看到此行，以决定何时使用该技能。",
+        "body": "指令（Markdown）",
+        "preview": "预览",
+        "previewEmpty": "暂无可预览内容。",
+        "save": "保存技能",
+        "saving": "保存中...",
+        "cancel": "取消"
+      },
+      "validation": {
+        "nameRequired": "名称为必填项。",
+        "namePattern": "只能使用小写字母、数字和连字符，且以字母或数字开头（最多 64 个字符）。",
+        "descriptionRequired": "描述为必填项。",
+        "descriptionSingleLine": "描述必须为单行。",
+        "descriptionTooLarge": "描述为 {{size}} 字节；最大为 {{max}}。",
+        "bodyTooLarge": "指令为 {{size}} 字节；最大为 {{max}}。",
+        "fileTooLarge": "文件为 {{size}} 字节；最大为 {{max}}。"
+      },
+      "updatesToast_one": "{{count}} 个共享技能有新版本",
+      "updatesToast_other": "{{count}} 个共享技能有新版本",
+      "versions": "版本历史（v{{version}}）",
+      "enable": "启用 {{name}}"
+    },
+    "question": {
+      "title": "问题",
+      "ariaLabel": "来自助手的问题",
+      "options": "选项",
+      "other": "其他",
+      "and": "和",
+      "otherAriaLabel": "其他答案",
+      "otherPlaceholder": "输入你的答案...",
+      "progress": "{{current}}/{{total}}",
+      "next": "下一步",
+      "back": "返回",
+      "reviewTitle": "检查答案",
+      "edit": "编辑",
+      "optional": "可选",
+      "selectMultiple": "选择所有适用项",
+      "notAnswered": "未回答",
+      "datePlaceholder": "选择日期",
+      "clear": "清除",
+      "answeredPrivately": "已私密回答",
+      "status": {
+        "pending": "等待你的回答",
+        "answered": "已回答",
+        "expired": "已过期",
+        "superseded": "已被取代",
+        "orphaned": "不可用"
+      },
+      "errors": {
+        "answer": "无法回答问题",
+        "required": "此问题为必填项",
+        "email": "请输入有效的电子邮件地址",
+        "date": "请选择有效日期",
+        "number": "请输入有效数字",
+        "url": "请输入有效 URL",
+        "tel": "请输入有效电话号码"
+      },
+      "answer": "您的回答",
+      "answerAriaLabel": "您的回答"
+    },
+    "approval": {
+      "ariaLabel": "{{tool}} 的审批",
+      "approve": "批准",
+      "reject": "拒绝",
+      "edit": "编辑",
+      "requestChanges": "请求更改",
+      "saveAndApprove": "保存并批准",
+      "saveEdit": "保存编辑",
+      "editFields": "编辑字段",
+      "editedArgumentsJson": "编辑后的参数 JSON",
+      "comment": "评论",
+      "commentRequired": "需要更改什么？（必填）",
+      "commentRequiredError": "请求更改时必须填写评论",
+      "none": "无",
+      "onePerLine": "每行一项或用逗号分隔",
+      "serverHeld": "服务器端保留",
+      "noChanges": "没有可保存的更改",
+      "invalidJson": "参数必须是有效的 JSON",
+      "jsonObjectRequired": "参数必须是 JSON 对象",
+      "editedContentNote": "已编辑内容；已批准的更改见 diff。",
+      "originalToEdited": "原始 → 已编辑",
+      "added": "已添加",
+      "removed": "已移除",
+      "replaced": "已替换",
+      "before": "之前：",
+      "after": "之后：",
+      "errors": {
+        "decide": "无法确定审批结果"
+      },
+      "fieldErrors": {
+        "required": "{{field}} 为必填项",
+        "wholeNumber": "{{field}} 必须是整数",
+        "number": "{{field}} 必须是数字"
+      },
+      "status": {
+        "approved": "已批准",
+        "edited": "已批准（有编辑）",
+        "rejected": "已拒绝",
+        "changesRequested": "已请求更改",
+        "expired": "已过期",
+        "superseded": "已被取代",
+        "orphaned": "不可用"
+      }
     }
   },
   "threadHistory": {
@@ -236,6 +667,11 @@
       "success": "所有聊天已删除",
       "inProgress": "正在删除所有聊天",
       "error": "删除所有聊天失败"
+    },
+    "errors": {
+      "fetch": "获取会话线程时出错：{{error}}",
+      "resume": "无法恢复聊天",
+      "resumeDetail": "无法恢复聊天：{{error}}"
     }
   },
   "navigation": {
@@ -246,7 +682,9 @@
         "light": "浅色主题",
         "dark": "深色主题",
         "system": "跟随系统"
-      }
+      },
+      "toggleTheme": "切换主题",
+      "selectProfile": "选择个人资料"
     },
     "newChat": {
       "button": "新建对话",
@@ -263,7 +701,8 @@
         "apiKeys": "API密钥",
         "logout": "退出登录",
         "clearAll": "清空所有聊天"
-      }
+      },
+      "imageAlt": "用户头像"
     }
   },
   "apiKeys": {
@@ -299,6 +738,47 @@
         "single": "选择日期",
         "range": "选择日期范围"
       }
+    },
+    "audio": {
+      "listening": "正在聆听"
+    },
+    "copy": {
+      "failed": "复制失败：{{error}}"
+    },
+    "dataframe": {
+      "noResults": "无结果。"
+    },
+    "image": {
+      "closeLightbox": "关闭灯箱"
+    },
+    "pdf": {
+      "printOpen": "打印/打开 PDF",
+      "download": "下载 PDF",
+      "loading": "正在加载 PDF...",
+      "openLarger": "在更大视图中打开 PDF",
+      "loadingPreview": "正在加载预览...",
+      "view": "查看 PDF",
+      "document": "PDF 文档",
+      "modalDescription": "包含 PDF 更大视图的模态框。"
+    },
+    "plotly": {
+      "loading": "正在加载...",
+      "error": "发生错误"
+    },
+    "share": {
+      "unshare": "取消共享"
+    },
+    "tasklist": {
+      "title": "任务"
+    },
+    "text": {
+      "loadError": "加载内容时发生错误"
+    },
+    "thread": {
+      "loadError": "加载会话线程失败：{{error}}"
+    },
+    "video": {
+      "unsupported": "您的浏览器不支持 video 标签。"
     }
   }
 }

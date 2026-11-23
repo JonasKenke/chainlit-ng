@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math-extended';
 import { visit } from 'unist-util-visit';
 
+import { useTranslation } from '@/components/i18n/Translator';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Card } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -147,6 +148,7 @@ const Markdown = ({
   className,
   children
 }: Props) => {
+  const { t } = useTranslation();
   const apiClient = useContext(ChainlitContext);
 
   if (renderMarkdown === false) {
@@ -253,7 +255,10 @@ const Markdown = ({
                     className="w-full h-auto rounded-md"
                     style={{ maxWidth: '100%' }}
                   >
-                    Your browser does not support the video tag.
+                    {t('components.video.unsupported', {
+                      defaultValue:
+                        'Your browser does not support the video tag.'
+                    })}
                   </video>
                 </div>
               );

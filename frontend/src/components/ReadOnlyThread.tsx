@@ -67,14 +67,19 @@ const ReadOnlyThread = ({ id }: Props) => {
   useEffect(() => {
     if (threadError) {
       navigate('/');
-      toast.error('Failed to load thread: ' + threadError.message);
+      toast.error(
+        t('components.thread.loadError', {
+          defaultValue: 'Failed to load thread: {{error}}',
+          error: threadError.message
+        })
+      );
     }
   }, [threadError]);
 
   const onFeedbackUpdated = useCallback(
     async (message: IStep, onSuccess: () => void, feedback: IFeedback) => {
       toast.promise(apiClient.setFeedback(feedback, sessionId), {
-        loading: 'Updating',
+        loading: t('chat.messages.feedback.status.updating'),
         success: (res) => {
           setSteps((prev) =>
             prev.map((step) => {
@@ -92,7 +97,7 @@ const ReadOnlyThread = ({ id }: Props) => {
           );
 
           onSuccess();
-          return 'Feedback updated!';
+          return t('chat.messages.feedback.status.updated');
         },
         error: (err) => {
           return <span>{err.message}</span>;

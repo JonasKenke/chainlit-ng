@@ -87,6 +87,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   checkboxes instead of radios, list defaults, option ids and labels in the
   answer, and additive Other text when `allow_free_text` is enabled. See
   [the questions guide](docs/questions.md).
+- Translate the approval card and the remaining shared UI labels, and fill every
+  bundled locale from the English source. A translation parity test now rejects
+  missing or extra keys, blank values, and changed interpolation placeholders.
 - Add `[features.spontaneous_file_upload] directory` to store uploaded files outside `APP_ROOT`. Relative paths resolve against `APP_ROOT`, absolute paths are used as-is, and startup fails with an actionable error when uploads are enabled and the directory is not writable. Only the legacy default `.files` directory is removed on shutdown; a configured directory is preserved.
 - Add opt-in OpenTelemetry trace export from the Step tree (`feat(otel)`):
   `[features.telemetry] enabled = true` plus the new `chainlit[otel]` extra

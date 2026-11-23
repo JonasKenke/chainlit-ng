@@ -6,7 +6,9 @@
       "continue": "Fortsæt",
       "goBack": "Gå tilbage",
       "reset": "Nulstil",
-      "submit": "Indsend"
+      "submit": "Indsend",
+      "close": "Luk",
+      "save": "Gem"
     },
     "status": {
       "loading": "Indlæser...",
@@ -14,7 +16,9 @@
         "default": "Der opstod en fejl",
         "serverConnection": "Kunne ikke nå serveren"
       }
-    }
+    },
+    "latest": "Seneste",
+    "current": "Nuværende"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "Send besked",
         "stop": "Stop opgave",
         "attachFiles": "Vedhæft filer"
+      },
+      "errors": {
+        "tooLarge": "Beskeden er for stor. Den maksimale meddelelsesstørrelse er 1 MB."
       }
     },
     "favorites": {
@@ -71,7 +78,8 @@
       "empty": {
         "title": "Ingen gemte prompts endnu",
         "description": "Start med at sende en prompt og markere den med en stjerne, eller vælg en prompt fra tidligere samtaler"
-      }
+      },
+      "remove": "Fjern favorit"
     },
     "commands": {
       "button": "Værktøjer",
@@ -122,7 +130,8 @@
           "updating": "Opdaterer",
           "updated": "Feedback opdateret"
         }
-      }
+      },
+      "output": "Output"
     },
     "history": {
       "title": "Seneste input",
@@ -145,7 +154,11 @@
         "adding": "Tilføjer…",
         "goHome": "Gå til forsiden",
         "notFound": "Prompt blev ikke fundet eller er ikke længere delt.",
-        "addError": "Kunne ikke tilføje prompt"
+        "addError": "Kunne ikke tilføje prompt",
+        "version": "Version",
+        "latestVersion": "v{{version}} (seneste)",
+        "addVersion": "Føj v{{version}} til mit galleri",
+        "openCopy": "Åbn min kopi"
       },
       "unshare": "Fjern deling",
       "delete": "Slet",
@@ -165,7 +178,426 @@
       "new": "Ny prompt",
       "search": "Søg i prompts...",
       "saved": "Prompt gemt!",
-      "unshared": "Deling fjernet"
+      "unshared": "Deling fjernet",
+      "tab": "Prompter",
+      "updateAvailable": "Opdatering tilgængelig v{{version}}",
+      "versions": "Versionshistorik (v{{version}})",
+      "updatesToast": "{{count}} af dine gemte prompter har en nyere delt version",
+      "updatesToastAction": "Gennemse",
+      "diff": {
+        "title": "Opdater prompt",
+        "historyTitle": "Versionshistorik",
+        "description": "Vælg en version, og opdater derefter din kopi.",
+        "historyDescription": "Vælg en version for at se ændringerne.",
+        "version": "Version",
+        "unified": "Samlet",
+        "split": "Side om side",
+        "localChanges": "Denne prompt har lokale ændringer",
+        "localChangesHint": "Hvis du opdaterer, erstattes det lokale indhold med den delte version. Din ændring forbliver tilgængelig i prompthistorikken.",
+        "confirmUpdate": "Erstat lokalt indhold",
+        "stale": "Denne prompt blev ændret, efter forhåndsvisningen blev indlæst. Sammenligningen er opdateret; gennemgå den igen.",
+        "sourceUnavailable": "Den delte kilde er ikke længere tilgængelig",
+        "sourceUnavailableHint": "Denne kopi beholder sit nuværende indhold. Frakobl den for at stoppe med at søge efter opdateringer.",
+        "detach": "Frakobl fra kilde",
+        "detached": "Frakoblet fra den delte kilde",
+        "alreadyCurrent": "Denne prompt svarer allerede til den delte version.",
+        "noChanges": "Ingen linjeændringer.",
+        "truncated": "Diffen er afkortet; kun den første del vises.",
+        "updated": "Prompten er opdateret fra den delte version",
+        "update": "Opdater til v{{version}}",
+        "updateFallback": "Opdater",
+        "updateError": "Kunne ikke opdatere denne prompt",
+        "loadError": "Kunne ikke indlæse versionssammenligningen.",
+        "currentVersion": "Dette er din nuværende version.",
+        "noVersions": "Der er ingen andre versioner tilgængelige.",
+        "versionUnavailable": "Den version er ikke længere tilgængelig. Vælg en anden.",
+        "downgrade": "Nedgrader til v{{version}}",
+        "downgraded": "Prompten er nedgraderet til v{{version}}"
+      },
+      "updatesToast_one": "{{count}} gemt prompt har en nyere delt version",
+      "updatesToast_other": "{{count}} gemte prompts har en nyere delt version"
+    },
+    "mcp": {
+      "title": "MCP-servere",
+      "tabs": {
+        "connect": "Forbind en MCP",
+        "list": "Mine MCP'er"
+      },
+      "configured": {
+        "title": "Konfigurerede servere"
+      },
+      "connect": "Forbind",
+      "reconnect": "Forbind igen",
+      "add": {
+        "title": "Tilføj din egen server"
+      },
+      "form": {
+        "name": "Navn",
+        "namePlaceholder": "Eksempel: Stripe",
+        "type": "Type",
+        "url": "Server-URL",
+        "urlPlaceholder": "Eksempel: http://localhost:8000/mcp",
+        "headers": "Headers (JSON, valgfrit)",
+        "headersPlaceholder": "Eksempel: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "Headers skal være et JSON-objekt med strengværdier",
+        "add": "Tilføj",
+        "useOAuth": "Log ind med OAuth (kun streamable HTTP)"
+      },
+      "list": {
+        "empty": "Ingen MCP-servere forbundet",
+        "addFirst": "Tilføj din første MCP-server",
+        "url": "URL",
+        "tools": "Værktøjer",
+        "removeTitle": "Er du sikker?",
+        "removeDescription": "Dette vil afbryde forbindelsen til MCP-serveren \"{{name}}\". Denne handling kan ikke fortrydes.",
+        "signIn": "Log ind på {{host}}",
+        "remove": "Fjern MCP-server"
+      },
+      "messages": {
+        "connecting": "Forbinder til MCP...",
+        "connected": "MCP forbundet!",
+        "adding": "Tilføjer MCP...",
+        "added": "MCP tilføjet!",
+        "reconnecting": "Genopretter forbindelse til MCP...",
+        "reconnected": "MCP forbundet igen!",
+        "removing": "Fjerner MCP...",
+        "removed": "MCP fjernet!",
+        "authorizationRequired": "Log ind for at fuldføre forbindelsen"
+      },
+      "errors": {
+        "connect": "Kunne ikke oprette forbindelse til MCP-serveren"
+      },
+      "library": {
+        "button": "MCP-prompter og -ressourcer",
+        "title": "MCP-bibliotek",
+        "tabs": {
+          "prompts": "Prompter",
+          "resources": "Ressourcer"
+        },
+        "prompts": {
+          "empty": "Ingen prompter fra tilsluttede MCP-servere"
+        },
+        "resources": {
+          "empty": "Ingen ressourcer fra tilsluttede MCP-servere"
+        },
+        "promptInsert": "Indsæt",
+        "promptInserted": "Prompt indsat i skrivefeltet",
+        "promptFailed": "Kunne ikke hente prompten fra MCP-serveren",
+        "resourceAdded": "Ressource føjet til chatten",
+        "resourceFailed": "Kunne ikke læse ressourcen fra MCP-serveren"
+      }
+    },
+    "promptScheduling": {
+      "button": "Planlagte prompts",
+      "title": "Planlagte prompts",
+      "create": "Opret planlagt prompt",
+      "edit": "Rediger planlagt prompt",
+      "new": "Ny planlægning",
+      "empty": "Ingen planlagte prompts endnu",
+      "nextRun": "Næste kørsel",
+      "lastRun": "Seneste kørsel",
+      "lastStatus": "Seneste status",
+      "status": {
+        "active": "Aktiv",
+        "paused": "Pauset",
+        "success": "Succes",
+        "failure": "Fejlet",
+        "successWithWarnings": "Succes med advarsler"
+      },
+      "actions": {
+        "edit": "Rediger planlægning",
+        "pause": "Sæt planlægning på pause",
+        "resume": "Genoptag planlægning",
+        "delete": "Slet planlægning",
+        "runNow": "Kør nu",
+        "viewThread": "Se seneste kørsel"
+      },
+      "form": {
+        "prompt": "Prompt",
+        "chooseGallery": "Vælg fra Prompt Gallery",
+        "profile": "Model",
+        "chatProfile": "Chatprofil",
+        "defaultAssistant": "Standardassistent",
+        "timezone": "Tidszone",
+        "recurrence": "Gentagelse",
+        "customFrequency": "Gentag",
+        "interval": "Hver",
+        "hours": "timer",
+        "time": "Tid",
+        "weekday": "Ugedag",
+        "dayOfMonth": "Dag i måneden",
+        "afterHooks": "Handlinger efter fuldførelse",
+        "unavailable": "ikke tilgængelig"
+      },
+      "presets": {
+        "daily": "Dagligt kl. 09:00",
+        "weekdays": "På hverdage kl. 09:00",
+        "weekly": "Ugentligt om mandagen",
+        "monthly": "Månedligt den første",
+        "custom": "Tilpasset"
+      },
+      "custom": {
+        "everyHours": "Hver N. time",
+        "daily": "Hver dag",
+        "weekly": "Hver uge",
+        "monthly": "Hver måned"
+      },
+      "weekdays": {
+        "monday": "Mandag",
+        "tuesday": "Tirsdag",
+        "wednesday": "Onsdag",
+        "thursday": "Torsdag",
+        "friday": "Fredag",
+        "saturday": "Lørdag",
+        "sunday": "Søndag"
+      },
+      "overview": {
+        "dailyAt": "Dagligt kl. {time}",
+        "weekdaysAt": "På hverdage kl. {time}",
+        "weeklyAt": "Hver {weekday} kl. {time}",
+        "monthlyAt": "Månedligt den {day}. kl. {time}",
+        "everyHours": "Hver {interval}. time",
+        "everyMinutes": "Hver {interval}. minut",
+        "custom": "Tilpasset tidsplan"
+      },
+      "galleryTitle": "Vælg en prompt fra galleriet",
+      "galleryEmpty": "Ingen tilgængelige prompts i galleriet",
+      "delete": {
+        "title": "Slet planlagt prompt?",
+        "description": "Denne tidsplan og dens kølagte kørsel slettes."
+      },
+      "errors": {
+        "load": "Kan ikke indlæse planlagte prompts",
+        "required": "Prompt og cron er påkrævet",
+        "save": "Kan ikke gemme planlagt prompt",
+        "update": "Kan ikke opdatere planlagt prompt",
+        "delete": "Kan ikke slette planlagt prompt",
+        "run": "Kan ikke sætte planlagt prompt i kø"
+      }
+    },
+    "skills": {
+      "button": "Bibliotek",
+      "title": "Færdigheder",
+      "menu": "Handlinger for {{name}}",
+      "tab": "Færdigheder",
+      "new": "Ny færdighed",
+      "import": "Importér",
+      "importing": "Importerer...",
+      "imported": "Færdighed importeret",
+      "created": "Færdighed oprettet",
+      "saved": "Færdighed gemt",
+      "loading": "Indlæser færdigheder...",
+      "importedBadge": "Importeret",
+      "importedBadgeTitle": "Importeret færdighed. Gennemgå før aktivering.",
+      "reviewBeforeEnabling": "Deaktiveret. Gennemgå før aktivering.",
+      "toggle": "Slå {{name}} til/fra",
+      "edit": "Rediger færdighed",
+      "export": "Eksportér færdighed",
+      "delete": "Slet færdighed",
+      "importedBy": "Importeret af dig fra {{source}} · {{date}}",
+      "fromLinkBadge": "Fra link",
+      "sharedBadge": "Delt",
+      "detached": "Afkoblet fra den delte kilde",
+      "libraryUnavailable": "Skill-biblioteket er ikke tilgængeligt for dette datalag.",
+      "updateAvailable": "Opdatering tilgængelig v{{version}}",
+      "updatesToast": "{{count}} delt skill har en nyere version",
+      "updatesToastAction": "Gennemse",
+      "filter": {
+        "current": "Filtrér skills: {{filter}}"
+      },
+      "sections": {
+        "label": "Skill-sektioner",
+        "all": "Alle",
+        "active": "Aktive",
+        "review": "Kræver gennemgang",
+        "updates": "Opdateringer",
+        "empty": "Ingen skills i denne sektion"
+      },
+      "review": {
+        "title": "Gennemse skill",
+        "description": "Tjek instruktionerne, før du aktiverer denne skill.",
+        "fromLink": "Kopieret fra et delt link",
+        "warning": "Hvis noget ser forkert ud, rediger skillen i stedet for at aktivere den.",
+        "enable": "Aktivér skill",
+        "enabling": "Aktiverer...",
+        "enabled": "Skill aktiveret",
+        "changed": "Skillen er ændret, siden den blev åbnet. Gennemse den aktuelle version igen."
+      },
+      "share": {
+        "title": "Del skill",
+        "description": "Alle med linket kan forhåndsvise og tilføje en kopi.",
+        "descriptionOff": "Opret et link for at dele denne skill.",
+        "link": "Delingslink",
+        "copy": "Kopiér link",
+        "copied": "Link kopieret!",
+        "unshare": "Stop deling",
+        "unshared": "Deling fjernet",
+        "submit": "Opret link",
+        "error": "Kunne ikke opdatere deling",
+        "open": "Del {{name}}",
+        "notFound": "Skill ikke fundet eller ikke længere delt.",
+        "goHome": "Gå til forsiden",
+        "by": "Af {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "Version",
+        "latestVersion": "v{{version}} (nyeste)",
+        "addVersion": "Tilføj v{{version}} til mit bibliotek",
+        "add": "Tilføj til mit bibliotek",
+        "adding": "Tilføjer...",
+        "openCopy": "Åbn min kopi",
+        "openLibrary": "Åbn mit bibliotek",
+        "added": "Skill tilføjet til dit bibliotek",
+        "addedReview": "Tilføjet som en deaktiveret kopi. Gennemgå den i dit bibliotek, før du aktiverer den.",
+        "addError": "Kunne ikke tilføje skill",
+        "alreadyAdded": "Denne skill findes allerede i dit bibliotek.",
+        "nameTaken": "Der findes allerede en skill med dette navn. Omdøb din skill, og tilføj denne igen.",
+        "disabledNote": "Kopier tilføjes som deaktiverede. Aktivér kun en, når du har gennemgået dens instruktioner.",
+        "unavailable": "Skill-biblioteket er ikke tilgængeligt i denne app."
+      },
+      "update": {
+        "title": "Opdater skill",
+        "description": "Vælg en version, og opdater derefter din kopi.",
+        "version": "Version",
+        "unified": "Samlet",
+        "split": "Side om side",
+        "localChanges": "Denne kopi har lokale ændringer",
+        "localChangesHint": "Opdatering erstatter det lokale indhold med den delte version. Din ændring forbliver tilgængelig i skill-historikken.",
+        "confirmUpdate": "Erstat lokalt indhold",
+        "stale": "Skill'en blev ændret, efter at forhåndsvisningen blev indlæst. Sammenligningen er opdateret; gennemgå den igen.",
+        "sourceUnavailable": "Den delte kilde er ikke længere tilgængelig",
+        "sourceUnavailableHint": "Denne kopi beholder sit nuværende indhold. Frakobl den for at stoppe med at lede efter opdateringer.",
+        "detach": "Frakobl kilden",
+        "detached": "Afkoblet fra den delte kilde",
+        "alreadyCurrent": "Denne skill svarer allerede til den delte version.",
+        "noChanges": "Ingen linjeændringer.",
+        "truncated": "Diffen er afkortet; kun den første del vises.",
+        "updated": "Skill opdateret fra den delte version; gennemgå før aktivering",
+        "update": "Opdater til v{{version}}",
+        "updateFallback": "Opdater",
+        "error": "Kunne ikke opdatere denne skill",
+        "loadError": "Kunne ikke indlæse de delte versioner.",
+        "versionConflict": "Den version tilhører ikke den delte kilde.",
+        "historyTitle": "Versionshistorik",
+        "historyDescription": "Vælg en version for at se, hvad der er ændret.",
+        "currentVersion": "Dette er din nuværende version.",
+        "noVersions": "Der er ingen andre versioner.",
+        "versionUnavailable": "Den version findes ikke længere. Vælg en anden.",
+        "downgrade": "Nedgradér til v{{version}}",
+        "downgraded": "Skill nedgraderet til v{{version}}"
+      },
+      "empty": {
+        "title": "Ingen skills endnu",
+        "description": "Opret en skill, eller importér en Markdown-fil"
+      },
+      "editor": {
+        "createTitle": "Ny skill",
+        "editTitle": "Rediger skill",
+        "name": "Navn",
+        "nameHint": "Små bogstaver, tal og bindestreger; skal være unikt.",
+        "description": "Beskrivelse",
+        "descriptionHint": "Modellen ser denne linje for at afgøre, hvornår skillen skal bruges.",
+        "body": "Instruktioner (Markdown)",
+        "preview": "Forhåndsvisning",
+        "previewEmpty": "Der er intet at forhåndsvise endnu.",
+        "save": "Gem skill",
+        "saving": "Gemmer...",
+        "cancel": "Annuller"
+      },
+      "validation": {
+        "nameRequired": "Navn er påkrævet.",
+        "namePattern": "Brug små bogstaver, cifre og bindestreger, start med et bogstav eller ciffer (maks. 64).",
+        "descriptionRequired": "Beskrivelse er påkrævet.",
+        "descriptionSingleLine": "Beskrivelsen skal være på én linje.",
+        "descriptionTooLarge": "Beskrivelsen er {{size}} bytes; maksimum er {{max}}.",
+        "bodyTooLarge": "Instruktionerne er {{size}} bytes; maksimum er {{max}}.",
+        "fileTooLarge": "Filen er {{size}} bytes; maksimum er {{max}}."
+      },
+      "updatesToast_one": "{{count}} delt færdighed har en nyere version",
+      "updatesToast_other": "{{count}} delte færdigheder har en nyere version",
+      "versions": "Versionshistorik (v{{version}})",
+      "enable": "Aktivér {{name}}"
+    },
+    "question": {
+      "title": "Spørgsmål",
+      "ariaLabel": "Spørgsmål fra assistenten",
+      "options": "Valgmuligheder",
+      "other": "Andet",
+      "and": "og",
+      "otherAriaLabel": "Andet svar",
+      "otherPlaceholder": "Skriv dit svar...",
+      "progress": "{{current}}/{{total}}",
+      "next": "Næste",
+      "back": "Tilbage",
+      "reviewTitle": "Gennemgå dine svar",
+      "edit": "Rediger",
+      "optional": "Valgfrit",
+      "selectMultiple": "Vælg alle relevante",
+      "notAnswered": "Ikke besvaret",
+      "datePlaceholder": "Vælg en dato",
+      "clear": "Ryd",
+      "answeredPrivately": "Besvaret privat",
+      "status": {
+        "pending": "Afventer dit svar",
+        "answered": "Besvaret",
+        "expired": "Udløbet",
+        "superseded": "Erstattet",
+        "orphaned": "Utilgængelig"
+      },
+      "errors": {
+        "answer": "Kan ikke besvare spørgsmålet",
+        "required": "Dette spørgsmål er påkrævet",
+        "email": "Indtast en gyldig e-mailadresse",
+        "date": "Vælg en gyldig dato",
+        "number": "Indtast et gyldigt tal",
+        "url": "Indtast en gyldig URL",
+        "tel": "Indtast et gyldigt telefonnummer"
+      },
+      "answer": "Dit svar",
+      "answerAriaLabel": "Dit svar"
+    },
+    "approval": {
+      "ariaLabel": "Godkendelse for {{tool}}",
+      "approve": "Godkend",
+      "reject": "Afvis",
+      "edit": "Rediger",
+      "requestChanges": "Anmod om ændringer",
+      "saveAndApprove": "Gem og godkend",
+      "saveEdit": "Gem redigering",
+      "editFields": "Rediger felter",
+      "editedArgumentsJson": "Redigeret argumenter-JSON",
+      "comment": "Kommentar",
+      "commentRequired": "Hvad skal ændres? (påkrævet)",
+      "commentRequiredError": "En kommentar er påkrævet, når der anmodes om ændringer",
+      "none": "Ingen",
+      "onePerLine": "Én pr. linje eller adskilt med komma",
+      "serverHeld": "På serversiden",
+      "noChanges": "Ingen ændringer at gemme",
+      "invalidJson": "Argumenterne skal være gyldig JSON",
+      "jsonObjectRequired": "Argumenterne skal være et JSON-objekt",
+      "editedContentNote": "Redigeret indhold; de godkendte ændringer findes i diffen.",
+      "originalToEdited": "Original → redigeret",
+      "added": "Tilføjet",
+      "removed": "Fjernet",
+      "replaced": "Erstattet",
+      "before": "Før:",
+      "after": "Efter:",
+      "errors": {
+        "decide": "Kan ikke afgøre godkendelse"
+      },
+      "fieldErrors": {
+        "required": "{{field}} er påkrævet",
+        "wholeNumber": "{{field}} skal være et helt tal",
+        "number": "{{field}} skal være et tal"
+      },
+      "status": {
+        "approved": "Godkendt",
+        "edited": "Godkendt med ændringer",
+        "rejected": "Afvist",
+        "changesRequested": "Ændringer anmodet",
+        "expired": "Udløbet",
+        "superseded": "Afløst",
+        "orphaned": "Utilgængelig"
+      }
     }
   },
   "threadHistory": {
@@ -235,6 +667,11 @@
       "success": "Alle chats slettet",
       "inProgress": "Sletter alle chats",
       "error": "Kunne ikke slette alle chats"
+    },
+    "errors": {
+      "fetch": "Fejl ved hentning af tråde: {{error}}",
+      "resume": "Kunne ikke genoptage chat",
+      "resumeDetail": "Kunne ikke genoptage chat: {{error}}"
     }
   },
   "navigation": {
@@ -245,7 +682,9 @@
         "light": "Lyst tema",
         "dark": "Mørkt tema",
         "system": "Følg system"
-      }
+      },
+      "toggleTheme": "Skift tema",
+      "selectProfile": "Vælg profil"
     },
     "newChat": {
       "button": "Ny chat",
@@ -262,7 +701,8 @@
         "apiKeys": "API-nøgler",
         "logout": "Log ud",
         "clearAll": "Slet alle chats"
-      }
+      },
+      "imageAlt": "brugerbillede"
     }
   },
   "apiKeys": {
@@ -298,6 +738,47 @@
         "single": "Vælg en dato",
         "range": "Vælg et datointerval"
       }
+    },
+    "audio": {
+      "listening": "Lytter"
+    },
+    "copy": {
+      "failed": "Kopiering mislykkedes: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "Ingen resultater."
+    },
+    "image": {
+      "closeLightbox": "Luk lightbox"
+    },
+    "pdf": {
+      "printOpen": "Udskriv/åbn PDF",
+      "download": "Download PDF",
+      "loading": "Indlæser PDF...",
+      "openLarger": "Åbn PDF i større visning",
+      "loadingPreview": "Indlæser forhåndsvisning...",
+      "view": "Se PDF",
+      "document": "PDF-dokument",
+      "modalDescription": "En modal med en større visning af PDF-filen."
+    },
+    "plotly": {
+      "loading": "Indlæser...",
+      "error": "Der opstod en fejl"
+    },
+    "share": {
+      "unshare": "Stop deling"
+    },
+    "tasklist": {
+      "title": "Opgaver"
+    },
+    "text": {
+      "loadError": "Der opstod en fejl under indlæsning af indholdet"
+    },
+    "thread": {
+      "loadError": "Kunne ikke indlæse tråd: {{error}}"
+    },
+    "video": {
+      "unsupported": "Din browser understøtter ikke video-tagget."
     }
   }
 }

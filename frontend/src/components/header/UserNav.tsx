@@ -104,7 +104,12 @@ export default function UserNav() {
             className="relative h-8 w-8 rounded-full"
           >
             <Avatar className="h-8 w-8">
-              <AvatarImage src={user?.metadata.image} alt="user image" />
+              <AvatarImage
+                src={user?.metadata.image}
+                alt={t('navigation.user.imageAlt', {
+                  defaultValue: 'user image'
+                })}
+              />
               <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
                 {capitalize(displayName[0])}
               </AvatarFallback>

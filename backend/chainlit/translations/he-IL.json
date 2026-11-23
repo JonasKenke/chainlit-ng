@@ -6,7 +6,9 @@
       "continue": "המשך",
       "goBack": "חזור",
       "reset": "איפוס",
-      "submit": "שלח"
+      "submit": "שלח",
+      "close": "סגור",
+      "save": "שמור"
     },
     "status": {
       "loading": "טוען...",
@@ -14,7 +16,9 @@
         "default": "אירעה שגיאה",
         "serverConnection": "לא ניתן להתחבר לשרת"
       }
-    }
+    },
+    "latest": "האחרון",
+    "current": "נוכחי"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "שלח הודעה",
         "stop": "עצור משימה",
         "attachFiles": "צרף קבצים"
+      },
+      "errors": {
+        "tooLarge": "ההודעה גדולה מדי. גודל ההודעה המרבי הוא 1 MB."
       }
     },
     "speech": {
@@ -123,7 +130,8 @@
           "updating": "מעדכן",
           "updated": "המשוב עודכן"
         }
-      }
+      },
+      "output": "פלט"
     },
     "history": {
       "title": "קלטים אחרונים",
@@ -146,7 +154,11 @@
         "adding": "מוסיף…",
         "goHome": "לדף הבית",
         "notFound": "הפרומפט לא נמצא או אינו משותף עוד.",
-        "addError": "הוספת הפרומפט נכשלה"
+        "addError": "הוספת הפרומפט נכשלה",
+        "version": "גרסה",
+        "latestVersion": "v{{version}} (האחרונה)",
+        "addVersion": "הוסף v{{version}} לגלריה שלי",
+        "openCopy": "פתח את העותק שלי"
       },
       "unshare": "בטל שיתוף",
       "delete": "מחק",
@@ -166,7 +178,426 @@
       "new": "הנחיה חדשה",
       "search": "חפש הנחיות...",
       "saved": "ההנחיה נשמרה!",
-      "unshared": "השיתוף הוסר"
+      "unshared": "השיתוף הוסר",
+      "tab": "פרומפטים",
+      "updateAvailable": "עדכון זמין v{{version}}",
+      "versions": "היסטוריית גרסאות (v{{version}})",
+      "updatesToast": "{{count}} פרומפטים שמורים עם גרסה משותפת חדשה יותר",
+      "updatesToastAction": "סקירה",
+      "diff": {
+        "title": "עדכון פרומפט",
+        "historyTitle": "היסטוריית גרסאות",
+        "description": "בחר גרסה, ואז עדכן את העותק שלך.",
+        "historyDescription": "בחר גרסה כדי לראות מה השתנה.",
+        "version": "גרסה",
+        "unified": "מאוחד",
+        "split": "זה לצד זה",
+        "localChanges": "לפרומפט הזה יש עריכות מקומיות",
+        "localChangesHint": "עדכון מחליף את התוכן המקומי בגרסה המשותפת. העריכה שלך תישאר זמינה בהיסטוריית הפרומפטים.",
+        "confirmUpdate": "החלף תוכן מקומי",
+        "stale": "הפרומפט הזה השתנה לאחר טעינת התצוגה המקדימה. ההשוואה רועננה; בדוק אותה שוב.",
+        "sourceUnavailable": "המקור המשותף אינו זמין עוד",
+        "sourceUnavailableHint": "העותק הזה שומר על התוכן הנוכחי שלו. נתק אותו כדי להפסיק לחפש עדכונים.",
+        "detach": "נתק מהמקור",
+        "detached": "נותק מהמקור המשותף",
+        "alreadyCurrent": "הפרומפט הזה כבר תואם לגרסה המשותפת.",
+        "noChanges": "אין שינויים בשורות.",
+        "truncated": "ההשוואה מקוצרת; מוצג רק החלק הראשון.",
+        "updated": "הפרומפט עודכן מהגרסה המשותפת",
+        "update": "עדכן לגרסה v{{version}}",
+        "updateFallback": "עדכן",
+        "updateError": "לא ניתן לעדכן את הפרומפט הזה",
+        "loadError": "לא ניתן לטעון את השוואת הגרסאות.",
+        "currentVersion": "זו הגרסה הנוכחית שלך.",
+        "noVersions": "אין גרסאות אחרות זמינות.",
+        "versionUnavailable": "הגרסה הזו אינה זמינה עוד. בחר גרסה אחרת.",
+        "downgrade": "הורד לגרסה v{{version}}",
+        "downgraded": "הפרומפט הורד לגרסה v{{version}}"
+      },
+      "updatesToast_one": "{{count}} פרומפט שמור כולל גרסה משותפת חדשה יותר",
+      "updatesToast_other": "{{count}} פרומפטים שמורים כוללים גרסה משותפת חדשה יותר"
+    },
+    "mcp": {
+      "title": "שרתי MCP",
+      "tabs": {
+        "connect": "חיבור MCP",
+        "list": "ה-MCPים שלי"
+      },
+      "configured": {
+        "title": "שרתים מוגדרים"
+      },
+      "connect": "התחבר",
+      "reconnect": "התחבר מחדש",
+      "add": {
+        "title": "הוסף שרת משלך"
+      },
+      "form": {
+        "name": "שם",
+        "namePlaceholder": "לדוגמה: Stripe",
+        "type": "סוג",
+        "url": "כתובת URL של השרת",
+        "urlPlaceholder": "לדוגמה: http://localhost:8000/mcp",
+        "headers": "כותרות (JSON, אופציונלי)",
+        "headersPlaceholder": "לדוגמה: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "הכותרות חייבות להיות אובייקט JSON של ערכי מחרוזת",
+        "add": "הוסף",
+        "useOAuth": "התחבר באמצעות OAuth (streamable HTTP בלבד)"
+      },
+      "list": {
+        "empty": "אין שרתי MCP מחוברים",
+        "addFirst": "הוסף את שרת ה-MCP הראשון שלך",
+        "url": "URL",
+        "tools": "כלים",
+        "removeTitle": "האם אתה בטוח?",
+        "removeDescription": "פעולה זו תנתק את שרת ה-MCP \"{{name}}\". לא ניתן לבטל פעולה זו.",
+        "signIn": "התחבר ל-{{host}}",
+        "remove": "הסר שרת MCP"
+      },
+      "messages": {
+        "connecting": "מתחבר ל-MCP...",
+        "connected": "MCP מחובר!",
+        "adding": "מוסיף MCP...",
+        "added": "MCP נוסף!",
+        "reconnecting": "מתחבר מחדש ל-MCP...",
+        "reconnected": "MCP התחבר מחדש!",
+        "removing": "מסיר MCP...",
+        "removed": "MCP הוסר!",
+        "authorizationRequired": "התחברו כדי להשלים את החיבור"
+      },
+      "errors": {
+        "connect": "לא ניתן להתחבר לשרת MCP"
+      },
+      "library": {
+        "button": "פרומפטים ומשאבים של MCP",
+        "title": "ספריית MCP",
+        "tabs": {
+          "prompts": "פרומפטים",
+          "resources": "משאבים"
+        },
+        "prompts": {
+          "empty": "אין פרומפטים משרתי MCP מחוברים"
+        },
+        "resources": {
+          "empty": "אין משאבים משרתי MCP מחוברים"
+        },
+        "promptInsert": "הוספה",
+        "promptInserted": "הפרומפט הוכנס לתיבת ההודעה",
+        "promptFailed": "לא ניתן לקבל את הפרומפט משרת MCP",
+        "resourceAdded": "המשאב נוסף לצ'אט",
+        "resourceFailed": "לא ניתן לקרוא את המשאב משרת MCP"
+      }
+    },
+    "promptScheduling": {
+      "button": "פרומפטים מתוזמנים",
+      "title": "פרומפטים מתוזמנים",
+      "create": "יצירת פרומפט מתוזמן",
+      "edit": "עריכת פרומפט מתוזמן",
+      "new": "תזמון חדש",
+      "empty": "אין פרומפטים מתוזמנים עדיין",
+      "nextRun": "הרצה הבאה",
+      "lastRun": "הרצה אחרונה",
+      "lastStatus": "סטטוס אחרון",
+      "status": {
+        "active": "פעיל",
+        "paused": "מושהה",
+        "success": "הצלחה",
+        "failure": "נכשל",
+        "successWithWarnings": "הצלחה עם אזהרות"
+      },
+      "actions": {
+        "edit": "עריכת תזמון",
+        "pause": "השהיית תזמון",
+        "resume": "המשך תזמון",
+        "delete": "מחיקת תזמון",
+        "runNow": "הרצה עכשיו",
+        "viewThread": "הצגת ההרצה האחרונה"
+      },
+      "form": {
+        "prompt": "פרומפט",
+        "chooseGallery": "בחירה מגלריית פרומפטים",
+        "profile": "מודל",
+        "chatProfile": "פרופיל צ׳אט",
+        "defaultAssistant": "עוזר ברירת מחדל",
+        "timezone": "אזור זמן",
+        "recurrence": "חזרתיות",
+        "customFrequency": "חזרה",
+        "interval": "כל",
+        "hours": "שעות",
+        "time": "שעה",
+        "weekday": "יום בשבוע",
+        "dayOfMonth": "יום בחודש",
+        "afterHooks": "פעולות לאחר השלמה",
+        "unavailable": "לא זמין"
+      },
+      "presets": {
+        "daily": "כל יום ב-09:00",
+        "weekdays": "בימי חול ב-09:00",
+        "weekly": "שבועי ביום שני",
+        "monthly": "חודשי בראשון לחודש",
+        "custom": "מותאם"
+      },
+      "custom": {
+        "everyHours": "כל N שעות",
+        "daily": "כל יום",
+        "weekly": "כל שבוע",
+        "monthly": "כל חודש"
+      },
+      "weekdays": {
+        "monday": "יום שני",
+        "tuesday": "יום שלישי",
+        "wednesday": "יום רביעי",
+        "thursday": "יום חמישי",
+        "friday": "יום שישי",
+        "saturday": "יום שבת",
+        "sunday": "יום ראשון"
+      },
+      "overview": {
+        "dailyAt": "כל יום ב-{time}",
+        "weekdaysAt": "בימי חול ב-{time}",
+        "weeklyAt": "כל {weekday} ב-{time}",
+        "monthlyAt": "חודשי ביום {day} ב-{time}",
+        "everyHours": "כל {interval} שעות",
+        "everyMinutes": "כל {interval} דקות",
+        "custom": "לוח זמנים מותאם"
+      },
+      "galleryTitle": "בחר פרומפט מהגלריה",
+      "galleryEmpty": "אין פרומפטים בגלריה",
+      "delete": {
+        "title": "למחוק פרומפט מתוזמן?",
+        "description": "התזמון הזה וההרצה בתורו יימחקו."
+      },
+      "errors": {
+        "load": "לא ניתן לטעון פרומפטים מתוזמנים",
+        "required": "נדרשים פרומפט ו-cron",
+        "save": "לא ניתן לשמור פרומפט מתוזמן",
+        "update": "לא ניתן לעדכן פרומפט מתוזמן",
+        "delete": "לא ניתן למחוק פרומפט מתוזמן",
+        "run": "לא ניתן להוסיף פרומפט מתוזמן לתור"
+      }
+    },
+    "skills": {
+      "button": "ספרייה",
+      "title": "מיומנויות",
+      "menu": "פעולות עבור {{name}}",
+      "tab": "מיומנויות",
+      "new": "מיומנות חדשה",
+      "import": "ייבוא",
+      "importing": "מייבא...",
+      "imported": "המיומנות יובאה",
+      "created": "המיומנות נוצרה",
+      "saved": "המיומנות נשמרה",
+      "loading": "טוען מיומנויות...",
+      "importedBadge": "מיובא",
+      "importedBadgeTitle": "מיומנות מיובאת. יש לבדוק לפני הפעלה.",
+      "reviewBeforeEnabling": "מושבתת. יש לבדוק לפני הפעלה.",
+      "toggle": "הפעל/כבה {{name}}",
+      "edit": "עריכת מיומנות",
+      "export": "ייצוא מיומנות",
+      "delete": "מחיקת מיומנות",
+      "importedBy": "יובא על ידך מ-{{source}} · {{date}}",
+      "fromLinkBadge": "מקישור",
+      "sharedBadge": "משותפת",
+      "detached": "נותקה מהמקור המשותף",
+      "libraryUnavailable": "ספריית המיומנויות אינה זמינה עבור שכבת הנתונים הזו.",
+      "updateAvailable": "עדכון זמין v{{version}}",
+      "updatesToast": "קיימת גרסה חדשה יותר ל-{{count}} מיומנויות משותפות",
+      "updatesToastAction": "סקירה",
+      "filter": {
+        "current": "סינון מיומנויות: {{filter}}"
+      },
+      "sections": {
+        "label": "מקטעי מיומנויות",
+        "all": "הכל",
+        "active": "פעילות",
+        "review": "דורשות בדיקה",
+        "updates": "עדכונים",
+        "empty": "אין מיומנויות במקטע הזה"
+      },
+      "review": {
+        "title": "סקירת מיומנות",
+        "description": "בדוק את ההוראות לפני הפעלת המיומנות.",
+        "fromLink": "הועתקה מקישור משותף",
+        "warning": "אם משהו נראה שגוי, ערוך את המיומנות במקום להפעיל אותה.",
+        "enable": "הפעל מיומנות",
+        "enabling": "מפעיל...",
+        "enabled": "המיומנות הופעלה",
+        "changed": "המיומנות השתנתה מאז שנפתחה. בדוק שוב את הגרסה הנוכחית."
+      },
+      "share": {
+        "title": "שיתוף מיומנות",
+        "description": "כל מי שיש לו את הקישור יכול לצפות בתצוגה מקדימה ולהוסיף עותק.",
+        "descriptionOff": "צור קישור לשיתוף המיומנות.",
+        "link": "קישור שיתוף",
+        "copy": "העתק קישור",
+        "copied": "הקישור הועתק!",
+        "unshare": "בטל שיתוף",
+        "unshared": "השיתוף בוטל",
+        "submit": "צור קישור",
+        "error": "עדכון השיתוף נכשל",
+        "open": "שתף {{name}}",
+        "notFound": "המיומנות לא נמצאה או שאינה משותפת עוד.",
+        "goHome": "חזרה לדף הבית",
+        "by": "מאת {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "גרסה",
+        "latestVersion": "v{{version}} (האחרונה)",
+        "addVersion": "הוסף v{{version}} לספרייה שלי",
+        "add": "הוסף לספרייה שלי",
+        "adding": "מוסיף...",
+        "openCopy": "פתח את העותק שלי",
+        "openLibrary": "פתח את הספרייה שלי",
+        "added": "המיומנות נוספה לספרייה שלך",
+        "addedReview": "נוסף כעותק מושבת. בדוק אותו בספרייה שלך לפני הפעלה.",
+        "addError": "הוספת המיומנות נכשלה",
+        "alreadyAdded": "המיומנות הזו כבר נמצאת בספרייה שלך.",
+        "nameTaken": "מיומנות בשם הזה כבר קיימת. שנה את שם המיומנות שלך, ואז הוסף את זו שוב.",
+        "disabledNote": "עותקים מתווספים מושבתים. הפעל עותק רק לאחר סקירת ההוראות שלו.",
+        "unavailable": "ספריית המיומנויות אינה זמינה באפליקציה הזו."
+      },
+      "update": {
+        "title": "עדכון מיומנות",
+        "description": "בחר גרסה, ואז עדכן את העותק שלך.",
+        "version": "גרסה",
+        "unified": "מאוחד",
+        "split": "זה לצד זה",
+        "localChanges": "לעותק הזה יש עריכות מקומיות",
+        "localChangesHint": "עדכון מחליף את התוכן המקומי בגרסה המשותפת. העריכה שלך נשארת זמינה בהיסטוריית המיומנות.",
+        "confirmUpdate": "החלף תוכן מקומי",
+        "stale": "המיומנות השתנתה לאחר טעינת התצוגה המקדימה. ההשוואה רועננה; בדוק אותה שוב.",
+        "sourceUnavailable": "המקור המשותף אינו זמין עוד",
+        "sourceUnavailableHint": "העותק הזה שומר על התוכן הנוכחי שלו. נתק אותו כדי להפסיק לחפש עדכונים.",
+        "detach": "נתק מהמקור",
+        "detached": "נותק מהמקור המשותף",
+        "alreadyCurrent": "מיומנות זו כבר תואמת לגרסה המשותפת.",
+        "noChanges": "אין שינויי שורות.",
+        "truncated": "ההשוואה מקוצרת; מוצג רק החלק הראשון.",
+        "updated": "המיומנות עודכנה מהגרסה המשותפת; יש לבדוק לפני הפעלה",
+        "update": "עדכן ל-v{{version}}",
+        "updateFallback": "עדכן",
+        "error": "לא ניתן היה לעדכן את המיומנות",
+        "loadError": "לא ניתן היה לטעון את הגרסאות המשותפות.",
+        "versionConflict": "הגרסה הזו אינה שייכת למקור המשותף.",
+        "historyTitle": "היסטוריית גרסאות",
+        "historyDescription": "בחר גרסה כדי לראות מה השתנה.",
+        "currentVersion": "זו הגרסה הנוכחית שלך.",
+        "noVersions": "אין גרסאות אחרות זמינות.",
+        "versionUnavailable": "הגרסה הזו אינה זמינה עוד. בחר גרסה אחרת.",
+        "downgrade": "הורד גרסה ל-v{{version}}",
+        "downgraded": "המיומנות הורדה לגרסה v{{version}}"
+      },
+      "empty": {
+        "title": "אין מיומנויות עדיין",
+        "description": "צור מיומנות או ייבא קובץ Markdown"
+      },
+      "editor": {
+        "createTitle": "מיומנות חדשה",
+        "editTitle": "עריכת מיומנות",
+        "name": "שם",
+        "nameHint": "אותיות קטנות, ספרות ומקפים; חייב להיות ייחודי.",
+        "description": "תיאור",
+        "descriptionHint": "המודל רואה שורה זו כדי להחליט מתי להשתמש במיומנות.",
+        "body": "הוראות (Markdown)",
+        "preview": "תצוגה מקדימה",
+        "previewEmpty": "אין עדיין מה להציג בתצוגה המקדימה.",
+        "save": "שמור מיומנות",
+        "saving": "שומר...",
+        "cancel": "ביטול"
+      },
+      "validation": {
+        "nameRequired": "נדרש שם.",
+        "namePattern": "יש להשתמש באותיות קטנות, ספרות ומקפים, ולהתחיל באות או בספרה (עד 64).",
+        "descriptionRequired": "נדרש תיאור.",
+        "descriptionSingleLine": "התיאור חייב להיות שורה אחת.",
+        "descriptionTooLarge": "התיאור בגודל {{size}} בתים; המקסימום הוא {{max}}.",
+        "bodyTooLarge": "ההוראות בגודל {{size}} בתים; המקסימום הוא {{max}}.",
+        "fileTooLarge": "הקובץ בגודל {{size}} בתים; המקסימום הוא {{max}}."
+      },
+      "updatesToast_one": "{{count}} מיומנות משותפת כוללת גרסה חדשה יותר",
+      "updatesToast_other": "{{count}} מיומנויות משותפות כוללות גרסה חדשה יותר",
+      "versions": "היסטוריית גרסאות (v{{version}})",
+      "enable": "הפעל {{name}}"
+    },
+    "question": {
+      "title": "שאלה",
+      "ariaLabel": "שאלה מהעוזר",
+      "options": "אפשרויות",
+      "other": "אחר",
+      "and": "ו",
+      "otherAriaLabel": "תשובה אחרת",
+      "otherPlaceholder": "הקלד את תשובתך...",
+      "progress": "{{current}}/{{total}}",
+      "next": "הבא",
+      "back": "חזור",
+      "reviewTitle": "סקירת התשובות שלך",
+      "edit": "ערוך",
+      "optional": "אופציונלי",
+      "selectMultiple": "בחר את כל המתאימים",
+      "notAnswered": "לא נענה",
+      "datePlaceholder": "בחר תאריך",
+      "clear": "נקה",
+      "answeredPrivately": "נענה באופן פרטי",
+      "status": {
+        "pending": "ממתין לתשובתך",
+        "answered": "נענתה",
+        "expired": "פג תוקף",
+        "superseded": "הוחלפה",
+        "orphaned": "לא זמינה"
+      },
+      "errors": {
+        "answer": "לא ניתן לענות על השאלה",
+        "required": "שאלה זו חובה",
+        "email": "הזן כתובת אימייל תקינה",
+        "date": "בחר תאריך תקין",
+        "number": "הזן מספר תקין",
+        "url": "הזן URL תקין",
+        "tel": "הזן מספר טלפון תקין"
+      },
+      "answer": "התשובה שלך",
+      "answerAriaLabel": "התשובה שלך"
+    },
+    "approval": {
+      "ariaLabel": "אישור עבור {{tool}}",
+      "approve": "אשר",
+      "reject": "דחה",
+      "edit": "ערוך",
+      "requestChanges": "בקש שינויים",
+      "saveAndApprove": "שמור ואשר",
+      "saveEdit": "שמור עריכה",
+      "editFields": "ערוך שדות",
+      "editedArgumentsJson": "JSON של ארגומנטים שנערכו",
+      "comment": "הערה",
+      "commentRequired": "מה צריך להשתנות? (חובה)",
+      "commentRequiredError": "נדרשת הערה בעת בקשת שינויים",
+      "none": "אין",
+      "onePerLine": "אחד בכל שורה או מופרד בפסיקים",
+      "serverHeld": "מוחזק בשרת",
+      "noChanges": "אין שינויים לשמירה",
+      "invalidJson": "הארגומנטים חייבים להיות JSON תקין",
+      "jsonObjectRequired": "הארגומנטים חייבים להיות אובייקט JSON",
+      "editedContentNote": "תוכן נערך; השינויים המאושרים מופיעים ב-diff.",
+      "originalToEdited": "מקורי → נערך",
+      "added": "נוסף",
+      "removed": "הוסר",
+      "replaced": "הוחלף",
+      "before": "לפני:",
+      "after": "אחרי:",
+      "errors": {
+        "decide": "לא ניתן להחליט על האישור"
+      },
+      "fieldErrors": {
+        "required": "{{field}} הוא שדה חובה",
+        "wholeNumber": "{{field}} חייב להיות מספר שלם",
+        "number": "{{field}} חייב להיות מספר"
+      },
+      "status": {
+        "approved": "אושר",
+        "edited": "אושר עם עריכות",
+        "rejected": "נדחה",
+        "changesRequested": "נדרשו שינויים",
+        "expired": "פג תוקף",
+        "superseded": "הוחלף בגרסה חדשה",
+        "orphaned": "לא זמין"
+      }
     }
   },
   "threadHistory": {
@@ -236,6 +667,11 @@
       "success": "כל השיחות נמחקו",
       "inProgress": "מוחק את כל השיחות",
       "error": "מחיקת כל השיחות נכשלה"
+    },
+    "errors": {
+      "fetch": "שגיאה בטעינת שיחות: {{error}}",
+      "resume": "לא ניתן להמשיך את השיחה",
+      "resumeDetail": "לא ניתן להמשיך את השיחה: {{error}}"
     }
   },
   "navigation": {
@@ -246,7 +682,9 @@
         "light": "Light Theme",
         "dark": "Dark Theme",
         "system": "Follow System"
-      }
+      },
+      "toggleTheme": "החלף ערכת נושא",
+      "selectProfile": "בחר פרופיל"
     },
     "newChat": {
       "button": "צ'אט חדש",
@@ -263,7 +701,8 @@
         "apiKeys": "מפתחות API",
         "logout": "התנתק",
         "clearAll": "מחק את כל השיחות"
-      }
+      },
+      "imageAlt": "תמונת משתמש"
     }
   },
   "apiKeys": {
@@ -299,6 +738,47 @@
         "single": "בחר תאריך",
         "range": "בחר טווח תאריכים"
       }
+    },
+    "audio": {
+      "listening": "מקשיב"
+    },
+    "copy": {
+      "failed": "ההעתקה נכשלה: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "אין תוצאות."
+    },
+    "image": {
+      "closeLightbox": "סגור תצוגה מוגדלת"
+    },
+    "pdf": {
+      "printOpen": "הדפס/פתח PDF",
+      "download": "הורד PDF",
+      "loading": "טוען PDF...",
+      "openLarger": "פתח PDF בתצוגה גדולה יותר",
+      "loadingPreview": "טוען תצוגה מקדימה...",
+      "view": "הצג PDF",
+      "document": "מסמך PDF",
+      "modalDescription": "חלון עם תצוגה גדולה יותר של ה-PDF."
+    },
+    "plotly": {
+      "loading": "טוען...",
+      "error": "אירעה שגיאה"
+    },
+    "share": {
+      "unshare": "בטל שיתוף"
+    },
+    "tasklist": {
+      "title": "משימות"
+    },
+    "text": {
+      "loadError": "אירעה שגיאה בטעינת התוכן"
+    },
+    "thread": {
+      "loadError": "טעינת השיחה נכשלה: {{error}}"
+    },
+    "video": {
+      "unsupported": "הדפדפן שלך אינו תומך בתג וידאו."
     }
   }
 }

@@ -6,7 +6,9 @@
       "continue": "続ける",
       "goBack": "戻る",
       "reset": "リセット",
-      "submit": "送信"
+      "submit": "送信",
+      "close": "閉じる",
+      "save": "保存"
     },
     "status": {
       "loading": "読み込み中...",
@@ -14,7 +16,9 @@
         "default": "エラーが発生しました",
         "serverConnection": "サーバーに接続できませんでした"
       }
-    }
+    },
+    "latest": "最新",
+    "current": "現在"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "メッセージを送信",
         "stop": "タスクを停止",
         "attachFiles": "ファイルを添付"
+      },
+      "errors": {
+        "tooLarge": "メッセージが大きすぎます。最大メッセージサイズは1 MBです。"
       }
     },
     "speech": {
@@ -94,7 +101,8 @@
       "actions": {
         "cancelUpload": "アップロードをキャンセル",
         "removeAttachment": "添付ファイルを削除"
-      }
+      },
+      "browse": "ファイルを参照"
     },
     "messages": {
       "status": {
@@ -122,7 +130,8 @@
           "updating": "更新中",
           "updated": "フィードバックを更新しました"
         }
-      }
+      },
+      "output": "出力"
     },
     "history": {
       "title": "最近の入力",
@@ -145,7 +154,11 @@
         "adding": "追加中…",
         "goHome": "ホームに戻る",
         "notFound": "プロンプトが見つからないか、共有されなくなりました。",
-        "addError": "プロンプトの追加に失敗しました"
+        "addError": "プロンプトの追加に失敗しました",
+        "version": "バージョン",
+        "latestVersion": "v{{version}}（最新）",
+        "addVersion": "v{{version}}をマイギャラリーに追加",
+        "openCopy": "自分のコピーを開く"
       },
       "unshare": "共有を解除",
       "delete": "削除",
@@ -165,7 +178,426 @@
       "new": "新しいプロンプト",
       "search": "プロンプトを検索...",
       "saved": "プロンプトを保存しました！",
-      "unshared": "共有を解除しました"
+      "unshared": "共有を解除しました",
+      "tab": "プロンプト",
+      "updateAvailable": "更新あり v{{version}}",
+      "versions": "バージョン履歴（v{{version}}）",
+      "updatesToast": "保存済みプロンプト{{count}}件に新しい共有バージョンがあります",
+      "updatesToastAction": "確認",
+      "diff": {
+        "title": "プロンプトを更新",
+        "historyTitle": "バージョン履歴",
+        "description": "バージョンを選択して、コピーを更新してください。",
+        "historyDescription": "変更内容を確認するバージョンを選択してください。",
+        "version": "バージョン",
+        "unified": "統合表示",
+        "split": "並べて表示",
+        "localChanges": "このプロンプトにはローカル編集があります",
+        "localChangesHint": "更新するとローカル内容が共有バージョンに置き換わります。編集内容はプロンプト履歴に残ります。",
+        "confirmUpdate": "ローカル内容を置き換える",
+        "stale": "プレビューの読み込み後にこのプロンプトが変更されました。差分は更新済みです。もう一度確認してください。",
+        "sourceUnavailable": "共有ソースは利用できなくなりました",
+        "sourceUnavailableHint": "このコピーは現在の内容を保持します。更新の確認を停止するには、ソースから切り離してください。",
+        "detach": "ソースから切り離す",
+        "detached": "共有ソースから切り離されました",
+        "alreadyCurrent": "このプロンプトはすでに共有バージョンと一致しています。",
+        "noChanges": "行の変更はありません。",
+        "truncated": "差分は省略されています。先頭部分のみ表示されます。",
+        "updated": "共有バージョンからプロンプトを更新しました",
+        "update": "v{{version}} に更新",
+        "updateFallback": "更新",
+        "updateError": "このプロンプトを更新できませんでした",
+        "loadError": "バージョン比較を読み込めませんでした。",
+        "currentVersion": "これは現在のバージョンです。",
+        "noVersions": "他のバージョンはありません。",
+        "versionUnavailable": "そのバージョンは利用できなくなりました。別のバージョンを選択してください。",
+        "downgrade": "v{{version}} にダウングレード",
+        "downgraded": "プロンプトを v{{version}} にダウングレードしました"
+      },
+      "updatesToast_one": "保存済みプロンプト {{count}} 件に新しい共有バージョンがあります",
+      "updatesToast_other": "保存済みプロンプト {{count}} 件に新しい共有バージョンがあります"
+    },
+    "mcp": {
+      "title": "MCPサーバー",
+      "tabs": {
+        "connect": "MCPを接続",
+        "list": "マイMCP"
+      },
+      "configured": {
+        "title": "設定済みサーバー"
+      },
+      "connect": "接続",
+      "reconnect": "再接続",
+      "add": {
+        "title": "独自のサーバーを追加"
+      },
+      "form": {
+        "name": "名前",
+        "namePlaceholder": "例: Stripe",
+        "type": "種類",
+        "url": "サーバーURL",
+        "urlPlaceholder": "例: http://localhost:8000/mcp",
+        "headers": "ヘッダー（JSON、任意）",
+        "headersPlaceholder": "例: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "ヘッダーは文字列値のJSONオブジェクトである必要があります",
+        "add": "追加",
+        "useOAuth": "OAuthでサインイン（streamable HTTPのみ）"
+      },
+      "list": {
+        "empty": "接続されているMCPサーバーはありません",
+        "addFirst": "最初のMCPサーバーを追加",
+        "url": "URL",
+        "tools": "ツール",
+        "removeTitle": "本当によろしいですか？",
+        "removeDescription": "MCPサーバー「{{name}}」との接続が解除されます。この操作は元に戻せません。",
+        "signIn": "{{host}}にサインイン",
+        "remove": "MCPサーバーを削除"
+      },
+      "messages": {
+        "connecting": "MCPに接続中...",
+        "connected": "MCPに接続しました！",
+        "adding": "MCPを追加中...",
+        "added": "MCPを追加しました！",
+        "reconnecting": "MCPに再接続中...",
+        "reconnected": "MCPに再接続しました！",
+        "removing": "MCPを削除中...",
+        "removed": "MCPを削除しました！",
+        "authorizationRequired": "接続を完了するにはサインインしてください"
+      },
+      "errors": {
+        "connect": "MCPサーバーに接続できませんでした"
+      },
+      "library": {
+        "button": "MCPプロンプトとリソース",
+        "title": "MCPライブラリ",
+        "tabs": {
+          "prompts": "プロンプト",
+          "resources": "リソース"
+        },
+        "prompts": {
+          "empty": "接続中のMCPサーバーからのプロンプトはありません"
+        },
+        "resources": {
+          "empty": "接続中のMCPサーバーからのリソースはありません"
+        },
+        "promptInsert": "挿入",
+        "promptInserted": "プロンプトを入力欄に挿入しました",
+        "promptFailed": "MCPサーバーからプロンプトを取得できませんでした",
+        "resourceAdded": "リソースをチャットに追加しました",
+        "resourceFailed": "MCPサーバーからリソースを読み取れませんでした"
+      }
+    },
+    "promptScheduling": {
+      "button": "スケジュール済みプロンプト",
+      "title": "スケジュール済みプロンプト",
+      "create": "スケジュール済みプロンプトを作成",
+      "edit": "スケジュール済みプロンプトを編集",
+      "new": "新しいスケジュール",
+      "empty": "スケジュール済みプロンプトはまだありません",
+      "nextRun": "次回実行",
+      "lastRun": "前回実行",
+      "lastStatus": "前回のステータス",
+      "status": {
+        "active": "有効",
+        "paused": "一時停止",
+        "success": "成功",
+        "failure": "失敗",
+        "successWithWarnings": "警告付きで成功"
+      },
+      "actions": {
+        "edit": "スケジュールを編集",
+        "pause": "スケジュールを一時停止",
+        "resume": "スケジュールを再開",
+        "delete": "スケジュールを削除",
+        "runNow": "今すぐ実行",
+        "viewThread": "最新の実行を表示"
+      },
+      "form": {
+        "prompt": "プロンプト",
+        "chooseGallery": "プロンプトギャラリーから選択",
+        "profile": "モデル",
+        "chatProfile": "チャットプロファイル",
+        "defaultAssistant": "デフォルトアシスタント",
+        "timezone": "タイムゾーン",
+        "recurrence": "繰り返し",
+        "customFrequency": "繰り返し頻度",
+        "interval": "間隔",
+        "hours": "時間",
+        "time": "時刻",
+        "weekday": "曜日",
+        "dayOfMonth": "日",
+        "afterHooks": "完了後のアクション",
+        "unavailable": "利用不可"
+      },
+      "presets": {
+        "daily": "毎日 09:00",
+        "weekdays": "平日 09:00",
+        "weekly": "毎週月曜日",
+        "monthly": "毎月1日",
+        "custom": "カスタム"
+      },
+      "custom": {
+        "everyHours": "N時間ごと",
+        "daily": "毎日",
+        "weekly": "毎週",
+        "monthly": "毎月"
+      },
+      "weekdays": {
+        "monday": "月曜日",
+        "tuesday": "火曜日",
+        "wednesday": "水曜日",
+        "thursday": "木曜日",
+        "friday": "金曜日",
+        "saturday": "土曜日",
+        "sunday": "日曜日"
+      },
+      "overview": {
+        "dailyAt": "毎日 {time}",
+        "weekdaysAt": "平日 {time}",
+        "weeklyAt": "毎週 {weekday} の {time}",
+        "monthlyAt": "毎月{day}日 {time}",
+        "everyHours": "{interval}時間ごと",
+        "everyMinutes": "{interval}分ごと",
+        "custom": "カスタムスケジュール"
+      },
+      "galleryTitle": "ギャラリーのプロンプトを選択",
+      "galleryEmpty": "利用可能なギャラリープロンプトはありません",
+      "delete": {
+        "title": "スケジュール済みプロンプトを削除しますか？",
+        "description": "このスケジュールとキューに入った実行は削除されます。"
+      },
+      "errors": {
+        "load": "スケジュール済みプロンプトを読み込めません",
+        "required": "プロンプトとcronは必須です",
+        "save": "スケジュール済みプロンプトを保存できません",
+        "update": "スケジュール済みプロンプトを更新できません",
+        "delete": "スケジュール済みプロンプトを削除できません",
+        "run": "スケジュール済みプロンプトをキューに追加できません"
+      }
+    },
+    "skills": {
+      "button": "ライブラリ",
+      "title": "スキル",
+      "menu": "{{name}} の操作",
+      "tab": "スキル",
+      "new": "新規スキル",
+      "import": "インポート",
+      "importing": "インポート中...",
+      "imported": "スキルをインポートしました",
+      "created": "スキルを作成しました",
+      "saved": "スキルを保存しました",
+      "loading": "スキルを読み込み中...",
+      "importedBadge": "インポート済み",
+      "importedBadgeTitle": "インポート済みスキル。有効化する前に確認してください。",
+      "reviewBeforeEnabling": "無効。有効化する前に確認してください。",
+      "toggle": "{{name}} を切り替え",
+      "edit": "スキルを編集",
+      "export": "スキルをエクスポート",
+      "delete": "スキルを削除",
+      "importedBy": "あなたが {{source}} からインポート · {{date}}",
+      "fromLinkBadge": "リンクから",
+      "sharedBadge": "共有",
+      "detached": "共有ソースから切り離されました",
+      "libraryUnavailable": "このデータレイヤーではスキルライブラリを利用できません。",
+      "updateAvailable": "アップデートあり v{{version}}",
+      "updatesToast": "{{count}} 件の共有スキルに新しいバージョンがあります",
+      "updatesToastAction": "確認",
+      "filter": {
+        "current": "スキルのフィルター: {{filter}}"
+      },
+      "sections": {
+        "label": "スキルセクション",
+        "all": "すべて",
+        "active": "有効",
+        "review": "確認が必要",
+        "updates": "アップデート",
+        "empty": "このセクションにスキルはありません"
+      },
+      "review": {
+        "title": "スキルを確認",
+        "description": "このスキルを有効にする前に手順を確認してください。",
+        "fromLink": "共有リンクからコピーしました",
+        "warning": "問題がある場合は、有効にせずにスキルを編集してください。",
+        "enable": "スキルを有効化",
+        "enabling": "有効化中...",
+        "enabled": "スキルを有効化しました",
+        "changed": "開いた後にスキルが変更されました。現在のバージョンをもう一度確認してください。"
+      },
+      "share": {
+        "title": "スキルを共有",
+        "description": "リンクを知っている人は誰でもプレビューしてコピーを追加できます。",
+        "descriptionOff": "このスキルを共有するリンクを作成します。",
+        "link": "共有リンク",
+        "copy": "リンクをコピー",
+        "copied": "リンクをコピーしました！",
+        "unshare": "共有を解除",
+        "unshared": "共有を解除しました",
+        "submit": "リンクを作成",
+        "error": "共有を更新できませんでした",
+        "open": "{{name}} を共有",
+        "notFound": "スキルが見つからないか、共有が終了しています。",
+        "goHome": "ホームへ",
+        "by": "作成者: {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "バージョン",
+        "latestVersion": "v{{version}}（最新）",
+        "addVersion": "v{{version}} をライブラリに追加",
+        "add": "ライブラリに追加",
+        "adding": "追加中...",
+        "openCopy": "自分のコピーを開く",
+        "openLibrary": "自分のライブラリを開く",
+        "added": "スキルをライブラリに追加しました",
+        "addedReview": "無効なコピーとして追加しました。有効にする前にライブラリで確認してください。",
+        "addError": "スキルの追加に失敗しました",
+        "alreadyAdded": "このスキルはすでにライブラリにあります。",
+        "nameTaken": "同じ名前のスキルがすでに存在します。スキル名を変更してから、もう一度追加してください。",
+        "disabledNote": "コピーは無効な状態で追加されます。手順を確認してから有効にしてください。",
+        "unavailable": "このアプリではスキルライブラリを利用できません。"
+      },
+      "update": {
+        "title": "スキルを更新",
+        "description": "バージョンを選択して、コピーを更新してください。",
+        "version": "バージョン",
+        "unified": "統合表示",
+        "split": "並べて表示",
+        "localChanges": "このコピーにはローカル編集があります",
+        "localChangesHint": "更新するとローカル内容が共有バージョンに置き換わります。編集内容はスキル履歴で引き続き確認できます。",
+        "confirmUpdate": "ローカル内容を置き換える",
+        "stale": "プレビューの読み込み後にスキルが変更されました。比較を更新したので、もう一度確認してください。",
+        "sourceUnavailable": "共有元は利用できなくなりました",
+        "sourceUnavailableHint": "このコピーは現在の内容を保持します。更新の確認を停止するには切り離してください。",
+        "detach": "共有元から切り離す",
+        "detached": "共有ソースから切り離されています",
+        "alreadyCurrent": "このスキルは共有バージョンと一致しています。",
+        "noChanges": "行の変更はありません。",
+        "truncated": "差分は省略されています。先頭部分のみ表示しています。",
+        "updated": "共有バージョンからスキルを更新しました。有効化する前に確認してください",
+        "update": "v{{version}} に更新",
+        "updateFallback": "更新",
+        "error": "このスキルを更新できませんでした",
+        "loadError": "共有バージョンを読み込めませんでした。",
+        "versionConflict": "そのバージョンは共有ソースのものではありません。",
+        "historyTitle": "バージョン履歴",
+        "historyDescription": "バージョンを選択して変更内容を確認してください。",
+        "currentVersion": "これは現在のバージョンです。",
+        "noVersions": "他のバージョンはありません。",
+        "versionUnavailable": "そのバージョンは利用できません。別のバージョンを選択してください。",
+        "downgrade": "v{{version}} にダウングレード",
+        "downgraded": "スキルを v{{version}} にダウングレードしました"
+      },
+      "empty": {
+        "title": "スキルはまだありません",
+        "description": "スキルを作成するか、Markdown ファイルをインポートしてください"
+      },
+      "editor": {
+        "createTitle": "新規スキル",
+        "editTitle": "スキルを編集",
+        "name": "名前",
+        "nameHint": "小文字の英字、数字、ハイフンのみ。一意である必要があります。",
+        "description": "説明",
+        "descriptionHint": "モデルはこの行を見て、スキルを使うタイミングを判断します。",
+        "body": "手順 (Markdown)",
+        "preview": "プレビュー",
+        "previewEmpty": "プレビューする内容はまだありません。",
+        "save": "スキルを保存",
+        "saving": "保存中...",
+        "cancel": "キャンセル"
+      },
+      "validation": {
+        "nameRequired": "名前は必須です。",
+        "namePattern": "小文字、数字、ハイフンを使用し、先頭は英字または数字にしてください（最大64文字）。",
+        "descriptionRequired": "説明は必須です。",
+        "descriptionSingleLine": "説明は1行で入力してください。",
+        "descriptionTooLarge": "説明が{{size}}バイトです（最大{{max}}バイト）。",
+        "bodyTooLarge": "指示が{{size}}バイトです（最大{{max}}バイト）。",
+        "fileTooLarge": "ファイルが{{size}}バイトです（最大{{max}}バイト）。"
+      },
+      "updatesToast_one": "{{count}}件の共有スキルに新しいバージョンがあります",
+      "updatesToast_other": "{{count}}件の共有スキルに新しいバージョンがあります",
+      "versions": "バージョン履歴（v{{version}}）",
+      "enable": "{{name}}を有効にする"
+    },
+    "question": {
+      "title": "質問",
+      "ariaLabel": "アシスタントからの質問",
+      "options": "選択肢",
+      "other": "その他",
+      "and": "および",
+      "otherAriaLabel": "その他の回答",
+      "otherPlaceholder": "回答を入力...",
+      "progress": "{{current}}/{{total}}",
+      "next": "次へ",
+      "back": "戻る",
+      "reviewTitle": "回答を確認",
+      "edit": "編集",
+      "optional": "任意",
+      "selectMultiple": "該当するものをすべて選択",
+      "notAnswered": "未回答",
+      "datePlaceholder": "日付を選択",
+      "clear": "クリア",
+      "answeredPrivately": "非公開で回答済み",
+      "status": {
+        "pending": "回答待ち",
+        "answered": "回答済み",
+        "expired": "期限切れ",
+        "superseded": "置き換え済み",
+        "orphaned": "利用不可"
+      },
+      "errors": {
+        "answer": "質問に回答できません",
+        "required": "この質問は必須です",
+        "email": "有効なメールアドレスを入力してください",
+        "date": "有効な日付を選択してください",
+        "number": "有効な数値を入力してください",
+        "url": "有効なURLを入力してください",
+        "tel": "有効な電話番号を入力してください"
+      },
+      "answer": "回答",
+      "answerAriaLabel": "回答"
+    },
+    "approval": {
+      "ariaLabel": "{{tool}} の承認",
+      "approve": "承認",
+      "reject": "拒否",
+      "edit": "編集",
+      "requestChanges": "変更を依頼",
+      "saveAndApprove": "保存して承認",
+      "saveEdit": "編集を保存",
+      "editFields": "フィールドを編集",
+      "editedArgumentsJson": "編集済み引数 JSON",
+      "comment": "コメント",
+      "commentRequired": "何を変更しますか？（必須）",
+      "commentRequiredError": "変更を依頼するにはコメントが必要です",
+      "none": "なし",
+      "onePerLine": "1行に1つ、またはカンマ区切り",
+      "serverHeld": "サーバー保持",
+      "noChanges": "保存する変更はありません",
+      "invalidJson": "引数は有効な JSON である必要があります",
+      "jsonObjectRequired": "引数は JSON オブジェクトである必要があります",
+      "editedContentNote": "編集済みの内容です。承認された変更は差分に表示されます。",
+      "originalToEdited": "元 → 編集後",
+      "added": "追加",
+      "removed": "削除",
+      "replaced": "置換",
+      "before": "変更前：",
+      "after": "変更後：",
+      "errors": {
+        "decide": "承認を決定できません"
+      },
+      "fieldErrors": {
+        "required": "{{field}} は必須です",
+        "wholeNumber": "{{field}} は整数である必要があります",
+        "number": "{{field}} は数値である必要があります"
+      },
+      "status": {
+        "approved": "承認済み",
+        "edited": "編集して承認済み",
+        "rejected": "拒否済み",
+        "changesRequested": "変更依頼済み",
+        "expired": "期限切れ",
+        "superseded": "置き換え済み",
+        "orphaned": "利用不可"
+      }
     }
   },
   "threadHistory": {
@@ -235,6 +667,11 @@
       "success": "すべてのチャットを削除しました",
       "inProgress": "すべてのチャットを削除中",
       "error": "すべてのチャットの削除に失敗しました"
+    },
+    "errors": {
+      "fetch": "スレッドの取得エラー: {{error}}",
+      "resume": "チャットを再開できませんでした",
+      "resumeDetail": "チャットを再開できませんでした: {{error}}"
     }
   },
   "navigation": {
@@ -245,7 +682,9 @@
         "light": "Light Theme",
         "dark": "Dark Theme",
         "system": "Follow System"
-      }
+      },
+      "toggleTheme": "テーマを切り替え",
+      "selectProfile": "プロフィールを選択"
     },
     "newChat": {
       "button": "新規チャット",
@@ -262,7 +701,8 @@
         "apiKeys": "APIキー",
         "logout": "ログアウト",
         "clearAll": "すべてのチャットを削除"
-      }
+      },
+      "imageAlt": "ユーザー画像"
     }
   },
   "apiKeys": {
@@ -298,6 +738,47 @@
         "single": "日付を選択",
         "range": "日付範囲を選択"
       }
+    },
+    "audio": {
+      "listening": "聞き取り中"
+    },
+    "copy": {
+      "failed": "コピーに失敗しました: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "結果がありません。"
+    },
+    "image": {
+      "closeLightbox": "ライトボックスを閉じる"
+    },
+    "pdf": {
+      "printOpen": "PDFを印刷/開く",
+      "download": "PDFをダウンロード",
+      "loading": "PDFを読み込み中...",
+      "openLarger": "PDFを拡大表示",
+      "loadingPreview": "プレビューを読み込み中...",
+      "view": "PDFを表示",
+      "document": "PDFドキュメント",
+      "modalDescription": "PDFを拡大表示するモーダルです。"
+    },
+    "plotly": {
+      "loading": "読み込み中...",
+      "error": "エラーが発生しました"
+    },
+    "share": {
+      "unshare": "共有解除"
+    },
+    "tasklist": {
+      "title": "タスク"
+    },
+    "text": {
+      "loadError": "コンテンツの読み込み中にエラーが発生しました"
+    },
+    "thread": {
+      "loadError": "スレッドの読み込みに失敗しました: {{error}}"
+    },
+    "video": {
+      "unsupported": "お使いのブラウザはvideoタグをサポートしていません。"
     }
   }
 }

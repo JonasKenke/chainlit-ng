@@ -6,7 +6,9 @@
       "continue": "계속",
       "goBack": "뒤로 가기",
       "reset": "초기화",
-      "submit": "제출"
+      "submit": "제출",
+      "close": "닫기",
+      "save": "저장"
     },
     "status": {
       "loading": "로딩 중...",
@@ -14,7 +16,9 @@
         "default": "오류가 발생했습니다",
         "serverConnection": "서버에 연결할 수 없습니다"
       }
-    }
+    },
+    "latest": "최신",
+    "current": "현재"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "메시지 보내기",
         "stop": "작업 중지",
         "attachFiles": "파일 첨부"
+      },
+      "errors": {
+        "tooLarge": "메시지가 너무 큽니다. 최대 메시지 크기는 1 MB입니다."
       }
     },
     "favorites": {
@@ -123,7 +130,8 @@
           "updating": "업데이트 중",
           "updated": "피드백이 업데이트되었습니다"
         }
-      }
+      },
+      "output": "출력"
     },
     "history": {
       "title": "최근 입력",
@@ -146,7 +154,11 @@
         "adding": "추가 중…",
         "goHome": "홈으로 가기",
         "notFound": "프롬프트를 찾을 수 없거나 더 이상 공유되지 않습니다.",
-        "addError": "프롬프트 추가 실패"
+        "addError": "프롬프트 추가 실패",
+        "version": "버전",
+        "latestVersion": "v{{version}} (최신)",
+        "addVersion": "내 gallery에 v{{version}} 추가",
+        "openCopy": "내 복사본 열기"
       },
       "unshare": "공유 취소",
       "delete": "삭제",
@@ -166,7 +178,426 @@
       "new": "새 프롬프트",
       "search": "프롬프트 검색...",
       "saved": "프롬프트가 저장되었습니다!",
-      "unshared": "공유가 해제되었습니다"
+      "unshared": "공유가 해제되었습니다",
+      "tab": "Prompts",
+      "updateAvailable": "업데이트 가능 v{{version}}",
+      "versions": "버전 기록 (v{{version}})",
+      "updatesToast": "저장된 prompt {{count}}개에 더 새로운 공유 버전이 있습니다",
+      "updatesToastAction": "검토",
+      "diff": {
+        "title": "Prompt 업데이트",
+        "historyTitle": "버전 기록",
+        "description": "버전을 선택한 뒤 사본을 업데이트하세요.",
+        "historyDescription": "변경 내용을 확인할 버전을 선택하세요.",
+        "version": "버전",
+        "unified": "통합",
+        "split": "나란히 보기",
+        "localChanges": "이 프롬프트에는 로컬 편집 내용이 있습니다",
+        "localChangesHint": "업데이트하면 로컬 콘텐츠가 공유 버전으로 대체됩니다. 편집 내용은 프롬프트 기록에 남아 있습니다.",
+        "confirmUpdate": "로컬 콘텐츠 대체",
+        "stale": "미리보기를 불러온 뒤 이 프롬프트가 변경되었습니다. 차이점이 새로 고쳐졌으니 다시 검토하세요.",
+        "sourceUnavailable": "공유 소스를 더 이상 사용할 수 없습니다",
+        "sourceUnavailableHint": "이 사본은 현재 콘텐츠를 유지합니다. 업데이트 확인을 중지하려면 분리하세요.",
+        "detach": "소스에서 분리",
+        "detached": "공유 소스에서 분리됨",
+        "alreadyCurrent": "이 프롬프트는 이미 공유 버전과 일치합니다.",
+        "noChanges": "변경된 줄이 없습니다.",
+        "truncated": "차이점이 잘렸으며 첫 부분만 표시됩니다.",
+        "updated": "공유 버전에서 프롬프트를 업데이트했습니다",
+        "update": "v{{version}}으로 업데이트",
+        "updateFallback": "업데이트",
+        "updateError": "이 프롬프트를 업데이트할 수 없습니다",
+        "loadError": "버전 비교를 불러올 수 없습니다.",
+        "currentVersion": "현재 버전입니다.",
+        "noVersions": "사용 가능한 다른 버전이 없습니다.",
+        "versionUnavailable": "해당 버전은 더 이상 사용할 수 없습니다. 다른 버전을 선택하세요.",
+        "downgrade": "v{{version}}으로 다운그레이드",
+        "downgraded": "프롬프트를 v{{version}}으로 다운그레이드했습니다"
+      },
+      "updatesToast_one": "저장된 프롬프트 {{count}}개에 더 새로운 공유 버전이 있습니다",
+      "updatesToast_other": "저장된 프롬프트 {{count}}개에 더 새로운 공유 버전이 있습니다"
+    },
+    "mcp": {
+      "title": "MCP 서버",
+      "tabs": {
+        "connect": "MCP 연결",
+        "list": "내 MCP"
+      },
+      "configured": {
+        "title": "구성된 서버"
+      },
+      "connect": "연결",
+      "reconnect": "다시 연결",
+      "add": {
+        "title": "직접 서버 추가"
+      },
+      "form": {
+        "name": "이름",
+        "namePlaceholder": "예: Stripe",
+        "type": "유형",
+        "url": "서버 URL",
+        "urlPlaceholder": "예: http://localhost:8000/mcp",
+        "headers": "헤더 (JSON, 선택 사항)",
+        "headersPlaceholder": "예: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "헤더는 문자열 값으로 이루어진 JSON 객체여야 합니다",
+        "add": "추가",
+        "useOAuth": "OAuth로 로그인 (스트리밍 HTTP 전용)"
+      },
+      "list": {
+        "empty": "연결된 MCP 서버가 없습니다",
+        "addFirst": "첫 MCP 서버 추가",
+        "url": "URL",
+        "tools": "도구",
+        "removeTitle": "확인하시겠습니까?",
+        "removeDescription": "MCP 서버 \"{{name}}\"의 연결이 해제됩니다. 이 작업은 되돌릴 수 없습니다.",
+        "signIn": "{{host}}에 로그인",
+        "remove": "MCP 서버 제거"
+      },
+      "messages": {
+        "connecting": "MCP 연결 중...",
+        "connected": "MCP 연결됨!",
+        "adding": "MCP 추가 중...",
+        "added": "MCP 추가됨!",
+        "reconnecting": "MCP 재연결 중...",
+        "reconnected": "MCP 재연결됨!",
+        "removing": "MCP 제거 중...",
+        "removed": "MCP 제거됨!",
+        "authorizationRequired": "연결을 완료하려면 로그인하세요"
+      },
+      "errors": {
+        "connect": "MCP server에 연결할 수 없습니다"
+      },
+      "library": {
+        "button": "MCP prompts 및 resources",
+        "title": "MCP library",
+        "tabs": {
+          "prompts": "Prompts",
+          "resources": "Resources"
+        },
+        "prompts": {
+          "empty": "연결된 MCP server의 prompts가 없습니다"
+        },
+        "resources": {
+          "empty": "연결된 MCP server의 resources가 없습니다"
+        },
+        "promptInsert": "삽입",
+        "promptInserted": "Prompt가 작성기에 삽입되었습니다",
+        "promptFailed": "MCP server에서 prompt를 가져올 수 없습니다",
+        "resourceAdded": "Resource가 채팅에 추가되었습니다",
+        "resourceFailed": "MCP server에서 resource를 읽을 수 없습니다"
+      }
+    },
+    "promptScheduling": {
+      "button": "예약된 프롬프트",
+      "title": "예약 프롬프트",
+      "create": "예약 프롬프트 만들기",
+      "edit": "예약 프롬프트 편집",
+      "new": "새 예약",
+      "empty": "아직 예약된 프롬프트가 없습니다",
+      "nextRun": "다음 실행",
+      "lastRun": "마지막 실행",
+      "lastStatus": "마지막 상태",
+      "status": {
+        "active": "활성",
+        "paused": "일시 중지됨",
+        "success": "성공",
+        "failure": "실패",
+        "successWithWarnings": "경고와 함께 성공"
+      },
+      "actions": {
+        "edit": "예약 편집",
+        "pause": "예약 일시 중지",
+        "resume": "예약 재개",
+        "delete": "예약 삭제",
+        "runNow": "지금 실행",
+        "viewThread": "최근 실행 보기"
+      },
+      "form": {
+        "prompt": "프롬프트",
+        "chooseGallery": "프롬프트 갤러리에서 선택",
+        "profile": "모델",
+        "chatProfile": "채팅 프로필",
+        "defaultAssistant": "기본 어시스턴트",
+        "timezone": "시간대",
+        "recurrence": "반복",
+        "customFrequency": "반복 주기",
+        "interval": "매",
+        "hours": "시간",
+        "time": "시각",
+        "weekday": "요일",
+        "dayOfMonth": "월의 일자",
+        "afterHooks": "완료 후 작업",
+        "unavailable": "사용 불가"
+      },
+      "presets": {
+        "daily": "매일 09:00",
+        "weekdays": "평일 09:00",
+        "weekly": "매주 월요일",
+        "monthly": "매월 1일",
+        "custom": "사용자 지정"
+      },
+      "custom": {
+        "everyHours": "N시간마다",
+        "daily": "매일",
+        "weekly": "매주",
+        "monthly": "매월"
+      },
+      "weekdays": {
+        "monday": "월요일",
+        "tuesday": "화요일",
+        "wednesday": "수요일",
+        "thursday": "목요일",
+        "friday": "금요일",
+        "saturday": "토요일",
+        "sunday": "일요일"
+      },
+      "overview": {
+        "dailyAt": "매일 {time}에",
+        "weekdaysAt": "평일 {time}에",
+        "weeklyAt": "매주 {weekday} {time}에",
+        "monthlyAt": "매월 {day}일 {time}에",
+        "everyHours": "{interval}시간마다",
+        "everyMinutes": "{interval}분마다",
+        "custom": "사용자 지정 일정"
+      },
+      "galleryTitle": "갤러리 프롬프트 선택",
+      "galleryEmpty": "사용 가능한 갤러리 프롬프트가 없습니다",
+      "delete": {
+        "title": "예약된 프롬프트를 삭제할까요?",
+        "description": "이 일정과 대기 중인 실행이 삭제됩니다."
+      },
+      "errors": {
+        "load": "예약된 프롬프트를 불러올 수 없습니다",
+        "required": "프롬프트와 cron은 필수입니다",
+        "save": "예약된 프롬프트를 저장할 수 없습니다",
+        "update": "예약된 프롬프트를 업데이트할 수 없습니다",
+        "delete": "예약된 프롬프트를 삭제할 수 없습니다",
+        "run": "예약된 프롬프트를 대기열에 추가할 수 없습니다"
+      }
+    },
+    "skills": {
+      "button": "라이브러리",
+      "title": "스킬",
+      "menu": "{{name}} 작업",
+      "tab": "스킬",
+      "new": "새 스킬",
+      "import": "가져오기",
+      "importing": "가져오는 중...",
+      "imported": "스킬을 가져왔습니다",
+      "created": "스킬이 생성되었습니다",
+      "saved": "스킬이 저장되었습니다",
+      "loading": "스킬 불러오는 중...",
+      "importedBadge": "가져옴",
+      "importedBadgeTitle": "가져온 스킬입니다. 활성화하기 전에 검토하세요.",
+      "reviewBeforeEnabling": "비활성화됨. 활성화하기 전에 검토하세요.",
+      "toggle": "{{name}} 전환",
+      "edit": "스킬 편집",
+      "export": "스킬 내보내기",
+      "delete": "스킬 삭제",
+      "importedBy": "내가 {{source}}에서 가져옴 · {{date}}",
+      "fromLinkBadge": "링크에서 가져옴",
+      "sharedBadge": "공유됨",
+      "detached": "공유 소스에서 분리됨",
+      "libraryUnavailable": "이 데이터 계층에서는 스킬 라이브러리를 사용할 수 없습니다.",
+      "updateAvailable": "v{{version}} 업데이트 가능",
+      "updatesToast": "공유 스킬 {{count}}개에 새 버전이 있습니다",
+      "updatesToastAction": "검토",
+      "filter": {
+        "current": "스킬 필터: {{filter}}"
+      },
+      "sections": {
+        "label": "스킬 섹션",
+        "all": "전체",
+        "active": "활성",
+        "review": "검토 필요",
+        "updates": "업데이트",
+        "empty": "이 섹션에 스킬이 없습니다"
+      },
+      "review": {
+        "title": "스킬 검토",
+        "description": "이 스킬을 활성화하기 전에 지침을 확인하세요.",
+        "fromLink": "공유 링크에서 복사됨",
+        "warning": "문제가 있어 보이면 활성화하지 말고 스킬을 편집하세요.",
+        "enable": "스킬 활성화",
+        "enabling": "활성화 중...",
+        "enabled": "스킬이 활성화되었습니다",
+        "changed": "스킬이 열린 후 변경되었습니다. 현재 버전을 다시 검토하세요."
+      },
+      "share": {
+        "title": "스킬 공유",
+        "description": "링크가 있는 사람은 누구나 미리 보고 사본을 추가할 수 있습니다.",
+        "descriptionOff": "이 스킬을 공유할 링크를 만드세요.",
+        "link": "공유 링크",
+        "copy": "링크 복사",
+        "copied": "링크 복사됨!",
+        "unshare": "공유 해제",
+        "unshared": "공유가 해제되었습니다",
+        "submit": "링크 만들기",
+        "error": "공유를 업데이트할 수 없습니다",
+        "open": "{{name}} 공유",
+        "notFound": "스킬을 찾을 수 없거나 더 이상 공유되지 않습니다.",
+        "goHome": "홈으로 이동",
+        "by": "{{author}} 작성",
+        "versionLabel": "v{{version}}",
+        "version": "버전",
+        "latestVersion": "v{{version}} (최신)",
+        "addVersion": "내 라이브러리에 v{{version}} 추가",
+        "add": "내 라이브러리에 추가",
+        "adding": "추가 중...",
+        "openCopy": "내 복사본 열기",
+        "openLibrary": "내 라이브러리 열기",
+        "added": "스킬이 라이브러리에 추가되었습니다",
+        "addedReview": "비활성화된 복사본으로 추가되었습니다. 활성화하기 전에 라이브러리에서 검토하세요.",
+        "addError": "스킬 추가 실패",
+        "alreadyAdded": "이 스킬은 이미 라이브러리에 있습니다.",
+        "nameTaken": "같은 이름의 스킬이 이미 있습니다. 스킬 이름을 바꾼 후 이 스킬을 다시 추가하세요.",
+        "disabledNote": "복사본은 비활성화된 상태로 추가됩니다. 지침을 검토한 후에만 활성화하세요.",
+        "unavailable": "이 앱에서는 스킬 라이브러리를 사용할 수 없습니다."
+      },
+      "update": {
+        "title": "스킬 업데이트",
+        "description": "버전을 선택한 다음 복사본을 업데이트하세요.",
+        "version": "버전",
+        "unified": "통합 보기",
+        "split": "나란히 보기",
+        "localChanges": "이 복사본에는 로컬 수정 사항이 있습니다",
+        "localChangesHint": "업데이트하면 로컬 콘텐츠가 공유 버전으로 대체됩니다. 수정 내용은 스킬 기록에 계속 남아 있습니다.",
+        "confirmUpdate": "로컬 콘텐츠 대체",
+        "stale": "미리보기를 로드한 후 스킬이 변경되었습니다. 비교가 새로 고쳐졌으니 다시 검토하세요.",
+        "sourceUnavailable": "공유 원본을 더 이상 사용할 수 없습니다",
+        "sourceUnavailableHint": "이 복사본은 현재 콘텐츠를 유지합니다. 업데이트 확인을 중지하려면 분리하세요.",
+        "detach": "원본에서 분리",
+        "detached": "공유 원본에서 분리됨",
+        "alreadyCurrent": "이 스킬은 이미 공유 버전과 일치합니다.",
+        "noChanges": "변경된 줄이 없습니다.",
+        "truncated": "diff가 잘렸습니다. 앞부분만 표시됩니다.",
+        "updated": "공유 버전에서 스킬을 업데이트했습니다. 활성화 전에 검토하세요",
+        "update": "v{{version}} 버전으로 업데이트",
+        "updateFallback": "업데이트",
+        "error": "이 스킬을 업데이트할 수 없습니다",
+        "loadError": "공유 버전을 불러올 수 없습니다.",
+        "versionConflict": "해당 버전은 공유 소스에 속하지 않습니다.",
+        "historyTitle": "버전 기록",
+        "historyDescription": "버전을 선택하면 변경 내용을 볼 수 있습니다.",
+        "currentVersion": "현재 사용 중인 버전입니다.",
+        "noVersions": "다른 버전이 없습니다.",
+        "versionUnavailable": "해당 버전은 더 이상 사용할 수 없습니다. 다른 버전을 선택하세요.",
+        "downgrade": "v{{version}} 버전으로 다운그레이드",
+        "downgraded": "스킬을 v{{version}} 버전으로 다운그레이드했습니다"
+      },
+      "empty": {
+        "title": "아직 스킬이 없습니다",
+        "description": "스킬을 만들거나 Markdown 파일을 가져오세요"
+      },
+      "editor": {
+        "createTitle": "새 스킬",
+        "editTitle": "스킬 편집",
+        "name": "이름",
+        "nameHint": "소문자, 숫자, 하이픈만 사용하며 고유해야 합니다.",
+        "description": "설명",
+        "descriptionHint": "모델이 이 줄을 보고 스킬 사용 시점을 판단합니다.",
+        "body": "지침 (Markdown)",
+        "preview": "미리보기",
+        "previewEmpty": "아직 미리 볼 내용이 없습니다.",
+        "save": "스킬 저장",
+        "saving": "저장 중...",
+        "cancel": "취소"
+      },
+      "validation": {
+        "nameRequired": "이름은 필수입니다.",
+        "namePattern": "소문자, 숫자, 하이픈만 사용하며 문자 또는 숫자로 시작해야 합니다(최대 64자).",
+        "descriptionRequired": "설명은 필수입니다.",
+        "descriptionSingleLine": "설명은 한 줄이어야 합니다.",
+        "descriptionTooLarge": "설명은 {{size}}바이트이며 최대 {{max}}바이트입니다.",
+        "bodyTooLarge": "지침은 {{size}}바이트이며 최대 {{max}}바이트입니다.",
+        "fileTooLarge": "파일은 {{size}}바이트이며 최대 {{max}}바이트입니다."
+      },
+      "updatesToast_one": "{{count}}개의 공유 스킬에 새 버전이 있습니다",
+      "updatesToast_other": "{{count}}개의 공유 스킬에 새 버전이 있습니다",
+      "versions": "버전 기록 (v{{version}})",
+      "enable": "{{name}} 활성화"
+    },
+    "question": {
+      "title": "질문",
+      "ariaLabel": "어시스턴트의 질문",
+      "options": "옵션",
+      "other": "기타",
+      "and": "및",
+      "otherAriaLabel": "기타 답변",
+      "otherPlaceholder": "답변을 입력하세요...",
+      "progress": "{{current}}/{{total}}",
+      "next": "다음",
+      "back": "뒤로",
+      "reviewTitle": "답변 검토",
+      "edit": "편집",
+      "optional": "선택 사항",
+      "selectMultiple": "해당하는 항목을 모두 선택하세요",
+      "notAnswered": "미응답",
+      "datePlaceholder": "날짜 선택",
+      "clear": "지우기",
+      "answeredPrivately": "비공개로 답변됨",
+      "status": {
+        "pending": "답변 대기 중",
+        "answered": "답변됨",
+        "expired": "만료됨",
+        "superseded": "대체됨",
+        "orphaned": "사용할 수 없음"
+      },
+      "errors": {
+        "answer": "질문에 답변할 수 없습니다",
+        "required": "필수 질문입니다",
+        "email": "올바른 이메일 주소를 입력하세요",
+        "date": "올바른 날짜를 선택하세요",
+        "number": "올바른 숫자를 입력하세요",
+        "url": "올바른 URL을 입력하세요",
+        "tel": "올바른 전화번호를 입력하세요"
+      },
+      "answer": "답변",
+      "answerAriaLabel": "답변"
+    },
+    "approval": {
+      "ariaLabel": "{{tool}} 승인",
+      "approve": "승인",
+      "reject": "거부",
+      "edit": "편집",
+      "requestChanges": "변경 요청",
+      "saveAndApprove": "저장 후 승인",
+      "saveEdit": "편집 저장",
+      "editFields": "필드 편집",
+      "editedArgumentsJson": "편집된 인수 JSON",
+      "comment": "코멘트",
+      "commentRequired": "무엇을 변경해야 하나요? (필수)",
+      "commentRequiredError": "변경 요청 시 코멘트가 필요합니다",
+      "none": "없음",
+      "onePerLine": "한 줄에 하나 또는 쉼표로 구분",
+      "serverHeld": "서버 보관됨",
+      "noChanges": "저장할 변경 사항이 없습니다",
+      "invalidJson": "인수는 유효한 JSON이어야 합니다",
+      "jsonObjectRequired": "인수는 JSON 객체여야 합니다",
+      "editedContentNote": "편집된 내용이며, 승인된 변경 사항은 diff에 표시됩니다.",
+      "originalToEdited": "원본 → 편집됨",
+      "added": "추가됨",
+      "removed": "제거됨",
+      "replaced": "대체됨",
+      "before": "이전:",
+      "after": "이후:",
+      "errors": {
+        "decide": "승인 여부를 결정할 수 없습니다"
+      },
+      "fieldErrors": {
+        "required": "{{field}}은(는) 필수입니다",
+        "wholeNumber": "{{field}}은(는) 정수여야 합니다",
+        "number": "{{field}}은(는) 숫자여야 합니다"
+      },
+      "status": {
+        "approved": "승인됨",
+        "edited": "편집 후 승인됨",
+        "rejected": "거부됨",
+        "changesRequested": "변경 요청됨",
+        "expired": "만료됨",
+        "superseded": "대체됨",
+        "orphaned": "사용 불가"
+      }
     }
   },
   "threadHistory": {
@@ -236,6 +667,11 @@
       "success": "모든 채팅이 삭제되었습니다",
       "inProgress": "모든 채팅 삭제 중",
       "error": "모든 채팅을 삭제하지 못했습니다"
+    },
+    "errors": {
+      "fetch": "스레드를 가져오는 중 오류: {{error}}",
+      "resume": "채팅을 이어갈 수 없습니다",
+      "resumeDetail": "채팅을 이어갈 수 없습니다: {{error}}"
     }
   },
   "navigation": {
@@ -246,7 +682,9 @@
         "light": "밝은 테마",
         "dark": "어두운 테마",
         "system": "시스템 따라가기"
-      }
+      },
+      "toggleTheme": "테마 전환",
+      "selectProfile": "프로필 선택"
     },
     "newChat": {
       "button": "새 채팅",
@@ -263,7 +701,8 @@
         "apiKeys": "API 키",
         "logout": "로그아웃",
         "clearAll": "모든 채팅 삭제"
-      }
+      },
+      "imageAlt": "사용자 이미지"
     }
   },
   "apiKeys": {
@@ -293,6 +732,53 @@
   "components": {
     "MultiSelectInput": {
       "placeholder": "선택..."
+    },
+    "DatePickerInput": {
+      "placeholder": {
+        "single": "날짜 선택",
+        "range": "날짜 범위 선택"
+      }
+    },
+    "audio": {
+      "listening": "듣는 중"
+    },
+    "copy": {
+      "failed": "복사 실패: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "결과 없음."
+    },
+    "image": {
+      "closeLightbox": "라이트박스 닫기"
+    },
+    "pdf": {
+      "printOpen": "PDF 인쇄/열기",
+      "download": "PDF 다운로드",
+      "loading": "PDF 로드 중...",
+      "openLarger": "더 큰 보기에서 PDF 열기",
+      "loadingPreview": "미리보기 로드 중...",
+      "view": "PDF 보기",
+      "document": "PDF 문서",
+      "modalDescription": "PDF를 더 크게 보여주는 모달입니다."
+    },
+    "plotly": {
+      "loading": "로드 중...",
+      "error": "오류가 발생했습니다"
+    },
+    "share": {
+      "unshare": "공유 해제"
+    },
+    "tasklist": {
+      "title": "작업"
+    },
+    "text": {
+      "loadError": "콘텐츠를 로드하는 중 오류가 발생했습니다"
+    },
+    "thread": {
+      "loadError": "스레드 로드 실패: {{error}}"
+    },
+    "video": {
+      "unsupported": "브라우저가 video 태그를 지원하지 않습니다."
     }
   }
 }

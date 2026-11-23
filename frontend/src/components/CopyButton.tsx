@@ -73,7 +73,12 @@ const CopyButton = ({ content, className, contentRef }: Props) => {
         setCopied(false);
       }, 2000);
     } catch (err) {
-      toast.error('Failed to copy: ' + String(err));
+      toast.error(
+        t('components.copy.failed', {
+          defaultValue: 'Failed to copy: {{error}}',
+          error: String(err)
+        })
+      );
     }
   };
 

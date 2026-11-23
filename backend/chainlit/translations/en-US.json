@@ -7,6 +7,7 @@
       "continue": "Continue",
       "goBack": "Go Back",
       "reset": "Reset",
+      "save": "Save",
       "submit": "Submit"
     },
     "latest": "Latest",
@@ -110,6 +111,7 @@
         "usedSteps": "Used {{count}} steps",
         "usedTools": "Used {{count}} tools"
       },
+      "output": "Output",
       "actions": {
         "copy": {
           "button": "Copy to clipboard",
@@ -552,9 +554,58 @@
       },
       "answer": "Your answer",
       "answerAriaLabel": "Your answer"
+    },
+    "approval": {
+      "ariaLabel": "Approval for {{tool}}",
+      "approve": "Approve",
+      "reject": "Reject",
+      "edit": "Edit",
+      "requestChanges": "Request changes",
+      "saveAndApprove": "Save & approve",
+      "saveEdit": "Save edit",
+      "editFields": "Edit fields",
+      "editedArgumentsJson": "Edited arguments JSON",
+      "comment": "Comment",
+      "commentRequired": "What should change? (required)",
+      "commentRequiredError": "A comment is required when requesting changes",
+      "none": "None",
+      "onePerLine": "One per line or comma separated",
+      "serverHeld": "Server-held",
+      "noChanges": "No changes to save",
+      "invalidJson": "Arguments must be valid JSON",
+      "jsonObjectRequired": "Arguments must be a JSON object",
+      "editedContentNote": "Edited content; the approved changes are in the diff.",
+      "originalToEdited": "Original → edited",
+      "added": "Added",
+      "removed": "Removed",
+      "replaced": "Replaced",
+      "before": "Before:",
+      "after": "After:",
+      "errors": {
+        "decide": "Unable to decide approval"
+      },
+      "fieldErrors": {
+        "required": "{{field}} is required",
+        "wholeNumber": "{{field}} must be a whole number",
+        "number": "{{field}} must be a number"
+      },
+      "status": {
+        "approved": "Approved",
+        "edited": "Approved with edits",
+        "rejected": "Rejected",
+        "changesRequested": "Changes requested",
+        "expired": "Expired",
+        "superseded": "Superseded",
+        "orphaned": "Unavailable"
+      }
     }
   },
   "threadHistory": {
+    "errors": {
+      "fetch": "Error fetching threads: {{error}}",
+      "resume": "Couldn't resume chat",
+      "resumeDetail": "Couldn't resume chat: {{error}}"
+    },
     "sidebar": {
       "title": "Past Chats",
       "filters": {
@@ -627,6 +678,8 @@
     "header": {
       "chat": "Chat",
       "readme": "Readme",
+      "toggleTheme": "Toggle theme",
+      "selectProfile": "Select profile",
       "theme": {
         "light": "Light Theme",
         "dark": "Dark Theme",
@@ -642,6 +695,7 @@
       }
     },
     "user": {
+      "imageAlt": "user image",
       "menu": {
         "settings": "Settings",
         "settingsKey": "S",
@@ -676,6 +730,47 @@
     "best-practice": "Best Practice"
   },
   "components": {
+    "audio": {
+      "listening": "Listening"
+    },
+    "copy": {
+      "failed": "Failed to copy: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "No results."
+    },
+    "image": {
+      "closeLightbox": "Close lightbox"
+    },
+    "pdf": {
+      "printOpen": "Print/Open PDF",
+      "download": "Download PDF",
+      "loading": "Loading PDF...",
+      "openLarger": "Open PDF in a larger view",
+      "loadingPreview": "Loading preview...",
+      "view": "View PDF",
+      "document": "PDF Document",
+      "modalDescription": "A modal with a larger view of the PDF."
+    },
+    "plotly": {
+      "loading": "Loading...",
+      "error": "An error occurred"
+    },
+    "share": {
+      "unshare": "Unshare"
+    },
+    "tasklist": {
+      "title": "Tasks"
+    },
+    "text": {
+      "loadError": "An error occurred while loading the content"
+    },
+    "thread": {
+      "loadError": "Failed to load thread: {{error}}"
+    },
+    "video": {
+      "unsupported": "Your browser does not support the video tag."
+    },
     "MultiSelectInput": {
       "placeholder": "Select..."
     },

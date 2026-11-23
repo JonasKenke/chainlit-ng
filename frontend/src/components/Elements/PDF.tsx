@@ -13,6 +13,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useEffect, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
+import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -44,6 +45,7 @@ export function PDFViewer({
   startPage = 1,
   persistentToolbar = false
 }: PDFViewerProps) {
+  const { t } = useTranslation();
   const [numPages, setNumPages] = useState<number>();
   const [pageNumber, setPageNumber] = useState(Math.max(1, startPage || 1));
   const [scale, setScale] = useState(1.0);
@@ -144,7 +146,9 @@ export function PDFViewer({
             size="icon"
             className="h-8 w-8 hidden md:flex"
             onClick={handlePrint}
-            title="Print/Open PDF"
+            title={t('components.pdf.printOpen', {
+              defaultValue: 'Print/Open PDF'
+            })}
           >
             <Printer className="h-4 w-4" />
           </Button>
@@ -153,7 +157,9 @@ export function PDFViewer({
             size="icon"
             className="h-8 w-8"
             asChild
-            title="Download PDF"
+            title={t('components.pdf.download', {
+              defaultValue: 'Download PDF'
+            })}
           >
             <a
               href={url}
@@ -174,7 +180,9 @@ export function PDFViewer({
             onLoadSuccess={onDocumentLoadSuccess}
             loading={
               <div className="flex items-center justify-center p-8 text-muted-foreground">
-                Loading PDF...
+                {t('components.pdf.loading', {
+                  defaultValue: 'Loading PDF...'
+                })}
               </div>
             }
           >
@@ -197,6 +205,7 @@ interface Props {
 }
 
 const PDFElement = ({ element }: Props) => {
+  const { t } = useTranslation();
   const [modalOpen, setModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [previewWidth, setPreviewWidth] = useState(0);
@@ -233,7 +242,9 @@ const PDFElement = ({ element }: Props) => {
         ref={containerRef}
         role="button"
         tabIndex={0}
-        aria-label="Open PDF in a larger view"
+        aria-label={t('components.pdf.openLarger', {
+          defaultValue: 'Open PDF in a larger view'
+        })}
         className="inline-pdf relative group cursor-pointer border border-border rounded-md overflow-hidden bg-muted/20 w-full max-w-xs h-auto min-h-[160px] flex items-center justify-center hover:border-primary/50 transition-all p-2"
         onClick={() => setModalOpen(true)}
         onKeyDown={(e) => {
@@ -252,7 +263,9 @@ const PDFElement = ({ element }: Props) => {
             file={element.url}
             loading={
               <div className="text-xs text-muted-foreground">
-                Loading preview...
+                {t('components.pdf.loadingPreview', {
+                  defaultValue: 'Loading preview...'
+                })}
               </div>
             }
           >
@@ -266,7 +279,10 @@ const PDFElement = ({ element }: Props) => {
           </Document>
           <div className="text-center mt-2">
             <span className="text-xs font-medium text-muted-foreground truncate w-full px-2 max-w-[200px] inline-block">
-              {element.name || 'PDF Document'}
+              {element.name ||
+                t('components.pdf.document', {
+                  defaultValue: 'PDF Document'
+                })}
             </span>
           </div>
         </div>
@@ -276,9 +292,13 @@ const PDFElement = ({ element }: Props) => {
         <DialogPortal>
           <DialogOverlay className="bg-black/80 z-50" />
           <DialogContent className="border-none bg-transparent shadow-none max-w-none p-2 md:p-4 w-[100vw] h-[100vh] md:w-[95vw] md:h-[95vh] flex flex-col [&>button]:hidden z-[60]">
-            <DialogTitle className="sr-only">View PDF</DialogTitle>
+            <DialogTitle className="sr-only">
+              {t('components.pdf.view', { defaultValue: 'View PDF' })}
+            </DialogTitle>
             <DialogDescription className="sr-only">
-              A modal with a larger view of the PDF.
+              {t('components.pdf.modalDescription', {
+                defaultValue: 'A modal with a larger view of the PDF.'
+              })}
             </DialogDescription>
             <div className="flex justify-end mb-2">
               <DialogClose asChild>
@@ -286,7 +306,9 @@ const PDFElement = ({ element }: Props) => {
                   variant="ghost"
                   size="icon"
                   className="bg-background/80 backdrop-blur-sm hover:bg-background"
-                  aria-label="Close"
+                  aria-label={t('common.actions.close', {
+                    defaultValue: 'Close'
+                  })}
                 >
                   <X className="h-5 w-5" />
                 </Button>

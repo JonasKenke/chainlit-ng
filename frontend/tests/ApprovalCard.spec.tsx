@@ -17,6 +17,19 @@ vi.mock('sonner', () => ({
   toast: { error: toastError, message: toastMessage }
 }));
 
+vi.mock('@/components/i18n/Translator', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) => {
+      const value =
+        (options?.defaultValue as string | undefined) ??
+        (typeof key === 'string' ? key : '');
+      return value.replace(/\{\{(\w+)\}\}/g, (_, name: string) =>
+        String(options?.[name] ?? `{{${name}}}`)
+      );
+    }
+  })
+}));
+
 vi.mock('@chainlit-ng/react-client', async () => {
   const ReactModule = await import('react');
   return {

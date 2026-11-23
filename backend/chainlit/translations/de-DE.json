@@ -6,7 +6,9 @@
       "continue": "Fortfahren",
       "goBack": "Zurück",
       "reset": "Zurücksetzen",
-      "submit": "Absenden"
+      "submit": "Absenden",
+      "close": "Schließen",
+      "save": "Speichern"
     },
     "status": {
       "loading": "Lädt...",
@@ -14,7 +16,9 @@
         "default": "Ein Fehler ist aufgetreten",
         "serverConnection": "Server konnte nicht erreicht werden"
       }
-    }
+    },
+    "latest": "Neueste",
+    "current": "Aktuell"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "Nachricht senden",
         "stop": "Aufgabe stoppen",
         "attachFiles": "Dateien anhängen"
+      },
+      "errors": {
+        "tooLarge": "Nachricht ist zu groß. Die maximale Nachrichtengröße beträgt 1 MB."
       }
     },
     "favorites": {
@@ -123,7 +130,8 @@
           "updating": "Aktualisiert",
           "updated": "Feedback aktualisiert"
         }
-      }
+      },
+      "output": "Ausgabe"
     },
     "history": {
       "title": "Vergangene Eingaben",
@@ -146,7 +154,11 @@
         "adding": "Wird hinzugefügt…",
         "goHome": "Zur Startseite",
         "notFound": "Prompt nicht gefunden oder nicht mehr geteilt.",
-        "addError": "Prompt konnte nicht hinzugefügt werden"
+        "addError": "Prompt konnte nicht hinzugefügt werden",
+        "version": "Version",
+        "latestVersion": "v{{version}} (neueste)",
+        "addVersion": "v{{version}} zu meiner Galerie hinzufügen",
+        "openCopy": "Meine Kopie öffnen"
       },
       "unshare": "Teilen aufheben",
       "delete": "Löschen",
@@ -166,7 +178,44 @@
       "new": "Neuer Prompt",
       "search": "Prompts suchen...",
       "saved": "Prompt gespeichert!",
-      "unshared": "Teilen aufgehoben"
+      "unshared": "Teilen aufgehoben",
+      "tab": "Prompts",
+      "updateAvailable": "Update verfügbar: v{{version}}",
+      "versions": "Versionsverlauf (v{{version}})",
+      "updatesToast": "{{count}} gespeicherter Prompt hat eine neuere geteilte Version",
+      "updatesToastAction": "Prüfen",
+      "diff": {
+        "title": "Prompt aktualisieren",
+        "historyTitle": "Versionsverlauf",
+        "description": "Wähle eine Version und aktualisiere dann deine Kopie.",
+        "historyDescription": "Wähle eine Version, um die Änderungen zu sehen.",
+        "version": "Version",
+        "unified": "Vereinheitlicht",
+        "split": "Nebeneinander",
+        "localChanges": "Dieser Prompt enthält lokale Änderungen",
+        "localChangesHint": "Beim Aktualisieren wird der lokale Inhalt durch die geteilte Version ersetzt. Deine Änderung bleibt im Prompt-Verlauf verfügbar.",
+        "confirmUpdate": "Lokalen Inhalt ersetzen",
+        "stale": "Dieser Prompt wurde nach dem Laden der Vorschau geändert. Der Diff wurde aktualisiert; prüfe ihn erneut.",
+        "sourceUnavailable": "Die geteilte Quelle ist nicht mehr verfügbar",
+        "sourceUnavailableHint": "Diese Kopie behält ihren aktuellen Inhalt. Trenne sie von der Quelle, um nicht weiter nach Aktualisierungen zu suchen.",
+        "detach": "Von Quelle trennen",
+        "detached": "Von der geteilten Quelle getrennt",
+        "alreadyCurrent": "Dieser Prompt entspricht bereits der geteilten Version.",
+        "noChanges": "Keine Zeilenänderungen.",
+        "truncated": "Der Diff ist gekürzt; nur der erste Teil wird angezeigt.",
+        "updated": "Prompt aus geteilter Version aktualisiert",
+        "update": "Auf v{{version}} aktualisieren",
+        "updateFallback": "Aktualisieren",
+        "updateError": "Dieser Prompt konnte nicht aktualisiert werden",
+        "loadError": "Der Versionsvergleich konnte nicht geladen werden.",
+        "currentVersion": "Dies ist deine aktuelle Version.",
+        "noVersions": "Keine weiteren Versionen verfügbar.",
+        "versionUnavailable": "Diese Version ist nicht mehr verfügbar. Wähle eine andere.",
+        "downgrade": "Auf v{{version}} herunterstufen",
+        "downgraded": "Prompt auf v{{version}} heruntergestuft"
+      },
+      "updatesToast_one": "{{count}} gespeicherter Prompt hat eine neuere geteilte Version",
+      "updatesToast_other": "{{count}} gespeicherte Prompts haben eine neuere geteilte Version"
     },
     "promptScheduling": {
       "button": "Geplante Prompts",
@@ -255,6 +304,300 @@
         "delete": "Geplanter Prompt konnte nicht gelöscht werden",
         "run": "Geplanter Prompt konnte nicht eingereiht werden"
       }
+    },
+    "mcp": {
+      "title": "MCP-Server",
+      "tabs": {
+        "connect": "MCP verbinden",
+        "list": "Meine MCPs"
+      },
+      "configured": {
+        "title": "Konfigurierte Server"
+      },
+      "connect": "Verbinden",
+      "reconnect": "Erneut verbinden",
+      "add": {
+        "title": "Eigenen Server hinzufügen"
+      },
+      "form": {
+        "name": "Name",
+        "namePlaceholder": "Beispiel: Stripe",
+        "type": "Typ",
+        "url": "Server-URL",
+        "urlPlaceholder": "Beispiel: http://localhost:8000/mcp",
+        "headers": "Header (JSON, optional)",
+        "headersPlaceholder": "Beispiel: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "Header müssen ein JSON-Objekt mit String-Werten sein",
+        "add": "Hinzufügen",
+        "useOAuth": "Mit OAuth anmelden (nur bei streamable HTTP)"
+      },
+      "list": {
+        "empty": "Keine MCP-Server verbunden",
+        "addFirst": "Ersten MCP-Server hinzufügen",
+        "url": "URL",
+        "tools": "Tools",
+        "removeTitle": "Sind Sie sicher?",
+        "removeDescription": "Dadurch wird die Verbindung zum MCP-Server \"{{name}}\" getrennt. Diese Aktion kann nicht rückgängig gemacht werden.",
+        "signIn": "Bei {{host}} anmelden",
+        "remove": "MCP-Server entfernen"
+      },
+      "messages": {
+        "connecting": "MCP wird verbunden...",
+        "connected": "MCP verbunden!",
+        "adding": "MCP wird hinzugefügt...",
+        "added": "MCP hinzugefügt!",
+        "reconnecting": "MCP wird neu verbunden...",
+        "reconnected": "MCP neu verbunden!",
+        "removing": "MCP wird entfernt...",
+        "removed": "MCP entfernt!",
+        "authorizationRequired": "Anmelden, um Verbindung abzuschließen"
+      },
+      "errors": {
+        "connect": "Verbindung zum MCP-Server nicht möglich"
+      },
+      "library": {
+        "button": "MCP-Prompts und -Ressourcen",
+        "title": "MCP-Bibliothek",
+        "tabs": {
+          "prompts": "Prompts",
+          "resources": "Ressourcen"
+        },
+        "prompts": {
+          "empty": "Keine Prompts von verbundenen MCP-Servern"
+        },
+        "resources": {
+          "empty": "Keine Ressourcen von verbundenen MCP-Servern"
+        },
+        "promptInsert": "Einfügen",
+        "promptInserted": "Prompt in das Eingabefeld eingefügt",
+        "promptFailed": "Prompt konnte nicht vom MCP-Server abgerufen werden",
+        "resourceAdded": "Ressource zum Chat hinzugefügt",
+        "resourceFailed": "Ressource konnte nicht vom MCP-Server gelesen werden"
+      }
+    },
+    "skills": {
+      "button": "Bibliothek",
+      "title": "Skills",
+      "menu": "Aktionen für {{name}}",
+      "tab": "Skills",
+      "new": "Neuer Skill",
+      "import": "Importieren",
+      "importing": "Wird importiert...",
+      "imported": "Skill importiert",
+      "created": "Skill erstellt",
+      "saved": "Skill gespeichert",
+      "loading": "Skills werden geladen...",
+      "importedBadge": "Importiert",
+      "importedBadgeTitle": "Importierter Skill. Vor dem Aktivieren prüfen.",
+      "reviewBeforeEnabling": "Deaktiviert. Vor dem Aktivieren prüfen.",
+      "toggle": "{{name}} umschalten",
+      "edit": "Skill bearbeiten",
+      "export": "Skill exportieren",
+      "delete": "Skill löschen",
+      "importedBy": "Von Ihnen importiert aus {{source}} · {{date}}",
+      "fromLinkBadge": "Aus Link",
+      "sharedBadge": "Geteilt",
+      "detached": "Von der gemeinsamen Quelle getrennt",
+      "libraryUnavailable": "Die Skill-Bibliothek ist für diese Datenschicht nicht verfügbar.",
+      "updateAvailable": "Update verfügbar v{{version}}",
+      "updatesToast": "{{count}} geteilter Skill hat eine neuere Version",
+      "updatesToastAction": "Prüfen",
+      "filter": {
+        "current": "Skills filtern: {{filter}}"
+      },
+      "sections": {
+        "label": "Skill-Bereiche",
+        "all": "Alle",
+        "active": "Aktiv",
+        "review": "Prüfung nötig",
+        "updates": "Aktualisierungen",
+        "empty": "Keine Skills in diesem Abschnitt"
+      },
+      "review": {
+        "title": "Skill prüfen",
+        "description": "Prüfe die Anweisungen, bevor du diesen Skill aktivierst.",
+        "fromLink": "Aus einem geteilten Link kopiert",
+        "warning": "Wenn etwas nicht stimmt, bearbeite den Skill, statt ihn zu aktivieren.",
+        "enable": "Skill aktivieren",
+        "enabling": "Wird aktiviert...",
+        "enabled": "Skill aktiviert",
+        "changed": "Der Skill wurde seit dem Öffnen geändert. Prüfe die aktuelle Version erneut."
+      },
+      "share": {
+        "title": "Skill teilen",
+        "description": "Jeder mit dem Link kann eine Vorschau ansehen und eine Kopie hinzufügen.",
+        "descriptionOff": "Erstelle einen Link, um diesen Skill zu teilen.",
+        "link": "Freigabelink",
+        "copy": "Link kopieren",
+        "copied": "Link kopiert!",
+        "unshare": "Freigabe aufheben",
+        "unshared": "Freigabe entfernt",
+        "submit": "Link erstellen",
+        "error": "Freigabe konnte nicht aktualisiert werden",
+        "open": "{{name}} teilen",
+        "notFound": "Skill nicht gefunden oder nicht mehr freigegeben.",
+        "goHome": "Zur Startseite",
+        "by": "Von {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "Version",
+        "latestVersion": "v{{version}} (aktuell)",
+        "addVersion": "v{{version}} zu meiner Bibliothek hinzufügen",
+        "add": "Zu meiner Bibliothek hinzufügen",
+        "adding": "Wird hinzugefügt...",
+        "openCopy": "Meine Kopie öffnen",
+        "openLibrary": "Meine Bibliothek öffnen",
+        "added": "Skill zu deiner Bibliothek hinzugefügt",
+        "addedReview": "Als deaktivierte Kopie hinzugefügt. Prüfe sie in deiner Bibliothek, bevor du sie aktivierst.",
+        "addError": "Skill konnte nicht hinzugefügt werden",
+        "alreadyAdded": "Dieser Skill ist bereits in deiner Bibliothek.",
+        "nameTaken": "Ein Skill mit diesem Namen existiert bereits. Benenne deinen Skill um und füge diesen dann erneut hinzu.",
+        "disabledNote": "Kopien werden deaktiviert hinzugefügt. Aktiviere eine erst, nachdem du ihre Anweisungen geprüft hast.",
+        "unavailable": "Die Skill-Bibliothek ist in dieser App nicht verfügbar."
+      },
+      "update": {
+        "title": "Skill aktualisieren",
+        "description": "Wähle eine Version und aktualisiere dann deine Kopie.",
+        "version": "Version",
+        "unified": "Vereinheitlicht",
+        "split": "Nebeneinander",
+        "localChanges": "Diese Kopie enthält lokale Änderungen",
+        "localChangesHint": "Beim Aktualisieren wird der lokale Inhalt durch die geteilte Version ersetzt. Deine Änderung bleibt im Skill-Verlauf verfügbar.",
+        "confirmUpdate": "Lokalen Inhalt ersetzen",
+        "stale": "Der Skill wurde geändert, nachdem die Vorschau geladen wurde. Der Vergleich wurde aktualisiert; prüfe ihn erneut.",
+        "sourceUnavailable": "Die geteilte Quelle ist nicht mehr verfügbar",
+        "sourceUnavailableHint": "Diese Kopie behält ihren aktuellen Inhalt. Trenne sie von der Quelle, um nicht weiter nach Updates zu suchen.",
+        "detach": "Von Quelle trennen",
+        "detached": "Von der geteilten Quelle getrennt",
+        "alreadyCurrent": "Dieser Skill entspricht bereits der geteilten Version.",
+        "noChanges": "Keine Zeilenänderungen.",
+        "truncated": "Der Diff ist gekürzt; es wird nur der erste Teil angezeigt.",
+        "updated": "Skill aus der geteilten Version aktualisiert; vor Aktivierung prüfen",
+        "update": "Auf v{{version}} aktualisieren",
+        "updateFallback": "Aktualisieren",
+        "error": "Dieser Skill konnte nicht aktualisiert werden",
+        "loadError": "Die geteilten Versionen konnten nicht geladen werden.",
+        "versionConflict": "Diese Version gehört nicht zur gemeinsam genutzten Quelle.",
+        "historyTitle": "Versionsverlauf",
+        "historyDescription": "Wähle eine Version aus, um zu sehen, was sich geändert hat.",
+        "currentVersion": "Dies ist deine aktuelle Version.",
+        "noVersions": "Es sind keine weiteren Versionen verfügbar.",
+        "versionUnavailable": "Diese Version ist nicht mehr verfügbar. Wähle eine andere.",
+        "downgrade": "Auf v{{version}} herabstufen",
+        "downgraded": "Skill auf v{{version}} herabgestuft"
+      },
+      "empty": {
+        "title": "Noch keine Skills",
+        "description": "Erstelle einen Skill oder importiere eine Markdown-Datei"
+      },
+      "editor": {
+        "createTitle": "Neuer Skill",
+        "editTitle": "Skill bearbeiten",
+        "name": "Name",
+        "nameHint": "Kleinbuchstaben, Ziffern und Bindestriche; muss eindeutig sein.",
+        "description": "Beschreibung",
+        "descriptionHint": "Das Modell sieht diese Zeile, um zu entscheiden, wann der Skill verwendet wird.",
+        "body": "Anweisungen (Markdown)",
+        "preview": "Vorschau",
+        "previewEmpty": "Noch nichts für die Vorschau.",
+        "save": "Skill speichern",
+        "saving": "Wird gespeichert...",
+        "cancel": "Abbrechen"
+      },
+      "validation": {
+        "nameRequired": "Name ist erforderlich.",
+        "namePattern": "Verwende Kleinbuchstaben, Ziffern und Bindestriche, beginnend mit einem Buchstaben oder einer Ziffer (max. 64).",
+        "descriptionRequired": "Beschreibung ist erforderlich.",
+        "descriptionSingleLine": "Die Beschreibung muss eine einzelne Zeile sein.",
+        "descriptionTooLarge": "Beschreibung ist {{size}} Bytes groß; maximal {{max}}.",
+        "bodyTooLarge": "Anweisungen sind {{size}} Bytes groß; maximal {{max}}.",
+        "fileTooLarge": "Datei ist {{size}} Bytes groß; maximal {{max}}."
+      },
+      "updatesToast_one": "{{count}} geteilter Skill hat eine neuere Version",
+      "updatesToast_other": "{{count}} geteilte Skills haben eine neuere Version",
+      "versions": "Versionsverlauf (v{{version}})",
+      "enable": "{{name}} aktivieren"
+    },
+    "question": {
+      "title": "Frage",
+      "ariaLabel": "Frage vom Assistenten",
+      "options": "Optionen",
+      "other": "Sonstiges",
+      "and": "und",
+      "otherAriaLabel": "Andere Antwort",
+      "otherPlaceholder": "Antwort eingeben...",
+      "progress": "{{current}}/{{total}}",
+      "next": "Weiter",
+      "back": "Zurück",
+      "reviewTitle": "Antworten überprüfen",
+      "edit": "Bearbeiten",
+      "optional": "Optional",
+      "selectMultiple": "Alle zutreffenden auswählen",
+      "notAnswered": "Nicht beantwortet",
+      "datePlaceholder": "Datum auswählen",
+      "clear": "Löschen",
+      "answeredPrivately": "Privat beantwortet",
+      "status": {
+        "pending": "Wartet auf Ihre Antwort",
+        "answered": "Beantwortet",
+        "expired": "Abgelaufen",
+        "superseded": "Ersetzt",
+        "orphaned": "Nicht verfügbar"
+      },
+      "errors": {
+        "answer": "Frage kann nicht beantwortet werden",
+        "required": "Diese Frage ist erforderlich",
+        "email": "Gültige E-Mail-Adresse eingeben",
+        "date": "Gültiges Datum auswählen",
+        "number": "Gültige Zahl eingeben",
+        "url": "Gültige URL eingeben",
+        "tel": "Gültige Telefonnummer eingeben"
+      },
+      "answer": "Ihre Antwort",
+      "answerAriaLabel": "Ihre Antwort"
+    },
+    "approval": {
+      "ariaLabel": "Genehmigung für {{tool}}",
+      "approve": "Genehmigen",
+      "reject": "Ablehnen",
+      "edit": "Bearbeiten",
+      "requestChanges": "Änderungen anfordern",
+      "saveAndApprove": "Speichern & genehmigen",
+      "saveEdit": "Bearbeitung speichern",
+      "editFields": "Felder bearbeiten",
+      "editedArgumentsJson": "Bearbeitete Argumente (JSON)",
+      "comment": "Kommentar",
+      "commentRequired": "Was soll geändert werden? (erforderlich)",
+      "commentRequiredError": "Beim Anfordern von Änderungen ist ein Kommentar erforderlich",
+      "none": "Keine",
+      "onePerLine": "Eine pro Zeile oder durch Kommas getrennt",
+      "serverHeld": "Serververwaltet",
+      "noChanges": "Keine Änderungen zum Speichern",
+      "invalidJson": "Argumente müssen gültiges JSON sein",
+      "jsonObjectRequired": "Argumente müssen ein JSON-Objekt sein",
+      "editedContentNote": "Bearbeiteter Inhalt; die genehmigten Änderungen sind im Diff.",
+      "originalToEdited": "Original → bearbeitet",
+      "added": "Hinzugefügt",
+      "removed": "Entfernt",
+      "replaced": "Ersetzt",
+      "before": "Vorher:",
+      "after": "Nachher:",
+      "errors": {
+        "decide": "Entscheidung über Genehmigung nicht möglich"
+      },
+      "fieldErrors": {
+        "required": "{{field}} ist erforderlich",
+        "wholeNumber": "{{field}} muss eine ganze Zahl sein",
+        "number": "{{field}} muss eine Zahl sein"
+      },
+      "status": {
+        "approved": "Genehmigt",
+        "edited": "Mit Änderungen genehmigt",
+        "rejected": "Abgelehnt",
+        "changesRequested": "Änderungen angefordert",
+        "expired": "Abgelaufen",
+        "superseded": "Ersetzt",
+        "orphaned": "Nicht verfügbar"
+      }
     }
   },
   "threadHistory": {
@@ -324,6 +667,11 @@
       "success": "Alle Chats gelöscht",
       "inProgress": "Alle Chats werden gelöscht",
       "error": "Alle Chats konnten nicht gelöscht werden"
+    },
+    "errors": {
+      "fetch": "Fehler beim Abrufen der Threads: {{error}}",
+      "resume": "Chat konnte nicht fortgesetzt werden",
+      "resumeDetail": "Chat konnte nicht fortgesetzt werden: {{error}}"
     }
   },
   "navigation": {
@@ -334,7 +682,9 @@
         "light": "Helles Design",
         "dark": "Dunkles Design",
         "system": "System Design"
-      }
+      },
+      "toggleTheme": "Design umschalten",
+      "selectProfile": "Profil auswählen"
     },
     "newChat": {
       "button": "Neuer Chat",
@@ -351,7 +701,8 @@
         "apiKeys": "API Schlüssel",
         "logout": "Abmelden",
         "clearAll": "Alle Chats löschen"
-      }
+      },
+      "imageAlt": "Benutzerbild"
     }
   },
   "apiKeys": {
@@ -381,6 +732,53 @@
   "components": {
     "MultiSelectInput": {
       "placeholder": "Wähle aus..."
+    },
+    "DatePickerInput": {
+      "placeholder": {
+        "single": "Datum auswählen",
+        "range": "Datumsbereich auswählen"
+      }
+    },
+    "audio": {
+      "listening": "Hört zu"
+    },
+    "copy": {
+      "failed": "Kopieren fehlgeschlagen: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "Keine Ergebnisse."
+    },
+    "image": {
+      "closeLightbox": "Lightbox schließen"
+    },
+    "pdf": {
+      "printOpen": "PDF drucken/öffnen",
+      "download": "PDF herunterladen",
+      "loading": "PDF wird geladen...",
+      "openLarger": "PDF in größerer Ansicht öffnen",
+      "loadingPreview": "Vorschau wird geladen...",
+      "view": "PDF anzeigen",
+      "document": "PDF-Dokument",
+      "modalDescription": "Ein Modal mit einer größeren Ansicht des PDFs."
+    },
+    "plotly": {
+      "loading": "Wird geladen...",
+      "error": "Ein Fehler ist aufgetreten"
+    },
+    "share": {
+      "unshare": "Freigabe aufheben"
+    },
+    "tasklist": {
+      "title": "Aufgaben"
+    },
+    "text": {
+      "loadError": "Beim Laden des Inhalts ist ein Fehler aufgetreten"
+    },
+    "thread": {
+      "loadError": "Thread konnte nicht geladen werden: {{error}}"
+    },
+    "video": {
+      "unsupported": "Ihr Browser unterstützt das Video-Tag nicht."
     }
   }
 }

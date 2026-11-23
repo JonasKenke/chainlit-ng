@@ -108,20 +108,14 @@ export const ModePicker = ({
         <img
           className={cn('rounded-md', className)}
           src={apiClient.buildEndpoint(icon)}
-          alt="Mode option icon"
+          alt=""
         />
       );
     }
 
     // Remote URL
     if (icon.startsWith('http://') || icon.startsWith('https://')) {
-      return (
-        <img
-          className={cn('rounded-md', className)}
-          src={icon}
-          alt="Mode option icon"
-        />
-      );
+      return <img className={cn('rounded-md', className)} src={icon} alt="" />;
     }
 
     // Lucide icon name

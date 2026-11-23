@@ -1,4 +1,8 @@
+import json
+import re
+from collections import Counter
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -384,3 +388,57 @@ class TestTranslationsEdgeCases:
         missing_errors = [e for e in errors if "Missing" in e]
         assert len(extra_errors) == 2
         assert len(missing_errors) == 3
+
+
+TRANSLATIONS = Path(__file__).resolve().parent.parent / "chainlit" / "translations"
+BASE_LOCALE = "en-US"
+PLACEHOLDER = re.compile(r"\{\{[^}]+\}\}")
+
+
+def _flatten_bundle(value, prefix=""):
+    flat = {}
+    for key, item in value.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(item, dict):
+            flat.update(_flatten_bundle(item, path))
+        else:
+            flat[path] = item
+    return flat
+
+
+def _load_bundle(locale):
+    return _flatten_bundle(
+        json.loads((TRANSLATIONS / f"{locale}.json").read_text(encoding="utf-8"))
+    )
+
+
+def _other_locales():
+    return sorted(
+        path.stem for path in TRANSLATIONS.glob("*.json") if path.stem != BASE_LOCALE
+    )
+
+
+def test_every_locale_has_the_english_keys():
+    base = _load_bundle(BASE_LOCALE)
+    for locale in _other_locales():
+        current = _load_bundle(locale)
+        missing = sorted(set(base) - set(current))
+        extra = sorted(set(current) - set(base))
+        assert not missing, f"{locale} is missing {len(missing)} keys: {missing[:10]}"
+        assert not extra, f"{locale} has {len(extra)} unknown keys: {extra[:10]}"
+
+
+def test_no_locale_has_blank_translations():
+    for locale in _other_locales():
+        for key, value in _load_bundle(locale).items():
+            assert isinstance(value, str), f"{locale}:{key} is not a string"
+            assert value.strip(), f"{locale}:{key} is blank"
+
+
+def test_placeholders_match_english():
+    base = _load_bundle(BASE_LOCALE)
+    for locale in _other_locales():
+        for key, value in _load_bundle(locale).items():
+            assert Counter(PLACEHOLDER.findall(value)) == Counter(
+                PLACEHOLDER.findall(base[key])
+            ), f"{locale}:{key} changed its placeholders"

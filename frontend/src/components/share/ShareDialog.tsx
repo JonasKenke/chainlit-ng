@@ -198,7 +198,7 @@ export function ShareDialog({
                 disabled={!threadId || isCopying}
                 variant="outline"
               >
-                Unshare
+                <Translator path="components.share.unshare" />
               </Button>
             ) : null}
           </div>

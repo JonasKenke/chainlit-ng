@@ -2,6 +2,7 @@ import { type ITextElement, useConfig } from '@chainlit-ng/react-client';
 
 import Alert from '@/components/Alert';
 import { Markdown } from '@/components/Markdown';
+import { useTranslation } from '@/components/i18n/Translator';
 import { Skeleton } from '@/components/ui/skeleton';
 
 import { useFetch } from 'hooks/useFetch';
@@ -11,6 +12,7 @@ interface TextElementProps {
 }
 
 const TextElement = ({ element }: TextElementProps) => {
+  const { t } = useTranslation();
   const { data, error, isLoading } = useFetch(element.url || null);
   const { config } = useConfig();
   const allowHtml = config?.features?.unsafe_allow_html;
@@ -24,7 +26,11 @@ const TextElement = ({ element }: TextElementProps) => {
 
   if (error) {
     return (
-      <Alert variant="error">An error occurred while loading the content</Alert>
+      <Alert variant="error">
+        {t('components.text.loadError', {
+          defaultValue: 'An error occurred while loading the content'
+        })}
+      </Alert>
     );
   }
 

@@ -6,7 +6,9 @@
       "continue": "Continuer",
       "goBack": "Retour",
       "reset": "Réinitialiser",
-      "submit": "Envoyer"
+      "submit": "Envoyer",
+      "close": "Fermer",
+      "save": "Enregistrer"
     },
     "status": {
       "loading": "Chargement...",
@@ -14,7 +16,9 @@
         "default": "Une erreur est survenue",
         "serverConnection": "Impossible de joindre le serveur"
       }
-    }
+    },
+    "latest": "Dernier",
+    "current": "Actuel"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "Envoyer le message",
         "stop": "Arrêter la tâche",
         "attachFiles": "Joindre des fichiers"
+      },
+      "errors": {
+        "tooLarge": "Le message est trop volumineux. La taille maximale est de 1 Mo."
       }
     },
     "favorites": {
@@ -123,7 +130,8 @@
           "updating": "Mise à jour",
           "updated": "Commentaire mis à jour"
         }
-      }
+      },
+      "output": "Sortie"
     },
     "history": {
       "title": "Dernières entrées",
@@ -146,7 +154,11 @@
         "adding": "Ajout…",
         "goHome": "Accueil",
         "notFound": "Prompt introuvable ou n'est plus partagé.",
-        "addError": "Échec de l'ajout du prompt"
+        "addError": "Échec de l'ajout du prompt",
+        "version": "Version",
+        "latestVersion": "v{{version}} (la plus récente)",
+        "addVersion": "Ajouter v{{version}} à ma galerie",
+        "openCopy": "Ouvrir ma copie"
       },
       "unshare": "Ne plus partager",
       "delete": "Supprimer",
@@ -166,7 +178,426 @@
       "new": "Nouveau prompt",
       "search": "Rechercher des prompts...",
       "saved": "Prompt enregistré !",
-      "unshared": "Partage supprimé"
+      "unshared": "Partage supprimé",
+      "tab": "Prompts",
+      "updateAvailable": "Mise à jour disponible : v{{version}}",
+      "versions": "Historique des versions (v{{version}})",
+      "updatesToast": "{{count}} prompt enregistré a une version partagée plus récente",
+      "updatesToastAction": "Examiner",
+      "diff": {
+        "title": "Mise à jour du prompt",
+        "historyTitle": "Historique des versions",
+        "description": "Choisissez une version, puis mettez à jour votre copie.",
+        "historyDescription": "Choisissez une version pour voir ce qui a changé.",
+        "version": "Version",
+        "unified": "Unifié",
+        "split": "Côte à côte",
+        "localChanges": "Ce prompt a des modifications locales",
+        "localChangesHint": "La mise à jour remplace le contenu local par la version partagée. Votre modification reste disponible dans l’historique du prompt.",
+        "confirmUpdate": "Remplacer le contenu local",
+        "stale": "Ce prompt a changé après le chargement de l’aperçu. Le diff a été actualisé ; vérifiez-le à nouveau.",
+        "sourceUnavailable": "La source partagée n’est plus disponible",
+        "sourceUnavailableHint": "Cette copie conserve son contenu actuel. Détachez-la pour ne plus rechercher de mises à jour.",
+        "detach": "Détacher de la source",
+        "detached": "Détaché de la source partagée",
+        "alreadyCurrent": "Ce prompt correspond déjà à la version partagée.",
+        "noChanges": "Aucune modification de ligne.",
+        "truncated": "Le diff est tronqué ; seule la première partie est affichée.",
+        "updated": "Prompt mis à jour depuis la version partagée",
+        "update": "Mettre à jour vers v{{version}}",
+        "updateFallback": "Mettre à jour",
+        "updateError": "Impossible de mettre à jour ce prompt",
+        "loadError": "Impossible de charger la comparaison des versions.",
+        "currentVersion": "Ceci est votre version actuelle.",
+        "noVersions": "Aucune autre version n’est disponible.",
+        "versionUnavailable": "Cette version n’est plus disponible. Choisissez-en une autre.",
+        "downgrade": "Rétrograder vers v{{version}}",
+        "downgraded": "Prompt rétrogradé vers v{{version}}"
+      },
+      "updatesToast_one": "{{count}} prompt enregistré a une version partagée plus récente",
+      "updatesToast_other": "{{count}} prompts enregistrés ont une version partagée plus récente"
+    },
+    "mcp": {
+      "title": "Serveurs MCP",
+      "tabs": {
+        "connect": "Connecter un MCP",
+        "list": "Mes MCP"
+      },
+      "configured": {
+        "title": "Serveurs configurés"
+      },
+      "connect": "Connecter",
+      "reconnect": "Reconnecter",
+      "add": {
+        "title": "Ajouter votre propre serveur"
+      },
+      "form": {
+        "name": "Nom",
+        "namePlaceholder": "Exemple : Stripe",
+        "type": "Type",
+        "url": "URL du serveur",
+        "urlPlaceholder": "Exemple : http://localhost:8000/mcp",
+        "headers": "En-têtes (JSON, facultatif)",
+        "headersPlaceholder": "Exemple : {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "Les en-têtes doivent être un objet JSON de valeurs de type chaîne",
+        "add": "Ajouter",
+        "useOAuth": "Se connecter avec OAuth (HTTP streamable uniquement)"
+      },
+      "list": {
+        "empty": "Aucun serveur MCP connecté",
+        "addFirst": "Ajouter votre premier serveur MCP",
+        "url": "URL",
+        "tools": "Outils",
+        "removeTitle": "Êtes-vous sûr ?",
+        "removeDescription": "Cela déconnectera le serveur MCP \"{{name}}\". Cette action est irréversible.",
+        "signIn": "Se connecter à {{host}}",
+        "remove": "Supprimer le serveur MCP"
+      },
+      "messages": {
+        "connecting": "Connexion au MCP...",
+        "connected": "MCP connecté !",
+        "adding": "Ajout de MCP...",
+        "added": "MCP ajouté !",
+        "reconnecting": "Reconnexion à MCP...",
+        "reconnected": "MCP reconnecté !",
+        "removing": "Suppression de MCP...",
+        "removed": "MCP supprimé !",
+        "authorizationRequired": "Connectez-vous pour terminer la connexion"
+      },
+      "errors": {
+        "connect": "Impossible de se connecter au serveur MCP"
+      },
+      "library": {
+        "button": "Prompts et ressources MCP",
+        "title": "Bibliothèque MCP",
+        "tabs": {
+          "prompts": "Prompts",
+          "resources": "Ressources"
+        },
+        "prompts": {
+          "empty": "Aucun prompt provenant des serveurs MCP connectés"
+        },
+        "resources": {
+          "empty": "Aucune ressource provenant des serveurs MCP connectés"
+        },
+        "promptInsert": "Insérer",
+        "promptInserted": "Prompt inséré dans la zone de saisie",
+        "promptFailed": "Impossible de récupérer le prompt depuis le serveur MCP",
+        "resourceAdded": "Ressource ajoutée à la conversation",
+        "resourceFailed": "Impossible de lire la ressource depuis le serveur MCP"
+      }
+    },
+    "promptScheduling": {
+      "button": "Prompts planifiés",
+      "title": "Prompts planifiés",
+      "create": "Créer un prompt planifié",
+      "edit": "Modifier le prompt planifié",
+      "new": "Nouvelle planification",
+      "empty": "Aucun prompt planifié pour l'instant",
+      "nextRun": "Prochaine exécution",
+      "lastRun": "Dernière exécution",
+      "lastStatus": "Dernier statut",
+      "status": {
+        "active": "Actif",
+        "paused": "En pause",
+        "success": "Réussi",
+        "failure": "Échec",
+        "successWithWarnings": "Réussi avec avertissements"
+      },
+      "actions": {
+        "edit": "Modifier la planification",
+        "pause": "Mettre la planification en pause",
+        "resume": "Reprendre la planification",
+        "delete": "Supprimer la planification",
+        "runNow": "Exécuter maintenant",
+        "viewThread": "Voir la dernière exécution"
+      },
+      "form": {
+        "prompt": "Prompt",
+        "chooseGallery": "Choisir dans la galerie de prompts",
+        "profile": "Modèle",
+        "chatProfile": "Profil de chat",
+        "defaultAssistant": "Assistant par défaut",
+        "timezone": "Fuseau horaire",
+        "recurrence": "Récurrence",
+        "customFrequency": "Répéter",
+        "interval": "Toutes les",
+        "hours": "heures",
+        "time": "Heure",
+        "weekday": "Jour de la semaine",
+        "dayOfMonth": "Jour du mois",
+        "afterHooks": "Actions après exécution",
+        "unavailable": "indisponible"
+      },
+      "presets": {
+        "daily": "Tous les jours à 09:00",
+        "weekdays": "En semaine à 09:00",
+        "weekly": "Chaque lundi",
+        "monthly": "Chaque mois le 1er",
+        "custom": "Personnalisé"
+      },
+      "custom": {
+        "everyHours": "Toutes les N heures",
+        "daily": "Tous les jours",
+        "weekly": "Toutes les semaines",
+        "monthly": "Tous les mois"
+      },
+      "weekdays": {
+        "monday": "lundi",
+        "tuesday": "mardi",
+        "wednesday": "mercredi",
+        "thursday": "jeudi",
+        "friday": "vendredi",
+        "saturday": "samedi",
+        "sunday": "dimanche"
+      },
+      "overview": {
+        "dailyAt": "Tous les jours à {time}",
+        "weekdaysAt": "En semaine à {time}",
+        "weeklyAt": "Chaque {weekday} à {time}",
+        "monthlyAt": "Chaque mois le jour {day} à {time}",
+        "everyHours": "Toutes les {interval} heures",
+        "everyMinutes": "Toutes les {interval} minutes",
+        "custom": "Planification personnalisée"
+      },
+      "galleryTitle": "Choisir une invite de galerie",
+      "galleryEmpty": "Aucune invite de galerie disponible",
+      "delete": {
+        "title": "Supprimer l'invite planifiée ?",
+        "description": "Cette planification et son exécution en file d’attente seront supprimées."
+      },
+      "errors": {
+        "load": "Impossible de charger les prompts planifiés",
+        "required": "Prompt et cron sont requis",
+        "save": "Impossible d’enregistrer le prompt planifié",
+        "update": "Impossible de mettre à jour le prompt planifié",
+        "delete": "Impossible de supprimer le prompt planifié",
+        "run": "Impossible de mettre en file d’attente le prompt planifié"
+      }
+    },
+    "skills": {
+      "button": "Bibliothèque",
+      "title": "Compétences",
+      "menu": "Actions pour {{name}}",
+      "tab": "Compétences",
+      "new": "Nouvelle compétence",
+      "import": "Importer",
+      "importing": "Importation...",
+      "imported": "Compétence importée",
+      "created": "Compétence créée",
+      "saved": "Compétence enregistrée",
+      "loading": "Chargement des compétences...",
+      "importedBadge": "Importée",
+      "importedBadgeTitle": "Compétence importée. Vérifiez avant activation.",
+      "reviewBeforeEnabling": "Désactivée. Vérifiez avant activation.",
+      "toggle": "Activer/Désactiver {{name}}",
+      "edit": "Modifier la compétence",
+      "export": "Exporter la compétence",
+      "delete": "Supprimer la compétence",
+      "importedBy": "Importée par vous depuis {{source}} · {{date}}",
+      "fromLinkBadge": "Depuis un lien",
+      "sharedBadge": "Partagée",
+      "detached": "Détachée de la source partagée",
+      "libraryUnavailable": "La bibliothèque de compétences est indisponible pour cette couche de données.",
+      "updateAvailable": "Mise à jour disponible v{{version}}",
+      "updatesToast": "Nouvelle version disponible pour {{count}} compétence(s) partagée(s)",
+      "updatesToastAction": "Vérifier",
+      "filter": {
+        "current": "Filtrer les compétences : {{filter}}"
+      },
+      "sections": {
+        "label": "Sections de compétences",
+        "all": "Toutes",
+        "active": "Actives",
+        "review": "À vérifier",
+        "updates": "Mises à jour",
+        "empty": "Aucune compétence dans cette section"
+      },
+      "review": {
+        "title": "Examiner la compétence",
+        "description": "Vérifiez les instructions avant d’activer cette compétence.",
+        "fromLink": "Copiée depuis un lien partagé",
+        "warning": "Si quelque chose semble incorrect, modifiez la compétence au lieu de l’activer.",
+        "enable": "Activer la compétence",
+        "enabling": "Activation en cours...",
+        "enabled": "Compétence activée",
+        "changed": "La compétence a changé depuis son ouverture. Vérifiez à nouveau la version actuelle."
+      },
+      "share": {
+        "title": "Partager la compétence",
+        "description": "Toute personne disposant du lien peut prévisualiser et ajouter une copie.",
+        "descriptionOff": "Créez un lien pour partager cette compétence.",
+        "link": "Lien de partage",
+        "copy": "Copier le lien",
+        "copied": "Lien copié !",
+        "unshare": "Annuler le partage",
+        "unshared": "Partage supprimé",
+        "submit": "Créer le lien",
+        "error": "Impossible de mettre à jour le partage",
+        "open": "Partager {{name}}",
+        "notFound": "Compétence introuvable ou plus partagée.",
+        "goHome": "Accueil",
+        "by": "Par {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "Version",
+        "latestVersion": "v{{version}} (dernière version)",
+        "addVersion": "Ajouter v{{version}} à ma bibliothèque",
+        "add": "Ajouter à ma bibliothèque",
+        "adding": "Ajout...",
+        "openCopy": "Ouvrir ma copie",
+        "openLibrary": "Ouvrir ma bibliothèque",
+        "added": "Compétence ajoutée à votre bibliothèque",
+        "addedReview": "Ajoutée comme copie désactivée. Vérifiez-la dans votre bibliothèque avant de l'activer.",
+        "addError": "Échec de l'ajout de la compétence",
+        "alreadyAdded": "Cette compétence est déjà dans votre bibliothèque.",
+        "nameTaken": "Une compétence portant ce nom existe déjà. Renommez votre compétence, puis ajoutez celle-ci à nouveau.",
+        "disabledNote": "Les copies sont ajoutées désactivées. N'activez une copie qu'après avoir vérifié ses instructions.",
+        "unavailable": "La bibliothèque de compétences n'est pas disponible dans cette application."
+      },
+      "update": {
+        "title": "Mettre à jour la compétence",
+        "description": "Choisissez une version, puis mettez à jour votre copie.",
+        "version": "Version",
+        "unified": "Unifié",
+        "split": "Côte à côte",
+        "localChanges": "Cette copie contient des modifications locales",
+        "localChangesHint": "La mise à jour remplace le contenu local par la version partagée. Votre modification reste disponible dans l'historique de la compétence.",
+        "confirmUpdate": "Remplacer le contenu local",
+        "stale": "La compétence a changé après le chargement de l'aperçu. La comparaison a été actualisée ; vérifiez-la à nouveau.",
+        "sourceUnavailable": "La source partagée n'est plus disponible",
+        "sourceUnavailableHint": "Cette copie conserve son contenu actuel. Détachez-la pour ne plus rechercher de mises à jour.",
+        "detach": "Détacher de la source",
+        "detached": "Détachée de la source partagée",
+        "alreadyCurrent": "Cette compétence correspond déjà à la version partagée.",
+        "noChanges": "Aucune modification de ligne.",
+        "truncated": "Le diff est tronqué ; seule la première partie est affichée.",
+        "updated": "Compétence mise à jour depuis la version partagée ; vérifiez avant de l'activer",
+        "update": "Mettre à jour vers v{{version}}",
+        "updateFallback": "Mettre à jour",
+        "error": "Impossible de mettre à jour cette compétence",
+        "loadError": "Impossible de charger les versions partagées.",
+        "versionConflict": "Cette version n'appartient pas à la source partagée.",
+        "historyTitle": "Historique des versions",
+        "historyDescription": "Choisissez une version pour voir ce qui a changé.",
+        "currentVersion": "Ceci est votre version actuelle.",
+        "noVersions": "Aucune autre version n'est disponible.",
+        "versionUnavailable": "Cette version n'est plus disponible. Choisissez-en une autre.",
+        "downgrade": "Rétrograder vers v{{version}}",
+        "downgraded": "Compétence rétrogradée vers v{{version}}"
+      },
+      "empty": {
+        "title": "Aucune compétence pour le moment",
+        "description": "Créez une compétence ou importez un fichier Markdown"
+      },
+      "editor": {
+        "createTitle": "Nouvelle compétence",
+        "editTitle": "Modifier la compétence",
+        "name": "Nom",
+        "nameHint": "Lettres minuscules, chiffres et traits d'union ; doit être unique.",
+        "description": "Description",
+        "descriptionHint": "Le modèle voit cette ligne pour décider quand utiliser la compétence.",
+        "body": "Instructions (Markdown)",
+        "preview": "Aperçu",
+        "previewEmpty": "Rien à afficher pour le moment.",
+        "save": "Enregistrer la compétence",
+        "saving": "Enregistrement...",
+        "cancel": "Annuler"
+      },
+      "validation": {
+        "nameRequired": "Le nom est requis.",
+        "namePattern": "Utilisez des lettres minuscules, des chiffres et des traits d'union, en commençant par une lettre ou un chiffre (max 64).",
+        "descriptionRequired": "La description est requise.",
+        "descriptionSingleLine": "La description doit tenir sur une seule ligne.",
+        "descriptionTooLarge": "La description fait {{size}} octets ; le maximum est {{max}}.",
+        "bodyTooLarge": "Les instructions font {{size}} octets ; le maximum est {{max}}.",
+        "fileTooLarge": "Le fichier fait {{size}} octets ; le maximum est {{max}}."
+      },
+      "updatesToast_one": "{{count}} compétence partagée a une version plus récente",
+      "updatesToast_other": "{{count}} compétences partagées ont une version plus récente",
+      "versions": "Historique des versions (v{{version}})",
+      "enable": "Activer {{name}}"
+    },
+    "question": {
+      "title": "Question",
+      "ariaLabel": "Question de l'assistant",
+      "options": "Options",
+      "other": "Autre",
+      "and": "et",
+      "otherAriaLabel": "Autre réponse",
+      "otherPlaceholder": "Saisissez votre réponse...",
+      "progress": "{{current}}/{{total}}",
+      "next": "Suivant",
+      "back": "Retour",
+      "reviewTitle": "Vérifiez vos réponses",
+      "edit": "Modifier",
+      "optional": "Facultatif",
+      "selectMultiple": "Sélectionnez tout ce qui s'applique",
+      "notAnswered": "Sans réponse",
+      "datePlaceholder": "Choisir une date",
+      "clear": "Effacer",
+      "answeredPrivately": "Réponse privée",
+      "status": {
+        "pending": "En attente de votre réponse",
+        "answered": "Répondu",
+        "expired": "Expiré",
+        "superseded": "Remplacé",
+        "orphaned": "Indisponible"
+      },
+      "errors": {
+        "answer": "Impossible de répondre à la question",
+        "required": "Cette question est obligatoire",
+        "email": "Saisissez une adresse e-mail valide",
+        "date": "Choisissez une date valide",
+        "number": "Saisissez un nombre valide",
+        "url": "Saisissez une URL valide",
+        "tel": "Saisissez un numéro de téléphone valide"
+      },
+      "answer": "Votre réponse",
+      "answerAriaLabel": "Votre réponse"
+    },
+    "approval": {
+      "ariaLabel": "Approbation pour {{tool}}",
+      "approve": "Approuver",
+      "reject": "Rejeter",
+      "edit": "Modifier",
+      "requestChanges": "Demander des modifications",
+      "saveAndApprove": "Enregistrer et approuver",
+      "saveEdit": "Enregistrer la modification",
+      "editFields": "Modifier les champs",
+      "editedArgumentsJson": "JSON des arguments modifiés",
+      "comment": "Commentaire",
+      "commentRequired": "Que faut-il modifier ? (obligatoire)",
+      "commentRequiredError": "Un commentaire est obligatoire pour demander des modifications",
+      "none": "Aucun",
+      "onePerLine": "Un par ligne ou séparés par des virgules",
+      "serverHeld": "Côté serveur",
+      "noChanges": "Aucune modification à enregistrer",
+      "invalidJson": "Les arguments doivent être un JSON valide",
+      "jsonObjectRequired": "Les arguments doivent être un objet JSON",
+      "editedContentNote": "Contenu modifié ; les modifications approuvées figurent dans le diff.",
+      "originalToEdited": "Original → modifié",
+      "added": "Ajouté",
+      "removed": "Supprimé",
+      "replaced": "Remplacé",
+      "before": "Avant :",
+      "after": "Après :",
+      "errors": {
+        "decide": "Impossible de statuer sur l’approbation"
+      },
+      "fieldErrors": {
+        "required": "{{field}} est obligatoire",
+        "wholeNumber": "{{field}} doit être un nombre entier",
+        "number": "{{field}} doit être un nombre"
+      },
+      "status": {
+        "approved": "Approuvé",
+        "edited": "Approuvé avec modifications",
+        "rejected": "Rejeté",
+        "changesRequested": "Modifications demandées",
+        "expired": "Expiré",
+        "superseded": "Supplanté",
+        "orphaned": "Indisponible"
+      }
     }
   },
   "threadHistory": {
@@ -236,6 +667,11 @@
       "success": "Toutes les discussions ont été effacées",
       "inProgress": "Effacement de toutes les discussions",
       "error": "Impossible d'effacer toutes les discussions"
+    },
+    "errors": {
+      "fetch": "Erreur lors de la récupération des fils : {{error}}",
+      "resume": "Impossible de reprendre la discussion",
+      "resumeDetail": "Impossible de reprendre la discussion : {{error}}"
     }
   },
   "navigation": {
@@ -246,7 +682,9 @@
         "light": "Thème clair",
         "dark": "Thème sombre",
         "system": "Suivre le système"
-      }
+      },
+      "toggleTheme": "Changer de thème",
+      "selectProfile": "Sélectionner un profil"
     },
     "newChat": {
       "button": "Nouvelle discussion",
@@ -263,7 +701,8 @@
         "apiKeys": "Clés API",
         "logout": "Se déconnecter",
         "clearAll": "Effacer toutes les discussions"
-      }
+      },
+      "imageAlt": "Image de l'utilisateur"
     }
   },
   "apiKeys": {
@@ -299,6 +738,47 @@
         "single": "Choisir une date",
         "range": "Choisir une plage de dates"
       }
+    },
+    "audio": {
+      "listening": "Écoute"
+    },
+    "copy": {
+      "failed": "Échec de la copie : {{error}}"
+    },
+    "dataframe": {
+      "noResults": "Aucun résultat."
+    },
+    "image": {
+      "closeLightbox": "Fermer la visionneuse"
+    },
+    "pdf": {
+      "printOpen": "Imprimer/Ouvrir le PDF",
+      "download": "Télécharger le PDF",
+      "loading": "Chargement du PDF...",
+      "openLarger": "Ouvrir le PDF dans une vue plus grande",
+      "loadingPreview": "Chargement de l'aperçu...",
+      "view": "Afficher le PDF",
+      "document": "Document PDF",
+      "modalDescription": "Fenêtre modale affichant le PDF en plus grand."
+    },
+    "plotly": {
+      "loading": "Chargement...",
+      "error": "Une erreur s'est produite"
+    },
+    "share": {
+      "unshare": "Annuler le partage"
+    },
+    "tasklist": {
+      "title": "Tâches"
+    },
+    "text": {
+      "loadError": "Une erreur s'est produite lors du chargement du contenu"
+    },
+    "thread": {
+      "loadError": "Échec du chargement du fil : {{error}}"
+    },
+    "video": {
+      "unsupported": "Votre navigateur ne prend pas en charge la balise vidéo."
     }
   }
 }

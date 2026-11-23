@@ -3,6 +3,7 @@ import { IImageElement } from '@chainlit-ng/react-client';
 import { X } from 'lucide-react';
 import { useState } from 'react';
 
+import { useTranslation } from '@/components/i18n/Translator';
 import {
   Dialog,
   DialogContent,
@@ -11,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 
 const ImageElement = ({ element }: { element: IImageElement }) => {
+  const { t } = useTranslation();
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   if (!element.url) return null;
@@ -43,7 +45,9 @@ const ImageElement = ({ element }: { element: IImageElement }) => {
               <button
                 onClick={() => setLightboxOpen(false)}
                 className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white"
-                aria-label="Close lightbox"
+                aria-label={t('components.image.closeLightbox', {
+                  defaultValue: 'Close lightbox'
+                })}
               >
                 <X className="h-6 w-6" />
               </button>

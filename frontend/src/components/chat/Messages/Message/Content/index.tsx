@@ -5,6 +5,7 @@ import { forwardRef, memo, useMemo } from 'react';
 
 import { CURSOR_PLACEHOLDER } from '@/components/BlinkingCursor';
 import { Markdown } from '@/components/Markdown';
+import { useTranslation } from '@/components/i18n/Translator';
 
 import { InlinedElements } from './InlinedElements';
 
@@ -36,6 +37,7 @@ const MessageContent = memo(
       { message, elements, allowHtml, latex, renderMarkdown, sections },
       ref
     ) => {
+      const { t } = useTranslation();
       const outputContent =
         message.streaming && message.output
           ? message.output + CURSOR_PLACEHOLDER
@@ -67,7 +69,9 @@ const MessageContent = memo(
       const outputMarkdown = displayOutput ? (
         <>
           {!isMessage && displayInput && message.output ? (
-            <div className="font-medium">Output</div>
+            <div className="font-medium">
+              {t('chat.messages.output', { defaultValue: 'Output' })}
+            </div>
           ) : null}
           <Markdown
             allowHtml={allowHtml}

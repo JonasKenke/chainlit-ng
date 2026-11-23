@@ -99,7 +99,7 @@ const Env = () => {
               ))}
 
               <Button id="submit-env" type="submit" className="w-full mt-4">
-                Save
+                {t('common.actions.save', { defaultValue: 'Save' })}
               </Button>
             </form>
           </CardContent>

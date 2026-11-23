@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import PendingInteractionDialog from '@/components/PendingInteractionDialog';
+import { useTranslation } from '@/components/i18n/Translator';
 
 import {
   consumeConfirmedNavigation,
@@ -23,6 +24,7 @@ interface Props {
 export default function AutoResumeThread({ id }: Props) {
   const navigate = useNavigate();
   const { config } = useConfig();
+  const { t } = useTranslation();
   const { clear, setIdToResume } = useChatInteract();
   const { session, idToResume } = useChatSession();
   const { threadId } = useChatMessages();
@@ -69,7 +71,11 @@ export default function AutoResumeThread({ id }: Props) {
     }
     if (session?.error) {
       resumeTargetRef.current = undefined;
-      toast.error("Couldn't resume chat");
+      toast.error(
+        t('threadHistory.errors.resume', {
+          defaultValue: "Couldn't resume chat"
+        })
+      );
       navigate('/');
     }
   }, [session, idToResume, id]);
@@ -77,7 +83,12 @@ export default function AutoResumeThread({ id }: Props) {
   useEffect(() => {
     if (resumeThreadError) {
       resumeTargetRef.current = undefined;
-      toast.error("Couldn't resume chat: " + resumeThreadError);
+      toast.error(
+        t('threadHistory.errors.resumeDetail', {
+          defaultValue: "Couldn't resume chat: {{error}}",
+          error: resumeThreadError
+        })
+      );
       navigate('/');
       setResumeThreadError(undefined);
     }

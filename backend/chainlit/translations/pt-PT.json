@@ -6,50 +6,54 @@
       "continue": "Continuar",
       "goBack": "Voltar",
       "reset": "Repor",
-      "submit": "Enviar"
+      "submit": "Enviar",
+      "close": "Fechar",
+      "save": "Guardar"
     },
     "status": {
       "loading": "A carregar...",
       "error": {
         "default": "Ocorreu um erro",
-        "serverConnection": "N\u00e3o foi poss\u00edvel estabelecer liga\u00e7\u00e3o ao servidor"
+        "serverConnection": "Não foi possível estabelecer ligação ao servidor"
       }
-    }
+    },
+    "latest": "Mais recente",
+    "current": "Atual"
   },
   "auth": {
     "login": {
-      "title": "Inicie sess\u00e3o para aceder \u00e0 aplica\u00e7\u00e3o",
+      "title": "Inicie sessão para aceder à aplicação",
       "form": {
         "email": {
           "label": "E-mail",
-          "required": "o e-mail \u00e9 obrigat\u00f3rio",
+          "required": "o e-mail é obrigatório",
           "placeholder": "me@example.com"
         },
         "password": {
           "label": "Palavra-passe",
-          "required": "a palavra-passe \u00e9 obrigat\u00f3ria"
+          "required": "a palavra-passe é obrigatória"
         },
         "actions": {
-          "signin": "Iniciar sess\u00e3o"
+          "signin": "Iniciar sessão"
         },
         "alternativeText": {
           "or": "Ou"
         }
       },
       "errors": {
-        "default": "N\u00e3o foi poss\u00edvel iniciar sess\u00e3o",
-        "signin": "Tente iniciar sess\u00e3o com outra conta",
-        "oauthSignin": "Tente iniciar sess\u00e3o com outra conta",
-        "redirectUriMismatch": "O URI de redirecionamento n\u00e3o corresponde \u00e0 configura\u00e7\u00e3o da aplica\u00e7\u00e3o OAuth",
-        "oauthCallback": "Tente iniciar sess\u00e3o com outra conta",
-        "oauthCreateAccount": "Tente iniciar sess\u00e3o com outra conta",
-        "emailCreateAccount": "Tente iniciar sess\u00e3o com outra conta",
-        "callback": "Tente iniciar sess\u00e3o com outra conta",
-        "oauthAccountNotLinked": "Para confirmar a sua identidade, inicie sess\u00e3o com a mesma conta utilizada anteriormente",
-        "emailSignin": "N\u00e3o foi poss\u00edvel enviar o e-mail",
+        "default": "Não foi possível iniciar sessão",
+        "signin": "Tente iniciar sessão com outra conta",
+        "oauthSignin": "Tente iniciar sessão com outra conta",
+        "redirectUriMismatch": "O URI de redirecionamento não corresponde à configuração da aplicação OAuth",
+        "oauthCallback": "Tente iniciar sessão com outra conta",
+        "oauthCreateAccount": "Tente iniciar sessão com outra conta",
+        "emailCreateAccount": "Tente iniciar sessão com outra conta",
+        "callback": "Tente iniciar sessão com outra conta",
+        "oauthAccountNotLinked": "Para confirmar a sua identidade, inicie sessão com a mesma conta utilizada anteriormente",
+        "emailSignin": "Não foi possível enviar o e-mail",
         "emailVerify": "Por favor, verifique o seu e-mail. Foi enviada uma nova mensagem",
-        "credentialsSignin": "Erro ao iniciar sess\u00e3o. Verifique se os dados fornecidos est\u00e3o corretos",
-        "sessionRequired": "Por favor, inicie sess\u00e3o para aceder a esta p\u00e1gina"
+        "credentialsSignin": "Erro ao iniciar sessão. Verifique se os dados fornecidos estão corretos",
+        "sessionRequired": "Por favor, inicie sessão para aceder a esta página"
       }
     },
     "provider": {
@@ -63,6 +67,9 @@
         "send": "Enviar mensagem",
         "stop": "Parar tarefa",
         "attachFiles": "Anexar ficheiros"
+      },
+      "errors": {
+        "tooLarge": "A mensagem é demasiado grande. O tamanho máximo da mensagem é 1 MB."
       }
     },
     "favorites": {
@@ -70,18 +77,18 @@
       "headline": "Mensagens favoritas",
       "remove": "Remover favorito",
       "empty": {
-        "title": "Ainda n\u00e3o h\u00e1 prompts guardados",
-        "description": "Comece por enviar um prompt e marc\u00e1-lo com estrela, ou marque com estrela um prompt de conversas anteriores"
+        "title": "Ainda não há prompts guardados",
+        "description": "Comece por enviar um prompt e marcá-lo com estrela, ou marque com estrela um prompt de conversas anteriores"
       }
     },
     "commands": {
       "button": "Ferramentas",
       "changeTool": "Alterar ferramenta",
-      "availableTools": "Ferramentas dispon\u00edveis"
+      "availableTools": "Ferramentas disponíveis"
     },
     "speech": {
-      "start": "Iniciar grava\u00e7\u00e3o",
-      "stop": "Parar grava\u00e7\u00e3o",
+      "start": "Iniciar gravação",
+      "stop": "Parar gravação",
       "connecting": "A ligar"
     },
     "fileUpload": {
@@ -106,35 +113,36 @@
       },
       "actions": {
         "copy": {
-          "button": "Copiar para a \u00e1rea de transfer\u00eancia",
+          "button": "Copiar para a área de transferência",
           "success": "Copiado!"
         }
       },
       "feedback": {
-        "positive": "\u00datil",
-        "negative": "N\u00e3o \u00fatil",
-        "edit": "Editar coment\u00e1rio",
+        "positive": "Útil",
+        "negative": "Não útil",
+        "edit": "Editar comentário",
         "dialog": {
-          "title": "Adicionar um coment\u00e1rio",
-          "submit": "Enviar coment\u00e1rio",
-          "yourFeedback": "O seu coment\u00e1rio..."
+          "title": "Adicionar um comentário",
+          "submit": "Enviar comentário",
+          "yourFeedback": "O seu comentário..."
         },
         "status": {
           "updating": "A atualizar",
-          "updated": "Coment\u00e1rio atualizado"
+          "updated": "Comentário atualizado"
         }
-      }
+      },
+      "output": "Saída"
     },
     "history": {
-      "title": "\u00daltimas entradas",
-      "empty": "Est\u00e1 vazio...",
-      "show": "Mostrar hist\u00f3rico"
+      "title": "Últimas entradas",
+      "empty": "Está vazio...",
+      "show": "Mostrar histórico"
     },
     "settings": {
-      "title": "Painel de configura\u00e7\u00f5es",
-      "customize": "Personalize aqui as configura\u00e7\u00f5es do seu chat"
+      "title": "Painel de configurações",
+      "customize": "Personalize aqui as configurações do seu chat"
     },
-    "watermark": "Os modelos de linguagem podem cometer erros. Verifique sempre informa\u00e7\u00f5es importantes.",
+    "watermark": "Os modelos de linguagem podem cometer erros. Verifique sempre informações importantes.",
     "promptGallery": {
       "button": "Galeria de prompts",
       "title": "Galeria de prompts",
@@ -146,7 +154,11 @@
         "adding": "A adicionar…",
         "goHome": "Ir para o início",
         "notFound": "Prompt não encontrado ou já não está partilhado.",
-        "addError": "Falha ao adicionar prompt"
+        "addError": "Falha ao adicionar prompt",
+        "version": "Versão",
+        "latestVersion": "v{{version}} (mais recente)",
+        "addVersion": "Adicionar v{{version}} à minha galeria",
+        "openCopy": "Abrir a minha cópia"
       },
       "unshare": "Cancelar partilha",
       "delete": "Eliminar",
@@ -166,7 +178,426 @@
       "new": "Novo prompt",
       "search": "Pesquisar prompts...",
       "saved": "Prompt guardado!",
-      "unshared": "Partilha removida"
+      "unshared": "Partilha removida",
+      "tab": "Prompts",
+      "updateAvailable": "Atualização disponível v{{version}}",
+      "versions": "Histórico de versões (v{{version}})",
+      "updatesToast": "{{count}} prompt guardado tem uma versão partilhada mais recente",
+      "updatesToastAction": "Rever",
+      "diff": {
+        "title": "Atualizar prompt",
+        "historyTitle": "Histórico de versões",
+        "description": "Escolha uma versão e atualize a sua cópia.",
+        "historyDescription": "Escolha uma versão para ver o que mudou.",
+        "version": "Versão",
+        "unified": "Unificado",
+        "split": "Lado a lado",
+        "localChanges": "Este prompt tem edições locais",
+        "localChangesHint": "A atualização substitui o conteúdo local pela versão partilhada. A sua edição continua disponível no histórico do prompt.",
+        "confirmUpdate": "Substituir conteúdo local",
+        "stale": "Este prompt foi alterado após o carregamento da pré-visualização. A comparação foi atualizada; reveja-a novamente.",
+        "sourceUnavailable": "A origem partilhada já não está disponível",
+        "sourceUnavailableHint": "Esta cópia mantém o conteúdo atual. Desassocie-a para deixar de procurar atualizações.",
+        "detach": "Desassociar da origem",
+        "detached": "Desassociado da origem partilhada",
+        "alreadyCurrent": "Este prompt já corresponde à versão partilhada.",
+        "noChanges": "Sem alterações nas linhas.",
+        "truncated": "A comparação está truncada; só é mostrada a primeira parte.",
+        "updated": "Prompt atualizado a partir da versão partilhada",
+        "update": "Atualizar para v{{version}}",
+        "updateFallback": "Atualizar",
+        "updateError": "Não foi possível atualizar este prompt",
+        "loadError": "Não foi possível carregar a comparação de versões.",
+        "currentVersion": "Esta é a sua versão atual.",
+        "noVersions": "Não há outras versões disponíveis.",
+        "versionUnavailable": "Essa versão já não está disponível. Escolha outra.",
+        "downgrade": "Reverter para v{{version}}",
+        "downgraded": "Prompt revertido para v{{version}}"
+      },
+      "updatesToast_one": "{{count}} prompt guardado tem uma versão partilhada mais recente",
+      "updatesToast_other": "{{count}} prompts guardados têm uma versão partilhada mais recente"
+    },
+    "mcp": {
+      "title": "Servidores MCP",
+      "tabs": {
+        "connect": "Conectar um MCP",
+        "list": "Os meus MCPs"
+      },
+      "configured": {
+        "title": "Servidores configurados"
+      },
+      "connect": "Conectar",
+      "reconnect": "Reconectar",
+      "add": {
+        "title": "Adicionar o seu próprio servidor"
+      },
+      "form": {
+        "name": "Nome",
+        "namePlaceholder": "Exemplo: Stripe",
+        "type": "Tipo",
+        "url": "URL do servidor",
+        "urlPlaceholder": "Exemplo: http://localhost:8000/mcp",
+        "headers": "Cabeçalhos (JSON, opcional)",
+        "headersPlaceholder": "Exemplo: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "Os cabeçalhos devem ser um objeto JSON com valores de string",
+        "add": "Adicionar",
+        "useOAuth": "Iniciar sessão com OAuth (apenas HTTP streamable)"
+      },
+      "list": {
+        "empty": "Nenhum servidor MCP conectado",
+        "addFirst": "Adicione o seu primeiro servidor MCP",
+        "url": "URL",
+        "tools": "Ferramentas",
+        "removeTitle": "Tem a certeza?",
+        "removeDescription": "Isto vai desconectar o servidor MCP \"{{name}}\". Esta ação não pode ser anulada.",
+        "signIn": "Iniciar sessão em {{host}}",
+        "remove": "Remover servidor MCP"
+      },
+      "messages": {
+        "connecting": "A conectar ao MCP...",
+        "connected": "MCP conectado!",
+        "adding": "A adicionar MCP...",
+        "added": "MCP adicionado!",
+        "reconnecting": "A reconectar MCP...",
+        "reconnected": "MCP reconectado!",
+        "removing": "A remover MCP...",
+        "removed": "MCP removido!",
+        "authorizationRequired": "Inicie sessão para concluir a ligação"
+      },
+      "errors": {
+        "connect": "Não foi possível ligar ao servidor MCP"
+      },
+      "library": {
+        "button": "Prompts e recursos MCP",
+        "title": "Biblioteca MCP",
+        "tabs": {
+          "prompts": "Prompts",
+          "resources": "Recursos"
+        },
+        "prompts": {
+          "empty": "Nenhum prompt dos servidores MCP ligados"
+        },
+        "resources": {
+          "empty": "Nenhum recurso dos servidores MCP ligados"
+        },
+        "promptInsert": "Inserir",
+        "promptInserted": "Prompt inserido no compositor",
+        "promptFailed": "Não foi possível obter o prompt do servidor MCP",
+        "resourceAdded": "Recurso adicionado ao chat",
+        "resourceFailed": "Não foi possível ler o recurso do servidor MCP"
+      }
+    },
+    "promptScheduling": {
+      "button": "Prompts agendados",
+      "title": "Prompts agendados",
+      "create": "Criar prompt agendado",
+      "edit": "Editar prompt agendado",
+      "new": "Novo agendamento",
+      "empty": "Ainda não há prompts agendados",
+      "nextRun": "Próxima execução",
+      "lastRun": "Última execução",
+      "lastStatus": "Último estado",
+      "status": {
+        "active": "Ativo",
+        "paused": "Pausado",
+        "success": "Sucesso",
+        "failure": "Falhou",
+        "successWithWarnings": "Sucesso com avisos"
+      },
+      "actions": {
+        "edit": "Editar agendamento",
+        "pause": "Pausar agendamento",
+        "resume": "Retomar agendamento",
+        "delete": "Eliminar agendamento",
+        "runNow": "Executar agora",
+        "viewThread": "Ver última execução"
+      },
+      "form": {
+        "prompt": "Prompt",
+        "chooseGallery": "Escolher da Galeria de Prompts",
+        "profile": "Modelo",
+        "chatProfile": "Perfil de chat",
+        "defaultAssistant": "Assistente predefinido",
+        "timezone": "Fuso horário",
+        "recurrence": "Recorrência",
+        "customFrequency": "Repetir",
+        "interval": "A cada",
+        "hours": "horas",
+        "time": "Hora",
+        "weekday": "Dia da semana",
+        "dayOfMonth": "Dia do mês",
+        "afterHooks": "Ações após conclusão",
+        "unavailable": "indisponível"
+      },
+      "presets": {
+        "daily": "Diariamente às 09:00",
+        "weekdays": "Dias úteis às 09:00",
+        "weekly": "Semanalmente à segunda-feira",
+        "monthly": "Mensalmente no primeiro dia",
+        "custom": "Personalizado"
+      },
+      "custom": {
+        "everyHours": "A cada N horas",
+        "daily": "Todos os dias",
+        "weekly": "Todas as semanas",
+        "monthly": "Todos os meses"
+      },
+      "weekdays": {
+        "monday": "Segunda-feira",
+        "tuesday": "Terça-feira",
+        "wednesday": "Quarta-feira",
+        "thursday": "Quinta-feira",
+        "friday": "Sexta-feira",
+        "saturday": "Sábado",
+        "sunday": "Domingo"
+      },
+      "overview": {
+        "dailyAt": "Diariamente às {time}",
+        "weekdaysAt": "Dias úteis às {time}",
+        "weeklyAt": "Todas as semanas à {weekday} às {time}",
+        "monthlyAt": "Mensalmente no dia {day} às {time}",
+        "everyHours": "A cada {interval} horas",
+        "everyMinutes": "A cada {interval} minutos",
+        "custom": "Agendamento personalizado"
+      },
+      "galleryTitle": "Escolha um prompt da galeria",
+      "galleryEmpty": "Nenhum prompt da galeria disponível",
+      "delete": {
+        "title": "Eliminar prompt agendado?",
+        "description": "Este agendamento e a respetiva execução em fila serão eliminados."
+      },
+      "errors": {
+        "load": "Não foi possível carregar os prompts agendados",
+        "required": "Prompt e cron são obrigatórios",
+        "save": "Não foi possível guardar o prompt agendado",
+        "update": "Não foi possível atualizar o prompt agendado",
+        "delete": "Não foi possível eliminar o prompt agendado",
+        "run": "Não foi possível colocar o prompt agendado em fila"
+      }
+    },
+    "skills": {
+      "button": "Biblioteca",
+      "title": "Competências",
+      "menu": "Ações para {{name}}",
+      "tab": "Competências",
+      "new": "Nova competência",
+      "import": "Importar",
+      "importing": "A importar...",
+      "imported": "Competência importada",
+      "created": "Competência criada",
+      "saved": "Competência guardada",
+      "loading": "A carregar competências...",
+      "importedBadge": "Importada",
+      "importedBadgeTitle": "Competência importada. Rever antes de ativar.",
+      "reviewBeforeEnabling": "Desativada. Rever antes de ativar.",
+      "toggle": "Ativar/desativar {{name}}",
+      "edit": "Editar competência",
+      "export": "Exportar competência",
+      "delete": "Eliminar competência",
+      "importedBy": "Importada por si de {{source}} · {{date}}",
+      "fromLinkBadge": "De link",
+      "sharedBadge": "Partilhada",
+      "detached": "Desvinculada da origem partilhada",
+      "libraryUnavailable": "A biblioteca de competências não está disponível para esta camada de dados.",
+      "updateAvailable": "Atualização disponível v{{version}}",
+      "updatesToast": "Nova versão disponível para {{count}} competência(s) partilhada(s)",
+      "updatesToastAction": "Rever",
+      "filter": {
+        "current": "Filtrar competências: {{filter}}"
+      },
+      "sections": {
+        "label": "Secções de competências",
+        "all": "Todas",
+        "active": "Ativas",
+        "review": "Requer revisão",
+        "updates": "Atualizações",
+        "empty": "Não há competências nesta secção"
+      },
+      "review": {
+        "title": "Rever competência",
+        "description": "Verifique as instruções antes de ativar esta competência.",
+        "fromLink": "Copiada de uma ligação partilhada",
+        "warning": "Se algo parecer errado, edite a competência em vez de a ativar.",
+        "enable": "Ativar competência",
+        "enabling": "A ativar...",
+        "enabled": "Competência ativada",
+        "changed": "A competência foi alterada desde que foi aberta. Reveja novamente a versão atual."
+      },
+      "share": {
+        "title": "Partilhar competência",
+        "description": "Qualquer pessoa com a ligação pode pré-visualizar e adicionar uma cópia.",
+        "descriptionOff": "Crie uma ligação para partilhar esta competência.",
+        "link": "Ligação de partilha",
+        "copy": "Copiar ligação",
+        "copied": "Ligação copiada!",
+        "unshare": "Anular partilha",
+        "unshared": "Partilha removida",
+        "submit": "Criar ligação",
+        "error": "Não foi possível atualizar a partilha",
+        "open": "Partilhar {{name}}",
+        "notFound": "Competência não encontrada ou já não está partilhada.",
+        "goHome": "Ir para o início",
+        "by": "Por {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "Versão",
+        "latestVersion": "v{{version}} (mais recente)",
+        "addVersion": "Adicionar v{{version}} à minha biblioteca",
+        "add": "Adicionar à minha biblioteca",
+        "adding": "A adicionar...",
+        "openCopy": "Abrir a minha cópia",
+        "openLibrary": "Abrir a minha biblioteca",
+        "added": "Competência adicionada à sua biblioteca",
+        "addedReview": "Adicionada como cópia desativada. Reveja-a na sua biblioteca antes de a ativar.",
+        "addError": "Falha ao adicionar a competência",
+        "alreadyAdded": "Esta competência já está na sua biblioteca.",
+        "nameTaken": "Já existe uma competência com este nome. Renomeie a sua competência e volte a adicionar esta.",
+        "disabledNote": "As cópias são adicionadas desativadas. Ative uma apenas depois de rever as respetivas instruções.",
+        "unavailable": "A biblioteca de competências não está disponível nesta aplicação."
+      },
+      "update": {
+        "title": "Atualizar competência",
+        "description": "Escolha uma versão e atualize a sua cópia.",
+        "version": "Versão",
+        "unified": "Unificado",
+        "split": "Lado a lado",
+        "localChanges": "Esta cópia tem edições locais",
+        "localChangesHint": "A atualização substitui o conteúdo local pela versão partilhada. A sua edição continua disponível no histórico da competência.",
+        "confirmUpdate": "Substituir conteúdo local",
+        "stale": "A competência foi alterada depois de a pré-visualização ter sido carregada. A comparação foi atualizada; reveja-a novamente.",
+        "sourceUnavailable": "A origem partilhada já não está disponível",
+        "sourceUnavailableHint": "Esta cópia mantém o conteúdo atual. Desassocie-a para deixar de procurar atualizações.",
+        "detach": "Desassociar da origem",
+        "detached": "Desassociada da origem partilhada",
+        "alreadyCurrent": "Esta competência já corresponde à versão partilhada.",
+        "noChanges": "Sem alterações de linhas.",
+        "truncated": "O diff está truncado; apenas a primeira parte é mostrada.",
+        "updated": "Competência atualizada a partir da versão partilhada; reveja antes de ativar",
+        "update": "Atualizar para v{{version}}",
+        "updateFallback": "Atualizar",
+        "error": "Não foi possível atualizar esta competência",
+        "loadError": "Não foi possível carregar as versões partilhadas.",
+        "versionConflict": "Essa versão não pertence à origem partilhada.",
+        "historyTitle": "Histórico de versões",
+        "historyDescription": "Escolha uma versão para ver o que mudou.",
+        "currentVersion": "Esta é a sua versão atual.",
+        "noVersions": "Não há outras versões disponíveis.",
+        "versionUnavailable": "Essa versão já não está disponível. Escolha outra.",
+        "downgrade": "Reverter para v{{version}}",
+        "downgraded": "Competência revertida para v{{version}}"
+      },
+      "empty": {
+        "title": "Ainda sem competências",
+        "description": "Crie uma competência ou importe um ficheiro Markdown"
+      },
+      "editor": {
+        "createTitle": "Nova competência",
+        "editTitle": "Editar competência",
+        "name": "Nome",
+        "nameHint": "Letras minúsculas, dígitos e hífenes; tem de ser único.",
+        "description": "Descrição",
+        "descriptionHint": "O modelo vê esta linha para decidir quando usar a competência.",
+        "body": "Instruções (Markdown)",
+        "preview": "Pré-visualização",
+        "previewEmpty": "Ainda não há nada para pré-visualizar.",
+        "save": "Guardar competência",
+        "saving": "A guardar...",
+        "cancel": "Cancelar"
+      },
+      "validation": {
+        "nameRequired": "O nome é obrigatório.",
+        "namePattern": "Utilize letras minúsculas, dígitos e hífenes, começando por uma letra ou dígito (máx. 64).",
+        "descriptionRequired": "A descrição é obrigatória.",
+        "descriptionSingleLine": "A descrição tem de ter uma única linha.",
+        "descriptionTooLarge": "A descrição tem {{size}} bytes; o máximo é {{max}}.",
+        "bodyTooLarge": "As instruções têm {{size}} bytes; o máximo é {{max}}.",
+        "fileTooLarge": "O ficheiro tem {{size}} bytes; o máximo é {{max}}."
+      },
+      "updatesToast_one": "{{count}} competência partilhada tem uma versão mais recente",
+      "updatesToast_other": "{{count}} competências partilhadas têm uma versão mais recente",
+      "versions": "Histórico de versões (v{{version}})",
+      "enable": "Ativar {{name}}"
+    },
+    "question": {
+      "title": "Pergunta",
+      "ariaLabel": "Pergunta do assistente",
+      "options": "Opções",
+      "other": "Outro",
+      "and": "e",
+      "otherAriaLabel": "Outra resposta",
+      "otherPlaceholder": "Escreva a sua resposta...",
+      "progress": "{{current}}/{{total}}",
+      "next": "Seguinte",
+      "back": "Voltar",
+      "reviewTitle": "Reveja as suas respostas",
+      "edit": "Editar",
+      "optional": "Opcional",
+      "selectMultiple": "Selecione todas as opções aplicáveis",
+      "notAnswered": "Sem resposta",
+      "datePlaceholder": "Escolha uma data",
+      "clear": "Limpar",
+      "answeredPrivately": "Respondido em privado",
+      "status": {
+        "pending": "A aguardar a sua resposta",
+        "answered": "Respondida",
+        "expired": "Expirada",
+        "superseded": "Substituída",
+        "orphaned": "Indisponível"
+      },
+      "errors": {
+        "answer": "Não foi possível responder à pergunta",
+        "required": "Esta pergunta é obrigatória",
+        "email": "Introduza um endereço de email válido",
+        "date": "Escolha uma data válida",
+        "number": "Introduza um número válido",
+        "url": "Introduza um URL válido",
+        "tel": "Introduza um número de telefone válido"
+      },
+      "answer": "A sua resposta",
+      "answerAriaLabel": "A sua resposta"
+    },
+    "approval": {
+      "ariaLabel": "Aprovação de {{tool}}",
+      "approve": "Aprovar",
+      "reject": "Rejeitar",
+      "edit": "Editar",
+      "requestChanges": "Pedir alterações",
+      "saveAndApprove": "Guardar e aprovar",
+      "saveEdit": "Guardar edição",
+      "editFields": "Editar campos",
+      "editedArgumentsJson": "JSON de argumentos editado",
+      "comment": "Comentário",
+      "commentRequired": "O que deve ser alterado? (obrigatório)",
+      "commentRequiredError": "É necessário um comentário ao pedir alterações",
+      "none": "Nenhum",
+      "onePerLine": "Um por linha ou separados por vírgulas",
+      "serverHeld": "Retido no servidor",
+      "noChanges": "Não há alterações para guardar",
+      "invalidJson": "Os argumentos têm de ser JSON válido",
+      "jsonObjectRequired": "Os argumentos têm de ser um objeto JSON",
+      "editedContentNote": "Conteúdo editado; as alterações aprovadas estão no diff.",
+      "originalToEdited": "Original → editado",
+      "added": "Adicionado",
+      "removed": "Removido",
+      "replaced": "Substituído",
+      "before": "Antes:",
+      "after": "Depois:",
+      "errors": {
+        "decide": "Não foi possível decidir a aprovação"
+      },
+      "fieldErrors": {
+        "required": "{{field}} é obrigatório",
+        "wholeNumber": "{{field}} tem de ser um número inteiro",
+        "number": "{{field}} tem de ser um número"
+      },
+      "status": {
+        "approved": "Aprovado",
+        "edited": "Aprovado com alterações",
+        "rejected": "Rejeitado",
+        "changesRequested": "Alterações solicitadas",
+        "expired": "Expirado",
+        "superseded": "Substituído por outro",
+        "orphaned": "Indisponível"
+      }
     }
   },
   "threadHistory": {
@@ -179,8 +610,8 @@
       "timeframes": {
         "today": "Hoje",
         "yesterday": "Ontem",
-        "previous7days": "\u00daltimos 7 dias",
-        "previous30days": "\u00daltimos 30 dias"
+        "previous7days": "Últimos 7 dias",
+        "previous30days": "Últimos 30 dias"
       },
       "empty": "Nenhuma conversa encontrada",
       "actions": {
@@ -189,7 +620,7 @@
       }
     },
     "thread": {
-      "untitled": "Conversa sem t\u00edtulo",
+      "untitled": "Conversa sem título",
       "menu": {
         "rename": "Renomear",
         "share": "Partilhar",
@@ -197,21 +628,21 @@
       },
       "actions": {
         "share": {
-          "title": "Partilhar liga\u00e7\u00e3o do chat",
+          "title": "Partilhar ligação do chat",
           "button": "Partilhar",
           "status": {
-            "copied": "Liga\u00e7\u00e3o copiada",
-            "created": "Liga\u00e7\u00e3o de partilha criada!",
+            "copied": "Ligação copiada",
+            "created": "Ligação de partilha criada!",
             "unshared": "Partilha desativada para esta conversa"
           },
           "error": {
-            "create": "Erro ao criar liga\u00e7\u00e3o de partilha",
+            "create": "Erro ao criar ligação de partilha",
             "unshare": "Erro ao desativar a partilha"
           }
         },
         "delete": {
-          "title": "Confirmar elimina\u00e7\u00e3o",
-          "description": "Ir\u00e1 eliminar a conversa e todos os seus conte\u00fados. Esta a\u00e7\u00e3o n\u00e3o pode ser anulada.",
+          "title": "Confirmar eliminação",
+          "description": "Irá eliminar a conversa e todos os seus conteúdos. Esta ação não pode ser anulada.",
           "success": "Chat eliminado",
           "inProgress": "A eliminar chat"
         },
@@ -231,11 +662,16 @@
     },
     "clearAll": {
       "title": "Eliminar todas as conversas?",
-      "description": "Isto elimina permanentemente todas as suas conversas, incluindo mensagens, elementos, ficheiros carregados e liga\u00e7\u00f5es partilhadas. Esta a\u00e7\u00e3o n\u00e3o pode ser anulada.",
+      "description": "Isto elimina permanentemente todas as suas conversas, incluindo mensagens, elementos, ficheiros carregados e ligações partilhadas. Esta ação não pode ser anulada.",
       "confirm": "Eliminar todas as conversas",
       "success": "Todas as conversas eliminadas",
       "inProgress": "A eliminar todas as conversas",
       "error": "Falha ao eliminar todas as conversas"
+    },
+    "errors": {
+      "fetch": "Erro ao obter conversas: {{error}}",
+      "resume": "Não foi possível retomar a conversa",
+      "resumeDetail": "Não foi possível retomar a conversa: {{error}}"
     }
   },
   "navigation": {
@@ -246,49 +682,52 @@
         "light": "Tema claro",
         "dark": "Tema escuro",
         "system": "Seguir sistema"
-      }
+      },
+      "toggleTheme": "Alternar tema",
+      "selectProfile": "Selecionar perfil"
     },
     "newChat": {
       "button": "Novo chat",
       "dialog": {
         "title": "Criar novo chat",
-        "description": "Isto ir\u00e1 apagar o hist\u00f3rico de chat atual. Tem a certeza de que pretende continuar?",
+        "description": "Isto irá apagar o histórico de chat atual. Tem a certeza de que pretende continuar?",
         "tooltip": "Novo chat"
       }
     },
     "user": {
       "menu": {
-        "settings": "Configura\u00e7\u00f5es",
+        "settings": "Configurações",
         "settingsKey": "S",
         "apiKeys": "Chaves API",
-        "logout": "Terminar sess\u00e3o",
+        "logout": "Terminar sessão",
         "clearAll": "Eliminar todas as conversas"
-      }
+      },
+      "imageAlt": "imagem do utilizador"
     }
   },
   "apiKeys": {
-    "title": "Chaves API necess\u00e1rias",
-    "description": "Para utilizar esta aplica\u00e7\u00e3o, s\u00e3o necess\u00e1rias as seguintes chaves API. As chaves s\u00e3o guardadas localmente no seu dispositivo.",
+    "title": "Chaves API necessárias",
+    "description": "Para utilizar esta aplicação, são necessárias as seguintes chaves API. As chaves são guardadas localmente no seu dispositivo.",
     "success": {
       "saved": "Guardado com sucesso"
     }
   },
   "alerts": {
-    "info": "Informa\u00e7\u00e3o",
+    "info": "Informação",
     "note": "Nota",
     "tip": "Dica",
     "important": "Importante",
     "warning": "Aviso",
     "caution": "Cuidado",
-    "debug": "Depura\u00e7\u00e3o",
+    "debug": "Depuração",
     "example": "Exemplo",
     "success": "Sucesso",
     "help": "Ajuda",
     "idea": "Ideia",
     "pending": "Pendente",
-    "security": "Seguran\u00e7a",
+    "security": "Segurança",
     "beta": "Beta",
-    "best-practice": "Boa pr\u00e1tica"
+    "best-practice": "Boa prática"
   },
   "components": {
     "MultiSelectInput": {
@@ -299,6 +738,47 @@
         "single": "Escolher uma data",
         "range": "Escolher um intervalo de datas"
       }
+    },
+    "audio": {
+      "listening": "A ouvir"
+    },
+    "copy": {
+      "failed": "Falha ao copiar: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "Sem resultados."
+    },
+    "image": {
+      "closeLightbox": "Fechar lightbox"
+    },
+    "pdf": {
+      "printOpen": "Imprimir/abrir PDF",
+      "download": "Transferir PDF",
+      "loading": "A carregar PDF...",
+      "openLarger": "Abrir PDF numa vista maior",
+      "loadingPreview": "A carregar pré-visualização...",
+      "view": "Ver PDF",
+      "document": "Documento PDF",
+      "modalDescription": "Uma janela modal com uma vista maior do PDF."
+    },
+    "plotly": {
+      "loading": "A carregar...",
+      "error": "Ocorreu um erro"
+    },
+    "share": {
+      "unshare": "Deixar de partilhar"
+    },
+    "tasklist": {
+      "title": "Tarefas"
+    },
+    "text": {
+      "loadError": "Ocorreu um erro ao carregar o conteúdo"
+    },
+    "thread": {
+      "loadError": "Falha ao carregar a conversa: {{error}}"
+    },
+    "video": {
+      "unsupported": "O seu navegador não suporta o elemento de vídeo."
     }
   }
 }

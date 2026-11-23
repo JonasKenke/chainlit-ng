@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Markdown } from '@/components/Markdown';
+import { useTranslation } from '@/components/i18n/Translator';
 import { Button } from '@/components/ui/button';
 
 // Editable controls live in scrollable card bodies, where an outward focus
@@ -189,20 +190,23 @@ const groupDiff = (entries: DiffEntry[]): DiffGroup[] => {
 
 const operationMeta: Record<
   DiffOperation,
-  { marker: string; label: string; tone: string }
+  { marker: string; labelKey: string; label: string; tone: string }
 > = {
   added: {
     marker: '+',
+    labelKey: 'chat.approval.added',
     label: 'Added',
     tone: 'text-emerald-600 dark:text-emerald-400'
   },
   removed: {
     marker: '-',
+    labelKey: 'chat.approval.removed',
     label: 'Removed',
     tone: 'text-red-600 dark:text-red-400'
   },
   replaced: {
     marker: '~',
+    labelKey: 'chat.approval.replaced',
     label: 'Replaced',
     tone: 'text-amber-600 dark:text-amber-400'
   }
@@ -229,7 +233,9 @@ const DiffRow = ({
   entry: DiffEntry;
   grouped: boolean;
 }) => {
+  const { t } = useTranslation();
   const meta = operationMeta[entry.operation];
+  const operationLabel = t(meta.labelKey, { defaultValue: meta.label });
   const label =
     (grouped ? humanizePath(entry.path, true) : '') || humanizePath(entry.path);
   // A replacement whose either side spans lines reads better as an old block
@@ -253,7 +259,7 @@ const DiffRow = ({
       >
         {meta.marker}
       </span>
-      <span className="sr-only">{`${meta.label}: `}</span>
+      <span className="sr-only">{`${operationLabel}: `}</span>
       <div className="min-w-0 flex-1">
         {multiline ? (
           <>
@@ -267,7 +273,11 @@ const DiffRow = ({
                   >
                     -
                   </span>
-                  <span className="sr-only">Before: </span>
+                  <span className="sr-only">
+                    {t('chat.approval.before', {
+                      defaultValue: 'Before:'
+                    })}{' '}
+                  </span>
                   <DiffValue leaf={entry.from} tone="text-muted-foreground" />
                 </div>
               ) : null}
@@ -279,7 +289,9 @@ const DiffRow = ({
                   >
                     +
                   </span>
-                  <span className="sr-only">After: </span>
+                  <span className="sr-only">
+                    {t('chat.approval.after', { defaultValue: 'After:' })}{' '}
+                  </span>
                   <DiffValue leaf={entry.to} />
                 </div>
               ) : null}
@@ -317,7 +329,28 @@ const DiffRow = ({
   );
 };
 
-const approvalDecisionLabel = (status: IApproval['status']): string | null => {
+const approvalDecisionKey = (status: IApproval['status']): string | null => {
+  switch (status) {
+    case 'approved':
+      return 'chat.approval.status.approved';
+    case 'edited':
+      return 'chat.approval.status.edited';
+    case 'rejected':
+      return 'chat.approval.status.rejected';
+    case 'changes_requested':
+      return 'chat.approval.status.changesRequested';
+    case 'expired':
+      return 'chat.approval.status.expired';
+    case 'superseded':
+      return 'chat.approval.status.superseded';
+    case 'orphaned':
+      return 'chat.approval.status.orphaned';
+    default:
+      return null;
+  }
+};
+
+const approvalDecisionFallback = (status: IApproval['status']): string => {
   switch (status) {
     case 'approved':
       return 'Approved';
@@ -331,10 +364,8 @@ const approvalDecisionLabel = (status: IApproval['status']): string | null => {
       return 'Expired';
     case 'superseded':
       return 'Superseded';
-    case 'orphaned':
-      return 'Unavailable';
     default:
-      return null;
+      return 'Unavailable';
   }
 };
 
@@ -364,7 +395,7 @@ const approvalDecisionMeta = (
   }
 };
 
-const approvalErrorMessage = (error: unknown): string => {
+const approvalErrorMessage = (error: unknown, fallback: string): string => {
   if (typeof error === 'object' && error !== null && 'payload' in error) {
     const payload = error.payload;
     if (
@@ -385,7 +416,7 @@ const approvalErrorMessage = (error: unknown): string => {
       }
     }
   }
-  return error instanceof Error ? error.message : 'Unable to decide approval';
+  return error instanceof Error ? error.message : fallback;
 };
 
 type FieldValues = Record<string, string | boolean>;
@@ -416,10 +447,16 @@ const initialFieldValues = (
   return values;
 };
 
+type EditValidationErrorKind = 'required' | 'wholeNumber' | 'number';
+
+type EditedArgumentsResult =
+  | { ok: true; values: Record<string, unknown> }
+  | { ok: false; kind: EditValidationErrorKind; field: string };
+
 const buildEditedArguments = (
   fields: IApprovalEditField[],
   values: FieldValues
-): Record<string, unknown> | string => {
+): EditedArgumentsResult => {
   const edited: Record<string, unknown> = {};
   for (const field of fields) {
     if (isServerHeld(field)) continue;
@@ -437,7 +474,9 @@ const buildEditedArguments = (
       continue;
     }
     if (text.trim() === '') {
-      if (field.required) return `${field.label} is required`;
+      if (field.required) {
+        return { ok: false, kind: 'required', field: field.label };
+      }
       if (field.nullable) edited[field.name] = null;
       continue;
     }
@@ -451,7 +490,7 @@ const buildEditedArguments = (
     if (field.kind === 'integer') {
       const number = Number(text);
       if (!Number.isInteger(number)) {
-        return `${field.label} must be a whole number`;
+        return { ok: false, kind: 'wholeNumber', field: field.label };
       }
       edited[field.name] = number;
       continue;
@@ -459,14 +498,14 @@ const buildEditedArguments = (
     if (field.kind === 'number') {
       const number = Number(text);
       if (!Number.isFinite(number)) {
-        return `${field.label} must be a number`;
+        return { ok: false, kind: 'number', field: field.label };
       }
       edited[field.name] = number;
       continue;
     }
     edited[field.name] = text;
   }
-  return edited;
+  return { ok: true, values: edited };
 };
 
 const argumentsEqual = (left: unknown, right: unknown): boolean => {
@@ -525,10 +564,10 @@ const areArgumentsUnchanged = (
     fields,
     initialFieldValues(fields, args)
   );
-  if (typeof baseline === 'string') return false;
+  if (!baseline.ok) return false;
   return argumentsEqual(
     withServerHeldArguments(edited, fields, args),
-    withServerHeldArguments(baseline, fields, args)
+    withServerHeldArguments(baseline.values, fields, args)
   );
 };
 
@@ -538,6 +577,7 @@ interface Props {
 
 export const ApprovalCard = ({ approval }: Props) => {
   const apiClient = useContext(ChainlitContext);
+  const { t } = useTranslation();
   const { allowHtml, latex } = useContext(MessageContext);
   const sessionId = useChainlitStore((state) => state.sessionId);
   const setApprovals = useSetChainlitState('approvals');
@@ -605,7 +645,12 @@ export const ApprovalCard = ({ approval }: Props) => {
       diffPreviews(approval.argumentsPreview, approval.editedArgumentsPreview),
     [approval.argumentsPreview, approval.editedArgumentsPreview]
   );
-  const decisionLabel = approvalDecisionLabel(approval.status);
+  const decisionKey = approvalDecisionKey(approval.status);
+  const decisionLabel = decisionKey
+    ? t(decisionKey, {
+        defaultValue: approvalDecisionFallback(approval.status)
+      })
+    : null;
   const decisionMeta = approvalDecisionMeta(approval.status);
   const DecisionIcon = decisionMeta.icon;
   const diffGroups = useMemo(() => groupDiff(diff), [diff]);
@@ -656,10 +701,39 @@ export const ApprovalCard = ({ approval }: Props) => {
         )
       );
     } catch (error) {
-      toast.error(approvalErrorMessage(error));
+      toast.error(
+        approvalErrorMessage(
+          error,
+          t('chat.approval.errors.decide', {
+            defaultValue: 'Unable to decide approval'
+          })
+        )
+      );
     } finally {
       setBusy(false);
     }
+  };
+
+  const editErrorMessage = (
+    kind: EditValidationErrorKind,
+    field: string
+  ): string => {
+    if (kind === 'required') {
+      return t('chat.approval.fieldErrors.required', {
+        defaultValue: '{{field}} is required',
+        field
+      });
+    }
+    if (kind === 'wholeNumber') {
+      return t('chat.approval.fieldErrors.wholeNumber', {
+        defaultValue: '{{field}} must be a whole number',
+        field
+      });
+    }
+    return t('chat.approval.fieldErrors.number', {
+      defaultValue: '{{field}} must be a number',
+      field
+    });
   };
 
   const startEdit = () => {
@@ -675,19 +749,23 @@ export const ApprovalCard = ({ approval }: Props) => {
   const submitForm = () => {
     if (!fields) return;
     const edited = buildEditedArguments(fields, fieldValues);
-    if (typeof edited === 'string') {
-      toast.error(edited);
+    if (!edited.ok) {
+      toast.error(editErrorMessage(edited.kind, edited.field));
       return;
     }
-    if (areArgumentsUnchanged(fields, approval.arguments ?? {}, edited)) {
+    if (
+      areArgumentsUnchanged(fields, approval.arguments ?? {}, edited.values)
+    ) {
       pendingFocusRef.current = 'card';
       setEditMode(null);
-      toast.message('No changes to save');
+      toast.message(
+        t('chat.approval.noChanges', { defaultValue: 'No changes to save' })
+      );
       return;
     }
     pendingFocusRef.current = 'card';
     setEditMode(null);
-    void decide('edit', { editedArguments: edited });
+    void decide('edit', { editedArguments: edited.values });
   };
 
   const submitJson = () => {
@@ -695,11 +773,19 @@ export const ApprovalCard = ({ approval }: Props) => {
     try {
       parsed = JSON.parse(draft);
     } catch {
-      toast.error('Arguments must be valid JSON');
+      toast.error(
+        t('chat.approval.invalidJson', {
+          defaultValue: 'Arguments must be valid JSON'
+        })
+      );
       return;
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      toast.error('Arguments must be a JSON object');
+      toast.error(
+        t('chat.approval.jsonObjectRequired', {
+          defaultValue: 'Arguments must be a JSON object'
+        })
+      );
       return;
     }
     pendingFocusRef.current = 'card';
@@ -725,7 +811,11 @@ export const ApprovalCard = ({ approval }: Props) => {
   const submitRequestChanges = () => {
     const reason = comment.trim();
     if (!reason) {
-      toast.error('A comment is required when requesting changes');
+      toast.error(
+        t('chat.approval.commentRequiredError', {
+          defaultValue: 'A comment is required when requesting changes'
+        })
+      );
       return;
     }
     pendingFocusRef.current = 'card';
@@ -746,7 +836,9 @@ export const ApprovalCard = ({ approval }: Props) => {
           aria-label={field.label}
           type="text"
           className={`${className} text-muted-foreground`}
-          value="Server-held"
+          value={t('chat.approval.serverHeld', {
+            defaultValue: 'Server-held'
+          })}
           readOnly
           disabled
         />
@@ -785,7 +877,11 @@ export const ApprovalCard = ({ approval }: Props) => {
             }))
           }
         >
-          {field.required ? null : <option value="">None</option>}
+          {field.required ? null : (
+            <option value="">
+              {t('chat.approval.none', { defaultValue: 'None' })}
+            </option>
+          )}
           {(field.options ?? []).map((option) => (
             <option key={String(option)} value={String(option)}>
               {String(option)}
@@ -803,7 +899,9 @@ export const ApprovalCard = ({ approval }: Props) => {
           className={`${className} h-28`}
           placeholder={
             field.kind === 'string_list'
-              ? 'One per line or comma separated'
+              ? t('chat.approval.onePerLine', {
+                  defaultValue: 'One per line or comma separated'
+                })
               : undefined
           }
           value={typeof value === 'string' ? value : ''}
@@ -851,7 +949,10 @@ export const ApprovalCard = ({ approval }: Props) => {
       tabIndex={-1}
       data-testid="approval-card"
       data-approval-id={approval.id}
-      aria-label={`Approval for ${approval.tool}`}
+      aria-label={t('chat.approval.ariaLabel', {
+        defaultValue: 'Approval for {{tool}}',
+        tool: approval.tool
+      })}
       className="scroll-mt-4 rounded-lg border border-border bg-card p-4 text-card-foreground"
     >
       <div>
@@ -873,7 +974,10 @@ export const ApprovalCard = ({ approval }: Props) => {
           </Markdown>
           {approval.status === 'edited' && diff.length ? (
             <p className="mt-1 text-xs text-muted-foreground">
-              Edited content; the approved changes are in the diff.
+              {t('chat.approval.editedContentNote', {
+                defaultValue:
+                  'Edited content; the approved changes are in the diff.'
+              })}
             </p>
           ) : null}
         </div>
@@ -882,7 +986,9 @@ export const ApprovalCard = ({ approval }: Props) => {
       {diff.length ? (
         <div data-testid="approval-diff" className="mt-3">
           <div className="text-xs font-medium text-muted-foreground">
-            Original → edited
+            {t('chat.approval.originalToEdited', {
+              defaultValue: 'Original → edited'
+            })}
           </div>
           <div className="mt-1 max-h-[80vh] space-y-2 overflow-auto custom-scrollbar rounded bg-muted p-3 text-xs">
             {diffGroups.map((group) => {
@@ -917,7 +1023,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           className="mt-4 scroll-mt-4 border-t border-border pt-3"
         >
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Edit fields
+            {t('chat.approval.editFields', { defaultValue: 'Edit fields' })}
           </div>
           <div className="mt-3 max-h-[80vh] space-y-3 overflow-y-auto custom-scrollbar pr-1">
             {fields.map((field) => (
@@ -945,7 +1051,9 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy}
               onClick={submitForm}
             >
-              Save & approve
+              {t('chat.approval.saveAndApprove', {
+                defaultValue: 'Save & approve'
+              })}
             </Button>
             <Button
               type="button"
@@ -954,7 +1062,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy}
               onClick={cancelEdit}
             >
-              Cancel
+              {t('common.actions.cancel', { defaultValue: 'Cancel' })}
             </Button>
           </div>
         </div>
@@ -962,7 +1070,9 @@ export const ApprovalCard = ({ approval }: Props) => {
         <div ref={editAreaRef} className="mt-3 scroll-mt-4">
           <textarea
             ref={jsonEditorRef}
-            aria-label="Edited arguments JSON"
+            aria-label={t('chat.approval.editedArgumentsJson', {
+              defaultValue: 'Edited arguments JSON'
+            })}
             className={`h-40 w-full rounded border border-border bg-background p-2 font-mono text-xs ${focusRing}`}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -974,7 +1084,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy}
               onClick={submitJson}
             >
-              Save edit
+              {t('chat.approval.saveEdit', { defaultValue: 'Save edit' })}
             </Button>
             <Button
               type="button"
@@ -983,7 +1093,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy}
               onClick={cancelEdit}
             >
-              Cancel
+              {t('common.actions.cancel', { defaultValue: 'Cancel' })}
             </Button>
           </div>
         </div>
@@ -993,12 +1103,16 @@ export const ApprovalCard = ({ approval }: Props) => {
             htmlFor={`approval-comment-${approval.id}`}
             className="text-xs font-medium text-muted-foreground"
           >
-            What should change? (required)
+            {t('chat.approval.commentRequired', {
+              defaultValue: 'What should change? (required)'
+            })}
           </label>
           <textarea
             ref={commentRef}
             id={`approval-comment-${approval.id}`}
-            aria-label="Comment"
+            aria-label={t('chat.approval.comment', {
+              defaultValue: 'Comment'
+            })}
             maxLength={500}
             className={`mt-1 h-24 w-full rounded border border-border bg-background p-2 text-sm ${focusRing}`}
             value={comment}
@@ -1011,7 +1125,9 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy || !comment.trim()}
               onClick={submitRequestChanges}
             >
-              Request changes
+              {t('chat.approval.requestChanges', {
+                defaultValue: 'Request changes'
+              })}
             </Button>
             <Button
               type="button"
@@ -1020,7 +1136,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy}
               onClick={cancelRequestChanges}
             >
-              Cancel
+              {t('common.actions.cancel', { defaultValue: 'Cancel' })}
             </Button>
           </div>
         </div>
@@ -1032,7 +1148,7 @@ export const ApprovalCard = ({ approval }: Props) => {
             disabled={busy}
             onClick={() => decide('approve')}
           >
-            Approve
+            {t('chat.approval.approve', { defaultValue: 'Approve' })}
           </Button>
           {canEdit ? (
             <Button
@@ -1043,7 +1159,7 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy}
               onClick={startEdit}
             >
-              Edit
+              {t('chat.approval.edit', { defaultValue: 'Edit' })}
             </Button>
           ) : null}
           <Button
@@ -1053,7 +1169,7 @@ export const ApprovalCard = ({ approval }: Props) => {
             disabled={busy}
             onClick={() => decide('reject')}
           >
-            Reject
+            {t('chat.approval.reject', { defaultValue: 'Reject' })}
           </Button>
           {canRequestChanges ? (
             <Button
@@ -1064,7 +1180,9 @@ export const ApprovalCard = ({ approval }: Props) => {
               disabled={busy}
               onClick={startRequestChanges}
             >
-              Request changes
+              {t('chat.approval.requestChanges', {
+                defaultValue: 'Request changes'
+              })}
             </Button>
           ) : null}
         </div>

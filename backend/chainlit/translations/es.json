@@ -6,7 +6,9 @@
       "continue": "Continuar",
       "goBack": "Volver",
       "reset": "Restablecer",
-      "submit": "Enviar"
+      "submit": "Enviar",
+      "close": "Cerrar",
+      "save": "Guardar"
     },
     "status": {
       "loading": "Cargando...",
@@ -14,7 +16,9 @@
         "default": "Ocurrió un error",
         "serverConnection": "No se pudo conectar con el servidor"
       }
-    }
+    },
+    "latest": "Más reciente",
+    "current": "Actual"
   },
   "auth": {
     "login": {
@@ -63,6 +67,9 @@
         "send": "Enviar mensaje",
         "stop": "Detener tarea",
         "attachFiles": "Adjuntar archivos"
+      },
+      "errors": {
+        "tooLarge": "El mensaje es demasiado grande. El tamaño máximo del mensaje es 1 MB."
       }
     },
     "favorites": {
@@ -123,7 +130,8 @@
           "updating": "Actualizando",
           "updated": "Comentario actualizado"
         }
-      }
+      },
+      "output": "Salida"
     },
     "history": {
       "title": "Últimas entradas",
@@ -146,7 +154,11 @@
         "adding": "Añadiendo…",
         "goHome": "Ir a inicio",
         "notFound": "Prompt no encontrado o ya no está compartido.",
-        "addError": "Error al añadir el prompt"
+        "addError": "Error al añadir el prompt",
+        "version": "Versión",
+        "latestVersion": "v{{version}} (última)",
+        "addVersion": "Añadir v{{version}} a mi galería",
+        "openCopy": "Abrir mi copia"
       },
       "unshare": "Dejar de compartir",
       "delete": "Eliminar",
@@ -166,7 +178,426 @@
       "new": "Nuevo prompt",
       "search": "Buscar prompts...",
       "saved": "¡Prompt guardado!",
-      "unshared": "Uso compartido eliminado"
+      "unshared": "Uso compartido eliminado",
+      "tab": "Prompts",
+      "updateAvailable": "Actualización disponible v{{version}}",
+      "versions": "Historial de versiones (v{{version}})",
+      "updatesToast": "{{count}} prompt guardado tiene una versión compartida más reciente",
+      "updatesToastAction": "Revisar",
+      "diff": {
+        "title": "Actualizar prompt",
+        "historyTitle": "Historial de versiones",
+        "description": "Elige una versión y actualiza tu copia.",
+        "historyDescription": "Elige una versión para ver qué cambió.",
+        "version": "Versión",
+        "unified": "Unificado",
+        "split": "Lado a lado",
+        "localChanges": "Este prompt tiene ediciones locales",
+        "localChangesHint": "Al actualizar, el contenido local se reemplaza por la versión compartida. Tu edición seguirá disponible en el historial del prompt.",
+        "confirmUpdate": "Reemplazar contenido local",
+        "stale": "Este prompt cambió después de cargar la vista previa. La comparación se actualizó; revísala de nuevo.",
+        "sourceUnavailable": "La fuente compartida ya no está disponible",
+        "sourceUnavailableHint": "Esta copia conserva su contenido actual. Desvincúlala para dejar de buscar actualizaciones.",
+        "detach": "Desvincular de la fuente",
+        "detached": "Desvinculado de la fuente compartida",
+        "alreadyCurrent": "Este prompt ya coincide con la versión compartida.",
+        "noChanges": "No hay cambios en las líneas.",
+        "truncated": "La comparación está truncada; solo se muestra la primera parte.",
+        "updated": "Prompt actualizado desde la versión compartida",
+        "update": "Actualizar a v{{version}}",
+        "updateFallback": "Actualizar",
+        "updateError": "No se pudo actualizar este prompt",
+        "loadError": "No se pudo cargar la comparación de versiones.",
+        "currentVersion": "Esta es tu versión actual.",
+        "noVersions": "No hay otras versiones disponibles.",
+        "versionUnavailable": "Esa versión ya no está disponible. Elige otra.",
+        "downgrade": "Volver a v{{version}}",
+        "downgraded": "Prompt revertido a v{{version}}"
+      },
+      "updatesToast_one": "{{count}} prompt guardado tiene una versión compartida más reciente",
+      "updatesToast_other": "{{count}} prompts guardados tienen una versión compartida más reciente"
+    },
+    "mcp": {
+      "title": "Servidores MCP",
+      "tabs": {
+        "connect": "Conectar un MCP",
+        "list": "Mis MCP"
+      },
+      "configured": {
+        "title": "Servidores configurados"
+      },
+      "connect": "Conectar",
+      "reconnect": "Reconectar",
+      "add": {
+        "title": "Añade tu propio servidor"
+      },
+      "form": {
+        "name": "Nombre",
+        "namePlaceholder": "Ejemplo: Stripe",
+        "type": "Tipo",
+        "url": "URL del servidor",
+        "urlPlaceholder": "Ejemplo: http://localhost:8000/mcp",
+        "headers": "Cabeceras (JSON, opcional)",
+        "headersPlaceholder": "Ejemplo: {\"Authorization\": \"Bearer TOKEN\"}",
+        "headersInvalid": "Las cabeceras deben ser un objeto JSON con valores de tipo cadena",
+        "add": "Añadir",
+        "useOAuth": "Iniciar sesión con OAuth (solo HTTP con streaming)"
+      },
+      "list": {
+        "empty": "No hay servidores MCP conectados",
+        "addFirst": "Añade tu primer servidor MCP",
+        "url": "URL",
+        "tools": "Herramientas",
+        "removeTitle": "¿Estás seguro?",
+        "removeDescription": "Esto desconectará el servidor MCP \"{{name}}\". Esta acción no se puede deshacer.",
+        "signIn": "Iniciar sesión en {{host}}",
+        "remove": "Eliminar servidor MCP"
+      },
+      "messages": {
+        "connecting": "Conectando MCP...",
+        "connected": "¡MCP conectado!",
+        "adding": "Añadiendo MCP...",
+        "added": "¡MCP añadido!",
+        "reconnecting": "Reconectando MCP...",
+        "reconnected": "¡MCP reconectado!",
+        "removing": "Eliminando MCP...",
+        "removed": "¡MCP eliminado!",
+        "authorizationRequired": "Inicia sesión para finalizar la conexión"
+      },
+      "errors": {
+        "connect": "No se pudo conectar con el servidor MCP"
+      },
+      "library": {
+        "button": "Prompts y recursos de MCP",
+        "title": "Biblioteca MCP",
+        "tabs": {
+          "prompts": "Prompts",
+          "resources": "Recursos"
+        },
+        "prompts": {
+          "empty": "No hay prompts de servidores MCP conectados"
+        },
+        "resources": {
+          "empty": "No hay recursos de servidores MCP conectados"
+        },
+        "promptInsert": "Insertar",
+        "promptInserted": "Prompt insertado en el compositor",
+        "promptFailed": "No se pudo obtener el prompt del servidor MCP",
+        "resourceAdded": "Recurso añadido al chat",
+        "resourceFailed": "No se pudo leer el recurso del servidor MCP"
+      }
+    },
+    "promptScheduling": {
+      "button": "Prompts programados",
+      "title": "Prompts programados",
+      "create": "Crear prompt programado",
+      "edit": "Editar prompt programado",
+      "new": "Nueva programación",
+      "empty": "Aún no hay prompts programados",
+      "nextRun": "Próxima ejecución",
+      "lastRun": "Última ejecución",
+      "lastStatus": "Último estado",
+      "status": {
+        "active": "Activa",
+        "paused": "En pausa",
+        "success": "Correcto",
+        "failure": "Fallido",
+        "successWithWarnings": "Correcto con advertencias"
+      },
+      "actions": {
+        "edit": "Editar programación",
+        "pause": "Pausar programación",
+        "resume": "Reanudar programación",
+        "delete": "Eliminar programación",
+        "runNow": "Ejecutar ahora",
+        "viewThread": "Ver última ejecución"
+      },
+      "form": {
+        "prompt": "Prompt",
+        "chooseGallery": "Elegir de la galería de prompts",
+        "profile": "Modelo",
+        "chatProfile": "Perfil de chat",
+        "defaultAssistant": "Asistente predeterminado",
+        "timezone": "Zona horaria",
+        "recurrence": "Recurrencia",
+        "customFrequency": "Repetir",
+        "interval": "Cada",
+        "hours": "horas",
+        "time": "Hora",
+        "weekday": "Día de la semana",
+        "dayOfMonth": "Día del mes",
+        "afterHooks": "Acciones tras completar",
+        "unavailable": "no disponible"
+      },
+      "presets": {
+        "daily": "Cada día a las 09:00",
+        "weekdays": "Días laborables a las 09:00",
+        "weekly": "Semanalmente los lunes",
+        "monthly": "Mensualmente el día 1",
+        "custom": "Personalizado"
+      },
+      "custom": {
+        "everyHours": "Cada N horas",
+        "daily": "Cada día",
+        "weekly": "Cada semana",
+        "monthly": "Cada mes"
+      },
+      "weekdays": {
+        "monday": "Lunes",
+        "tuesday": "Martes",
+        "wednesday": "Miércoles",
+        "thursday": "Jueves",
+        "friday": "Viernes",
+        "saturday": "Sábado",
+        "sunday": "Domingo"
+      },
+      "overview": {
+        "dailyAt": "Cada día a las {time}",
+        "weekdaysAt": "Días laborables a las {time}",
+        "weeklyAt": "Cada {weekday} a las {time}",
+        "monthlyAt": "Mensualmente el día {day} a las {time}",
+        "everyHours": "Cada {interval} horas",
+        "everyMinutes": "Cada {interval} minutos",
+        "custom": "Programación personalizada"
+      },
+      "galleryTitle": "Elige un prompt de la galería",
+      "galleryEmpty": "No hay prompts de galería disponibles",
+      "delete": {
+        "title": "¿Eliminar prompt programado?",
+        "description": "Se eliminará esta programación junto con su ejecución en cola."
+      },
+      "errors": {
+        "load": "No se pudieron cargar los prompts programados",
+        "required": "Prompt y cron son obligatorios",
+        "save": "No se pudo guardar el prompt programado",
+        "update": "No se pudo actualizar el prompt programado",
+        "delete": "No se pudo eliminar el prompt programado",
+        "run": "No se pudo poner en cola el prompt programado"
+      }
+    },
+    "skills": {
+      "button": "Biblioteca",
+      "title": "Habilidades",
+      "menu": "Acciones para {{name}}",
+      "tab": "Habilidades",
+      "new": "Nueva habilidad",
+      "import": "Importar",
+      "importing": "Importando...",
+      "imported": "Habilidad importada",
+      "created": "Habilidad creada",
+      "saved": "Habilidad guardada",
+      "loading": "Cargando habilidades...",
+      "importedBadge": "Importada",
+      "importedBadgeTitle": "Habilidad importada. Revísala antes de activarla.",
+      "reviewBeforeEnabling": "Desactivada. Revísala antes de activarla.",
+      "toggle": "Alternar {{name}}",
+      "edit": "Editar habilidad",
+      "export": "Exportar habilidad",
+      "delete": "Eliminar habilidad",
+      "importedBy": "Importada por ti desde {{source}} · {{date}}",
+      "fromLinkBadge": "Desde enlace",
+      "sharedBadge": "Compartida",
+      "detached": "Desvinculada de la fuente compartida",
+      "libraryUnavailable": "La biblioteca de habilidades no está disponible para esta capa de datos.",
+      "updateAvailable": "Actualización disponible v{{version}}",
+      "updatesToast": "{{count}} habilidad compartida tiene una versión más reciente",
+      "updatesToastAction": "Revisar",
+      "filter": {
+        "current": "Filtrar habilidades: {{filter}}"
+      },
+      "sections": {
+        "label": "Secciones de habilidades",
+        "all": "Todas",
+        "active": "Activas",
+        "review": "Requieren revisión",
+        "updates": "Actualizaciones",
+        "empty": "No hay habilidades en esta sección"
+      },
+      "review": {
+        "title": "Revisar habilidad",
+        "description": "Revisa las instrucciones antes de activar esta habilidad.",
+        "fromLink": "Copiada desde un enlace compartido",
+        "warning": "Si algo parece incorrecto, edita la habilidad en lugar de activarla.",
+        "enable": "Activar habilidad",
+        "enabling": "Activando...",
+        "enabled": "Habilidad activada",
+        "changed": "La habilidad cambió desde que se abrió. Revisa de nuevo la versión actual."
+      },
+      "share": {
+        "title": "Compartir habilidad",
+        "description": "Cualquiera que tenga el enlace puede obtener una vista previa y añadir una copia.",
+        "descriptionOff": "Crea un enlace para compartir esta habilidad.",
+        "link": "Enlace para compartir",
+        "copy": "Copiar enlace",
+        "copied": "¡Enlace copiado!",
+        "unshare": "Dejar de compartir",
+        "unshared": "Se ha dejado de compartir",
+        "submit": "Crear enlace",
+        "error": "No se pudo actualizar el uso compartido",
+        "open": "Compartir {{name}}",
+        "notFound": "No se encontró la habilidad o ya no se comparte.",
+        "goHome": "Ir al inicio",
+        "by": "Por {{author}}",
+        "versionLabel": "v{{version}}",
+        "version": "Versión",
+        "latestVersion": "v{{version}} (última)",
+        "addVersion": "Añadir v{{version}} a mi biblioteca",
+        "add": "Añadir a mi biblioteca",
+        "adding": "Añadiendo...",
+        "openCopy": "Abrir mi copia",
+        "openLibrary": "Abrir mi biblioteca",
+        "added": "Habilidad añadida a tu biblioteca",
+        "addedReview": "Añadida como copia deshabilitada. Revísala en tu biblioteca antes de habilitarla.",
+        "addError": "No se pudo añadir la habilidad",
+        "alreadyAdded": "Esta habilidad ya está en tu biblioteca.",
+        "nameTaken": "Ya existe una habilidad con este nombre. Renombra tu habilidad y vuelve a añadir esta.",
+        "disabledNote": "Las copias se añaden deshabilitadas. Habilita una solo después de revisar sus instrucciones.",
+        "unavailable": "La biblioteca de habilidades no está disponible en esta aplicación."
+      },
+      "update": {
+        "title": "Actualizar habilidad",
+        "description": "Elige una versión y actualiza tu copia.",
+        "version": "Versión",
+        "unified": "Unificado",
+        "split": "Lado a lado",
+        "localChanges": "Esta copia tiene ediciones locales",
+        "localChangesHint": "Actualizar reemplaza el contenido local con la versión compartida. Tu edición permanece disponible en el historial de la habilidad.",
+        "confirmUpdate": "Reemplazar contenido local",
+        "stale": "La habilidad cambió después de cargar la vista previa. La comparación se ha actualizado; revísala de nuevo.",
+        "sourceUnavailable": "La fuente compartida ya no está disponible",
+        "sourceUnavailableHint": "Esta copia mantiene su contenido actual. Desvincúlala para dejar de buscar actualizaciones.",
+        "detach": "Desvincular de la fuente",
+        "detached": "Desvinculada de la fuente compartida",
+        "alreadyCurrent": "Esta habilidad ya coincide con la versión compartida.",
+        "noChanges": "No hay cambios en las líneas.",
+        "truncated": "El diff está truncado; solo se muestra la primera parte.",
+        "updated": "Habilidad actualizada desde la versión compartida; revísala antes de habilitarla",
+        "update": "Actualizar a v{{version}}",
+        "updateFallback": "Actualizar",
+        "error": "No se pudo actualizar esta habilidad",
+        "loadError": "No se pudieron cargar las versiones compartidas.",
+        "versionConflict": "Esa versión no pertenece a la fuente compartida.",
+        "historyTitle": "Historial de versiones",
+        "historyDescription": "Elige una versión para ver qué cambió.",
+        "currentVersion": "Esta es tu versión actual.",
+        "noVersions": "No hay otras versiones disponibles.",
+        "versionUnavailable": "Esa versión ya no está disponible. Elige otra.",
+        "downgrade": "Volver a v{{version}}",
+        "downgraded": "Habilidad revertida a v{{version}}"
+      },
+      "empty": {
+        "title": "Aún no hay habilidades",
+        "description": "Crea una habilidad o importa un archivo Markdown"
+      },
+      "editor": {
+        "createTitle": "Nueva habilidad",
+        "editTitle": "Editar habilidad",
+        "name": "Nombre",
+        "nameHint": "Letras minúsculas, dígitos y guiones; debe ser único.",
+        "description": "Descripción",
+        "descriptionHint": "El modelo ve esta línea para decidir cuándo usar la habilidad.",
+        "body": "Instrucciones (Markdown)",
+        "preview": "Vista previa",
+        "previewEmpty": "Aún no hay nada que previsualizar.",
+        "save": "Guardar habilidad",
+        "saving": "Guardando...",
+        "cancel": "Cancelar"
+      },
+      "validation": {
+        "nameRequired": "El nombre es obligatorio.",
+        "namePattern": "Usa letras minúsculas, dígitos y guiones, empezando por una letra o un dígito (máx. 64).",
+        "descriptionRequired": "La descripción es obligatoria.",
+        "descriptionSingleLine": "La descripción debe ocupar una sola línea.",
+        "descriptionTooLarge": "La descripción ocupa {{size}} bytes; el máximo es {{max}}.",
+        "bodyTooLarge": "Las instrucciones ocupan {{size}} bytes; el máximo es {{max}}.",
+        "fileTooLarge": "El archivo ocupa {{size}} bytes; el máximo es {{max}}."
+      },
+      "updatesToast_one": "{{count}} habilidad compartida tiene una versión más reciente",
+      "updatesToast_other": "{{count}} habilidades compartidas tienen una versión más reciente",
+      "versions": "Historial de versiones (v{{version}})",
+      "enable": "Activar {{name}}"
+    },
+    "question": {
+      "title": "Pregunta",
+      "ariaLabel": "Pregunta del asistente",
+      "options": "Opciones",
+      "other": "Otra",
+      "and": "y",
+      "otherAriaLabel": "Otra respuesta",
+      "otherPlaceholder": "Escribe tu respuesta...",
+      "progress": "{{current}}/{{total}}",
+      "next": "Siguiente",
+      "back": "Atrás",
+      "reviewTitle": "Revisa tus respuestas",
+      "edit": "Editar",
+      "optional": "Opcional",
+      "selectMultiple": "Selecciona todas las que correspondan",
+      "notAnswered": "Sin responder",
+      "datePlaceholder": "Elige una fecha",
+      "clear": "Limpiar",
+      "answeredPrivately": "Respondido en privado",
+      "status": {
+        "pending": "Esperando tu respuesta",
+        "answered": "Respondida",
+        "expired": "Expirada",
+        "superseded": "Sustituida",
+        "orphaned": "No disponible"
+      },
+      "errors": {
+        "answer": "No se puede responder la pregunta",
+        "required": "Esta pregunta es obligatoria",
+        "email": "Introduce un correo electrónico válido",
+        "date": "Elige una fecha válida",
+        "number": "Introduce un número válido",
+        "url": "Introduce una URL válida",
+        "tel": "Introduce un número de teléfono válido"
+      },
+      "answer": "Tu respuesta",
+      "answerAriaLabel": "Tu respuesta"
+    },
+    "approval": {
+      "ariaLabel": "Aprobación de {{tool}}",
+      "approve": "Aprobar",
+      "reject": "Rechazar",
+      "edit": "Editar",
+      "requestChanges": "Solicitar cambios",
+      "saveAndApprove": "Guardar y aprobar",
+      "saveEdit": "Guardar edición",
+      "editFields": "Editar campos",
+      "editedArgumentsJson": "JSON de argumentos editados",
+      "comment": "Comentario",
+      "commentRequired": "¿Qué debe cambiar? (obligatorio)",
+      "commentRequiredError": "Se requiere un comentario para solicitar cambios",
+      "none": "Ninguno",
+      "onePerLine": "Uno por línea o separados por comas",
+      "serverHeld": "Retenido por el servidor",
+      "noChanges": "No hay cambios que guardar",
+      "invalidJson": "Los argumentos deben ser JSON válido",
+      "jsonObjectRequired": "Los argumentos deben ser un objeto JSON",
+      "editedContentNote": "Contenido editado; los cambios aprobados están en el diff.",
+      "originalToEdited": "Original → editado",
+      "added": "Añadido",
+      "removed": "Eliminado",
+      "replaced": "Reemplazado",
+      "before": "Antes:",
+      "after": "Después:",
+      "errors": {
+        "decide": "No se pudo decidir la aprobación"
+      },
+      "fieldErrors": {
+        "required": "{{field}} es obligatorio",
+        "wholeNumber": "{{field}} debe ser un número entero",
+        "number": "{{field}} debe ser un número"
+      },
+      "status": {
+        "approved": "Aprobado",
+        "edited": "Aprobado con ediciones",
+        "rejected": "Rechazado",
+        "changesRequested": "Cambios solicitados",
+        "expired": "Caducado",
+        "superseded": "Sustituido",
+        "orphaned": "No disponible"
+      }
     }
   },
   "threadHistory": {
@@ -236,6 +667,11 @@
       "success": "Todos los chats borrados",
       "inProgress": "Borrando todos los chats",
       "error": "No se pudieron borrar todos los chats"
+    },
+    "errors": {
+      "fetch": "Error al obtener los hilos: {{error}}",
+      "resume": "No se pudo reanudar el chat",
+      "resumeDetail": "No se pudo reanudar el chat: {{error}}"
     }
   },
   "navigation": {
@@ -246,7 +682,9 @@
         "light": "Tema claro",
         "dark": "Tema oscuro",
         "system": "Seguir sistema"
-      }
+      },
+      "toggleTheme": "Cambiar tema",
+      "selectProfile": "Seleccionar perfil"
     },
     "newChat": {
       "button": "Nuevo chat",
@@ -263,7 +701,8 @@
         "apiKeys": "Claves API",
         "logout": "Cerrar sesión",
         "clearAll": "Borrar todos los chats"
-      }
+      },
+      "imageAlt": "imagen del usuario"
     }
   },
   "apiKeys": {
@@ -299,6 +738,47 @@
         "single": "Elige una fecha",
         "range": "Elige un rango de fechas"
       }
+    },
+    "audio": {
+      "listening": "Escuchando"
+    },
+    "copy": {
+      "failed": "No se pudo copiar: {{error}}"
+    },
+    "dataframe": {
+      "noResults": "Sin resultados."
+    },
+    "image": {
+      "closeLightbox": "Cerrar visor"
+    },
+    "pdf": {
+      "printOpen": "Imprimir/Abrir PDF",
+      "download": "Descargar PDF",
+      "loading": "Cargando PDF...",
+      "openLarger": "Abrir PDF en una vista más grande",
+      "loadingPreview": "Cargando vista previa...",
+      "view": "Ver PDF",
+      "document": "Documento PDF",
+      "modalDescription": "Un modal con una vista más grande del PDF."
+    },
+    "plotly": {
+      "loading": "Cargando...",
+      "error": "Se produjo un error"
+    },
+    "share": {
+      "unshare": "Dejar de compartir"
+    },
+    "tasklist": {
+      "title": "Tareas"
+    },
+    "text": {
+      "loadError": "Se produjo un error al cargar el contenido"
+    },
+    "thread": {
+      "loadError": "No se pudo cargar el hilo: {{error}}"
+    },
+    "video": {
+      "unsupported": "Tu navegador no admite la etiqueta de video."
     }
   }
 }
