@@ -7,6 +7,15 @@ import {
 } from '@chainlit-ng/react-client';
 import { MessageContext } from 'contexts/MessageContext';
 import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  MessageSquare,
+  MinusCircle,
+  XCircle
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import {
   useCallback,
   useContext,
   useEffect,
@@ -329,6 +338,32 @@ const approvalDecisionLabel = (status: IApproval['status']): string | null => {
   }
 };
 
+const approvalDecisionMeta = (
+  status: IApproval['status']
+): { icon: LucideIcon; tone: string } => {
+  switch (status) {
+    case 'approved':
+    case 'edited':
+      return {
+        icon: CheckCircle2,
+        tone: 'text-emerald-600 dark:text-emerald-400'
+      };
+    case 'rejected':
+      return { icon: XCircle, tone: 'text-red-600 dark:text-red-400' };
+    case 'changes_requested':
+      return {
+        icon: MessageSquare,
+        tone: 'text-amber-600 dark:text-amber-400'
+      };
+    case 'expired':
+      return { icon: Clock, tone: 'text-muted-foreground' };
+    case 'superseded':
+      return { icon: MinusCircle, tone: 'text-muted-foreground' };
+    default:
+      return { icon: AlertTriangle, tone: 'text-muted-foreground' };
+  }
+};
+
 const approvalErrorMessage = (error: unknown): string => {
   if (typeof error === 'object' && error !== null && 'payload' in error) {
     const payload = error.payload;
@@ -571,6 +606,8 @@ export const ApprovalCard = ({ approval }: Props) => {
     [approval.argumentsPreview, approval.editedArgumentsPreview]
   );
   const decisionLabel = approvalDecisionLabel(approval.status);
+  const decisionMeta = approvalDecisionMeta(approval.status);
+  const DecisionIcon = decisionMeta.icon;
   const diffGroups = useMemo(() => groupDiff(diff), [diff]);
   const firstEditableFieldName =
     fields?.find((field) => !isServerHeld(field))?.name ?? null;
@@ -988,7 +1025,7 @@ export const ApprovalCard = ({ approval }: Props) => {
           </div>
         </div>
       ) : isPending ? (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
           <Button
             type="button"
             size="sm"
@@ -1032,28 +1069,38 @@ export const ApprovalCard = ({ approval }: Props) => {
           ) : null}
         </div>
       ) : (
-        <div className="mt-3 text-xs">
-          <span
-            data-testid="approval-decision"
-            className="font-medium text-foreground"
+        <>
+          <div
+            data-testid="approval-outcome"
+            className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border pt-3 text-xs"
           >
-            {decisionLabel}
-          </span>
-          {approval.terminalReason ? (
-            <span className="text-muted-foreground">
-              {' · '}
-              {approval.terminalReason.replace(/_/g, ' ')}
+            <span className="inline-flex items-center gap-1.5">
+              <DecisionIcon
+                className={`size-3.5 shrink-0 ${decisionMeta.tone}`}
+                aria-hidden="true"
+              />
+              <span
+                data-testid="approval-decision"
+                className="font-medium text-foreground"
+              >
+                {decisionLabel}
+              </span>
             </span>
-          ) : null}
+            {approval.terminalReason ? (
+              <span className="text-muted-foreground">
+                {approval.terminalReason.replace(/_/g, ' ')}
+              </span>
+            ) : null}
+          </div>
           {approval.reason ? (
             <div
               data-testid="approval-comment"
-              className="mt-1 whitespace-pre-wrap text-foreground"
+              className="mt-2 whitespace-pre-wrap text-xs text-foreground"
             >
               <bdi dir="auto">{approval.reason}</bdi>
             </div>
           ) : null}
-        </div>
+        </>
       )}
     </section>
   );
