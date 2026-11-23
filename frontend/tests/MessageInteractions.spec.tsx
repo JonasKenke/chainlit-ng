@@ -199,7 +199,9 @@ describe('inline interaction cards', () => {
     renderStep();
 
     expect(screen.getByTestId('question-card')).toBeInTheDocument();
-    expect(screen.getByText('chat.question.readOnly')).toBeInTheDocument();
+    expect(
+      screen.getByText('chat.question.status.orphaned')
+    ).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
   });

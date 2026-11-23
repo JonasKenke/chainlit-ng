@@ -403,3 +403,57 @@ def test_public_share_never_contains_a_free_text_answer():
     # The owner view keeps the answer; only the public projection redacts it.
     owner = public_thread(thread, include_settings=True)
     assert secret in json.dumps(owner)
+
+
+def test_public_share_redacts_each_typed_answer_and_drops_defaults():
+    secret = "sk-live-pasted-secret"
+    record = _question_record(
+        structured=True,
+        multi=True,
+        questions=[
+            {
+                "id": "name",
+                "prompt": "Name",
+                "type": "text",
+                "options": [],
+                "allowFreeText": True,
+                "default": secret,
+                "required": True,
+                "placeholder": None,
+                "multiline": True,
+            },
+            {
+                "id": "env",
+                "prompt": "Environment",
+                "type": "choice",
+                "options": [{"id": "staging", "label": "Staging"}],
+                "allowFreeText": False,
+                "default": "staging",
+                "required": True,
+                "placeholder": None,
+                "multiline": True,
+            },
+        ],
+        answer={
+            "answers": [
+                {"questionId": "name", "text": secret},
+                {"questionId": "env", "optionId": "staging", "label": "Staging"},
+            ]
+        },
+    )
+
+    public = public_thread(_question_thread(record))
+    approval = public["steps"][0]["metadata"]["approval"]
+
+    assert approval["answer"] == {
+        "answers": [
+            {"questionId": "name", "text": None, "redacted": True},
+            {"questionId": "env", "optionId": "staging", "label": "Staging"},
+        ]
+    }
+    assert approval["questions"][0]["prompt"] == "Name"
+    assert all("default" not in question for question in approval["questions"])
+    assert secret not in json.dumps(public)
+
+    owner = public_thread(_question_thread(record), include_settings=True)
+    assert secret in json.dumps(owner)

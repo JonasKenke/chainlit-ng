@@ -28,6 +28,9 @@ _PUBLIC_QUESTION_FIELDS = (
     "prompt",
     "options",
     "allowFreeText",
+    "questions",
+    "structured",
+    "multi",
     "answer",
     "decidedAt",
     "terminalReason",
@@ -40,6 +43,41 @@ def _record_kind(record: Mapping[str, Any]) -> Optional[str]:
     if kind not in ("approval", "question"):
         return None
     return cast(str, kind)
+
+
+def _public_question_answer(answer: Any) -> Any:
+    """Redact typed answers; keep server option ids and labels."""
+    if answer is None:
+        return None
+    if not isinstance(answer, Mapping):
+        return {"text": None, "redacted": True}
+    raw_answers = answer.get("answers")
+    if isinstance(raw_answers, list):
+        public_answers = []
+        for item in raw_answers:
+            if not isinstance(item, Mapping) or not isinstance(
+                item.get("questionId"), str
+            ):
+                continue
+            if isinstance(item.get("optionId"), str) and item.get("text") is None:
+                public_answers.append(
+                    {
+                        "questionId": item["questionId"],
+                        "optionId": item["optionId"],
+                        "label": item.get("label"),
+                    }
+                )
+            else:
+                public_answers.append(
+                    {"questionId": item["questionId"], "text": None, "redacted": True}
+                )
+        return {"answers": public_answers}
+    if isinstance(answer.get("optionId"), str) and answer.get("text") is None:
+        return {
+            "optionId": answer["optionId"],
+            "label": answer.get("label"),
+        }
+    return {"text": None, "redacted": True}
 
 
 def _public_question(record: Mapping[str, Any]) -> Optional[dict]:
@@ -61,22 +99,18 @@ def _public_question(record: Mapping[str, Any]) -> Optional[dict]:
     public = {key: record[key] for key in _PUBLIC_QUESTION_FIELDS if key in record}
     public["kind"] = "question"
 
+    # A default is app configuration that may carry account data; the share
+    # view is read-only and never needs it.
+    if isinstance(public.get("questions"), list):
+        public["questions"] = [
+            {key: value for key, value in spec.items() if key != "default"}
+            for spec in public["questions"]
+            if isinstance(spec, Mapping)
+        ]
+
     # M1: a typed answer never crosses the share boundary. An option answer
     # keeps only the server id and label; any other shape is redacted.
-    answer = record.get("answer")
-    if answer is None:
-        public["answer"] = None
-    elif (
-        isinstance(answer, Mapping)
-        and isinstance(answer.get("optionId"), str)
-        and answer.get("text") is None
-    ):
-        public["answer"] = {
-            "optionId": answer["optionId"],
-            "label": answer.get("label"),
-        }
-    else:
-        public["answer"] = {"text": None, "redacted": True}
+    public["answer"] = _public_question_answer(record.get("answer"))
 
     # A pending record is only answerable while this process holds its live
     # registry entry. Projection only: the stored pending row is not changed.

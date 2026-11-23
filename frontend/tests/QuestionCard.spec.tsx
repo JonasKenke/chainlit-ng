@@ -23,9 +23,13 @@ vi.mock('@/components/i18n/Translator', () => ({
         'chat.question.otherAriaLabel': 'Other answer',
         'chat.question.answer': 'Your answer',
         'chat.question.answerAriaLabel': 'Your answer',
-        'chat.question.readOnly': 'This question can no longer be answered.',
+        'chat.question.notAnswered': 'Not answered',
         'chat.question.answeredPrivately': 'Answered privately',
-        'chat.question.by': 'By',
+        'chat.question.status.pending': 'Waiting for your answer',
+        'chat.question.status.answered': 'Answered',
+        'chat.question.status.expired': 'Expired',
+        'chat.question.status.superseded': 'Superseded',
+        'chat.question.status.orphaned': 'Unavailable',
         'chat.question.errors.answer': 'Unable to answer question',
         'common.actions.submit': 'Submit'
       })[key] ??
@@ -203,13 +207,10 @@ describe('QuestionCard', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  it('renders no status label for an expired question', () => {
+  it('renders the terminal status for an expired question', () => {
     renderCard({ status: 'expired' });
 
-    expect(screen.queryByText('Expired')).toBeNull();
-    expect(
-      screen.getByText('This question can no longer be answered.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Expired')).toBeInTheDocument();
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
   });
@@ -236,12 +237,10 @@ describe('QuestionCard', () => {
     expect(scroll.className).not.toContain('overflow-x-hidden');
   });
 
-  it('renders a pending card as read-only when it is not live', () => {
+  it('renders a pending card as unavailable when it is not live', () => {
     renderCard({ live: false });
 
-    expect(
-      screen.getByText('This question can no longer be answered.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
   });

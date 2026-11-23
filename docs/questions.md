@@ -24,9 +24,64 @@ raises `QuestionAlreadyAsked`; use a child step for a separate question.
 Approvals and questions share a cap of eight pending interactions per session,
 and each question expires with `config.project.session_timeout`.
 
+## Multiple questions and typed fields
+
+Pass `questions=` to ask several fields in one card. Each field has an `id`,
+a `prompt`, and a `type`; the card shows one field at a time with a
+`1/4` progress indicator, Back and Next buttons, and a review step that lists
+every question with its answer before Submit.
+
+```python
+answer = await cl.ask(
+    questions=[
+        cl.Question("Your name", id="name", type="text", default="Ada"),
+        cl.Question("Email", id="email", type="email"),
+        cl.Question(
+            "Deploy environment",
+            id="env",
+            type="choice",
+            options=[
+                cl.QuestionOption("staging", "Staging"),
+                cl.QuestionOption("prod", "Production"),
+            ],
+            default="staging",
+            allow_free_text=False,
+        ),
+        cl.Question("Start date", id="start", type="date"),
+        cl.Question("Notes", id="notes", type="text", required=False),
+    ]
+)
+
+print(answer.answers["email"].text)
+print(answer.answers["env"].label)
+```
+
+Supported `type` values:
+
+| Type     | Control                                                 | Server validation                               |
+| -------- | ------------------------------------------------------- | ----------------------------------------------- |
+| `text`   | textarea, or a single-line input with `multiline=False` | plain text rules only                           |
+| `email`  | email input                                             | `name@domain.tld` shape, at most 254 characters |
+| `date`   | calendar picker                                         | `YYYY-MM-DD` and a real calendar date           |
+| `number` | numeric input                                           | finite decimal                                  |
+| `url`    | URL input                                               | `http` or `https` scheme with a host            |
+| `tel`    | phone input                                             | digits, spaces, `+`, `-`, `.`, `(`, `)`         |
+| `choice` | radio list plus optional Other textarea                 | server option id or allowed free text           |
+
+`default` is an option id for `choice` and a typed value otherwise. A
+`required=False` field may be left blank; the answer is omitted. The card
+validates each field before Next and the review step re-checks every field
+before Submit, and the server repeats every check against the ask-time
+snapshot.
+
+`cl.ask(question=...)` keeps its original contract. Do not combine it with
+`questions=`.
+
 ## The answer is untrusted user input
 
-`answer.text` is the user's raw, plain text. The server trims it, normalizes
+`answer.text` is the user's raw, plain text for the single-question form. For
+`questions=`, read `answer.answers[question_id]`; each value has `option_id`,
+`label` and `text`. The server trims text, normalizes
 line endings, and rejects NUL/C0 controls (except newline and tab), C1 controls,
 Unicode bidi controls (`U+061C`, `U+200E`, `U+200F`, `U+202A`–`U+202E`,
 `U+2066`–`U+2069`), zero-width characters (`U+200B`–`U+200D`, `U+FEFF`),
@@ -47,6 +102,11 @@ tool_result = answer.as_tool_result()
 #   "optionId": None,
 #   "text": "...",
 #   "durable": True,
+#   # Added for questions=, in question order:
+#   "answers": [
+#       {"questionId": "email", "optionId": None, "text": "..."},
+#       {"questionId": "env", "optionId": "prod", "text": None},
+#   ],
 # }
 ```
 
@@ -68,9 +128,14 @@ the timeout path).
 - Option ids are validated against the ask-time snapshot. Client-supplied labels
   and unknown option ids are refused.
 - A free-text answer is shown to the thread owner, but the public share
-  projection replaces it with `{"text": null, "redacted": true}`. Option
-  answers keep the server id and label. This is a recorded product decision
+  projection replaces it with `{"text": null, "redacted": true}`. For
+  `questions=`, each typed item is redacted separately and each option item
+  keeps the server id and label. Question defaults are removed from shares
+  because they may carry account data. This is a recorded product decision
   (KRE-270 §15.5): there is no disclosure knob in v1.
+- The multi-question card validates each field before Next and re-checks every
+  field before Submit. The review step lists each prompt with its answer, and a
+  Back button returns to the previous field or to the last field from review.
 
 ## S1 follow-up dispositions
 

@@ -521,9 +521,17 @@
       "options": "Options",
       "other": "Other",
       "otherAriaLabel": "Other answer",
-      "readOnly": "This question can no longer be answered.",
+      "otherPlaceholder": "Type your answer...",
+      "progress": "{{current}}/{{total}}",
+      "next": "Next",
+      "back": "Back",
+      "reviewTitle": "Review your answers",
+      "edit": "Edit",
+      "optional": "Optional",
+      "notAnswered": "Not answered",
+      "datePlaceholder": "Pick a date",
+      "clear": "Clear",
       "answeredPrivately": "Answered privately",
-      "by": "By",
       "status": {
         "pending": "Waiting for your answer",
         "answered": "Answered",
@@ -532,7 +540,13 @@
         "orphaned": "Unavailable"
       },
       "errors": {
-        "answer": "Unable to answer question"
+        "answer": "Unable to answer question",
+        "required": "This question is required",
+        "email": "Enter a valid email address",
+        "date": "Choose a valid date",
+        "number": "Enter a valid number",
+        "url": "Enter a valid URL",
+        "tel": "Enter a valid phone number"
       },
       "answer": "Your answer",
       "answerAriaLabel": "Your answer"

@@ -331,6 +331,22 @@ class ApprovalDecisionResponse(BaseModel):
     error: Optional[str] = None
 
 
+class QuestionAnswerItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    questionId: str = Field(min_length=1, max_length=64)
+    optionId: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    text: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_single_value(self) -> "QuestionAnswerItem":
+        if (self.optionId is None) == (self.text is None):
+            raise ValueError("exactly one of optionId or text is required")
+        if self.text is not None and not self.text.strip():
+            raise ValueError("text must not be blank")
+        return self
+
+
 class QuestionAnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -338,12 +354,17 @@ class QuestionAnswerRequest(BaseModel):
     questionId: str = Field(min_length=1, max_length=64)
     optionId: Optional[str] = Field(default=None, min_length=1, max_length=64)
     text: Optional[str] = Field(default=None, max_length=2000)
+    answers: Optional[List[QuestionAnswerItem]] = Field(default=None, max_length=10)
     decisionRequestId: str = Field(
         min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
     )
 
     @model_validator(mode="after")
     def validate_single_answer(self) -> "QuestionAnswerRequest":
+        if self.answers is not None:
+            if self.optionId is not None or self.text is not None:
+                raise ValueError("pass answers or a single answer, not both")
+            return self
         if (self.optionId is None) == (self.text is None):
             raise ValueError("exactly one of optionId or text is required")
         if self.text is not None and not self.text.strip():

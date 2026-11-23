@@ -17,6 +17,7 @@ from chainlit.approval import (
     ApprovalPending,
     ApprovalPersistenceError,
     ApprovalUnsupported,
+    Question,
     QuestionAlreadyAsked,
     QuestionInvalid,
     QuestionOption,
@@ -1160,3 +1161,343 @@ async def test_ask_requires_a_step(mock_chainlit_context, mock_session):
     async with mock_chainlit_context:
         with pytest.raises(ApprovalUnsupported):
             await ask(PROMPT)
+
+
+async def _pending_questions(step: Step, questions, **kwargs):
+    before = set(approval_module._pending_by_approval)
+    task = asyncio.create_task(
+        ask(
+            questions=questions,
+            step=step,
+            timeout=kwargs.pop("timeout", 30),
+            **kwargs,
+        )
+    )
+    for _ in range(200):
+        new_ids = set(approval_module._pending_by_approval) - before
+        if new_ids:
+            return task, approval_module._pending_by_approval[new_ids.pop()]
+        if task.done():
+            raise AssertionError(f"ask failed early: {task.exception()!r}")
+        await asyncio.sleep(0.01)
+    raise AssertionError("question entry was not registered")
+
+
+def _multi_questions():
+    return [
+        Question("Your name", id="name", type="text", default="Ada"),
+        Question("Email", id="email", type="email"),
+        Question(
+            "Environment",
+            id="env",
+            type="choice",
+            options=[
+                QuestionOption("staging", "Staging"),
+                QuestionOption("prod", "Production"),
+            ],
+            allow_free_text=False,
+            default="staging",
+        ),
+        Question("Start date", id="start", type="date"),
+        Question("Notes", id="notes", type="text", required=False),
+    ]
+
+
+async def test_multi_question_round_trips_typed_answers(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="profile", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(step, _multi_questions())
+
+        record = step.metadata["approval"]
+        assert record["structured"] is True
+        assert record["multi"] is True
+        assert [question["id"] for question in record["questions"]] == [
+            "name",
+            "email",
+            "env",
+            "start",
+            "notes",
+        ]
+        assert record["questions"][0]["default"] == "Ada"
+        assert record["questions"][2]["default"] == "staging"
+
+        emitted = ctx.emitter.send_question.await_args.args[0]
+        assert emitted["structured"] is True
+        assert emitted["questions"][1]["type"] == "email"
+        assert emitted["questions"][4]["required"] is False
+
+        stored = await transition(
+            entry.approval_id,
+            "answered",
+            actor=mock_session.user,
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            expected_kind="question",
+            answer={
+                "answers": [
+                    {"questionId": "name", "text": "  Ada  "},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "optionId": "prod"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                ]
+            },
+        )
+        answer = await task
+
+    assert answer.answered is True
+    assert answer.option_id is None
+    assert answer.label is None
+    assert answer.text is None
+    assert set(answer.answers) == {"name", "email", "env", "start"}
+    assert answer.answers["name"].text == "Ada"
+    assert answer.answers["email"].text == "ada@example.com"
+    assert answer.answers["env"].option_id == "prod"
+    assert answer.answers["env"].label == "Production"
+    assert answer.answers["start"].text == "2026-11-23"
+
+    result = answer.as_tool_result()
+    assert result["text"] is None
+    assert result["answers"] == [
+        {"questionId": "name", "optionId": None, "text": "Ada"},
+        {"questionId": "email", "optionId": None, "text": "ada@example.com"},
+        {"questionId": "env", "optionId": "prod", "text": None},
+        {"questionId": "start", "optionId": None, "text": "2026-11-23"},
+    ]
+
+    persisted = layer.steps[step.id]["metadata"]["approval"]
+    assert persisted["answer"] == stored["answer"]
+    assert persisted["answer"]["answers"] == [
+        {"questionId": "name", "text": "Ada"},
+        {"questionId": "email", "text": "ada@example.com"},
+        {"questionId": "env", "optionId": "prod", "label": "Production"},
+        {"questionId": "start", "text": "2026-11-23"},
+    ]
+
+
+async def test_single_structured_question_mirrors_its_answer(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="email-step", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(
+            step, [Question("Email", id="email", type="email")]
+        )
+        await transition(
+            entry.approval_id,
+            "answered",
+            actor=mock_session.user,
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            expected_kind="question",
+            answer={"answers": [{"questionId": "email", "text": "a@b.co"}]},
+        )
+        answer = await task
+
+    assert answer.answers["email"].text == "a@b.co"
+    assert answer.text == "a@b.co"
+    assert answer.as_tool_result()["answers"] == [
+        {"questionId": "email", "optionId": None, "text": "a@b.co"}
+    ]
+
+
+async def test_multi_question_rejects_invalid_answers_without_a_write(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="profile", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(step, _multi_questions())
+        writes = layer.write_calls
+
+        invalid_answers = [
+            {"answers": []},
+            {"answers": [{"questionId": "name", "text": "Ada"}]},
+            {"answers": [{"questionId": "unknown", "text": "x"}]},
+            {
+                "answers": [
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "name", "text": "Bea"},
+                ]
+            },
+            {
+                "answers": [
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "email", "text": "not-an-email"},
+                    {"questionId": "env", "optionId": "prod"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                ]
+            },
+            {
+                "answers": [
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "text": "other"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                ]
+            },
+            {
+                "answers": [
+                    {"questionId": "name", "optionId": "x"},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "optionId": "prod"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                ]
+            },
+            {
+                "answers": [
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "optionId": "unknown"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                ]
+            },
+            {
+                "answers": [
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "optionId": "prod"},
+                    {"questionId": "start", "text": "2026-02-30"},
+                ]
+            },
+            {
+                "answers": [
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "optionId": "prod"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                    {"questionId": "notes", "text": "x", "extra": True},
+                ]
+            },
+        ]
+        for answer in invalid_answers:
+            with pytest.raises(QuestionInvalid):
+                await transition(
+                    entry.approval_id,
+                    "answered",
+                    actor=mock_session.user,
+                    thread_id=mock_session.thread_id,
+                    session_generation=mock_session.generation,
+                    expected_kind="question",
+                    answer=answer,
+                )
+        assert layer.write_calls == writes
+        assert step.metadata["approval"]["status"] == "pending"
+
+        await transition(
+            entry.approval_id,
+            "answered",
+            actor=mock_session.user,
+            thread_id=mock_session.thread_id,
+            session_generation=mock_session.generation,
+            expected_kind="question",
+            answer={
+                "answers": [
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "optionId": "prod"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                ]
+            },
+        )
+        await task
+
+
+async def test_multi_question_input_validation():
+    with pytest.raises(QuestionInvalid):
+        await ask(questions=[])
+    with pytest.raises(QuestionInvalid):
+        await ask(PROMPT, questions=[Question("Email")])
+    with pytest.raises(QuestionInvalid):
+        await ask(questions=[Question("Pick", type="choice")])
+    with pytest.raises(QuestionInvalid):
+        await ask(questions=[Question("Email", type="email", default="not-an-email")])
+    with pytest.raises(QuestionInvalid):
+        await ask(
+            questions=[
+                Question("Text", type="text", options=[QuestionOption("a", "A")])
+            ]
+        )
+    with pytest.raises(QuestionInvalid):
+        await ask(questions=[Question("One", id="dup"), Question("Two", id="dup")])
+    with pytest.raises(QuestionInvalid):
+        await ask(questions=[Question("Date", type="date", default="2026-02-30")])
+    with pytest.raises(QuestionInvalid):
+        await ask(
+            questions=[
+                Question(
+                    "Pick",
+                    type="choice",
+                    options=[QuestionOption("a", "A")],
+                    default="b",
+                )
+            ]
+        )
+    with pytest.raises(QuestionInvalid):
+        await ask(questions=[Question("Site", type="url", default="ftp://x")])
+    with pytest.raises(QuestionInvalid):
+        await ask(questions=[Question(f"Question {index}") for index in range(11)])
+    with pytest.raises(QuestionInvalid):
+        await ask(
+            questions=[Question("Name")],
+            options=[QuestionOption("a", "A")],
+        )
+
+
+async def test_route_answers_multi_question(
+    layer, monkeypatch, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+    mock_session.unavailable_chat_profile = None
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_question = AsyncMock()
+        step = Step(name="profile", type="tool")
+        await step.send()
+        task, entry = await _pending_questions(step, _multi_questions())
+
+        response = await _post(
+            monkeypatch,
+            "/project/question",
+            _question_payload(
+                mock_session,
+                entry,
+                answers=[
+                    {"questionId": "name", "text": "Ada"},
+                    {"questionId": "email", "text": "ada@example.com"},
+                    {"questionId": "env", "optionId": "prod"},
+                    {"questionId": "start", "text": "2026-11-23"},
+                ],
+            ),
+            mock_session.user,
+            mock_session,
+            {"Origin": "http://testserver"},
+        )
+        answer = await task
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "answered"
+    assert body["answer"]["answers"] == [
+        {"questionId": "name", "text": "Ada"},
+        {"questionId": "email", "text": "ada@example.com"},
+        {"questionId": "env", "optionId": "prod", "label": "Production"},
+        {"questionId": "start", "text": "2026-11-23"},
+    ]
+    assert answer.answers["env"].label == "Production"

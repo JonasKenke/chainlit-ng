@@ -77,6 +77,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   as `cl.QuestionAnswer`; its `as_tool_result()` handoff carries explicit
   `provenance`/`trust: "untrusted_user_input"`/`durable` markers. No data-layer
   or schema change. See [the questions guide](docs/questions.md).
+- Add multi-question asks and typed fields through `cl.ask(questions=...)`:
+  text, email, date, number, URL and phone inputs with client and server
+  validation, per-field defaults and optional fields, a one-at-a-time card with
+  `1/4` progress, Back and Next, a review step, and per-field answers on
+  `QuestionAnswer.answers` and `as_tool_result()["answers"]`. The existing
+  single-question form is unchanged. See [the questions guide](docs/questions.md).
 - Add `[features.spontaneous_file_upload] directory` to store uploaded files outside `APP_ROOT`. Relative paths resolve against `APP_ROOT`, absolute paths are used as-is, and startup fails with an actionable error when uploads are enabled and the directory is not writable. Only the legacy default `.files` directory is removed on shutdown; a configured directory is preserved.
 - Add opt-in OpenTelemetry trace export from the Step tree (`feat(otel)`):
   `[features.telemetry] enabled = true` plus the new `chainlit[otel]` extra
@@ -122,6 +128,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   identifier and decision time and now shows the decision itself (approved,
   approved with edits, rejected, changes requested, expired, superseded or
   unavailable).
+- Make dialogs and alert dialogs fade and zoom in place instead of flying in
+  from the top-left. Tailwind v4 compiles `translate-x/y` to the `translate`
+  property while `tailwindcss-animate` animates `transform`, so the combined
+  offsets started the centered dialog far outside its final position.
 - Render inline LaTeX math literally when its closer is more than ~254 characters away, and bound both the `\(` and `$` inline lookahead so repeated unclosed openers parse in linear time.
 - Declare `aiohttp` and SQLAlchemy's `asyncio` extra in the `custom-data` extra so the SQLAlchemy and DynamoDB data layers import on a clean install.
 - Verify `azure-ad-hybrid` OAuth state and `id_token`, and generate a per-login nonce.

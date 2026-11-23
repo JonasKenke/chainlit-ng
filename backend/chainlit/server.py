@@ -4006,11 +4006,15 @@ async def answer_question(
             detail="This conversation is read-only because its chat profile is unavailable.",
         )
 
-    answer: Dict[str, Any] = (
-        {"optionId": payload.optionId}
-        if payload.optionId is not None
-        else {"text": payload.text}
-    )
+    answer: Dict[str, Any]
+    if payload.answers is not None:
+        answer = {
+            "answers": [item.model_dump(exclude_none=True) for item in payload.answers]
+        }
+    elif payload.optionId is not None:
+        answer = {"optionId": payload.optionId}
+    else:
+        answer = {"text": payload.text}
     try:
         record = await transition(
             payload.questionId,
