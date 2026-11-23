@@ -199,12 +199,9 @@ export const QuestionField = ({
                 <span>{t('chat.question.or', { defaultValue: 'or' })}</span>
                 <span className="h-px flex-1 bg-border" />
               </div>
-              <label htmlFor={textareaId} className="sr-only">
-                {t('chat.question.other')}
-              </label>
               <textarea
                 id={textareaId}
-                aria-labelledby={promptId}
+                aria-label={t('chat.question.otherAriaLabel')}
                 aria-describedby={showError ? errorId : undefined}
                 placeholder={
                   field.placeholder ??
