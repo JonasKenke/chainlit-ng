@@ -175,7 +175,7 @@ describe('QuestionCard', () => {
     expect(screen.queryByLabelText('Other answer')).toBeNull();
   });
 
-  it('shows the terminal option label and no controls', () => {
+  it('shows only the chosen answer without the decider identity or time', () => {
     renderCard({
       status: 'answered',
       answer: { optionId: 'prod', label: 'Production' },
@@ -185,11 +185,10 @@ describe('QuestionCard', () => {
 
     expect(screen.queryByText('Answered')).toBeNull();
     expect(screen.getByText('Production')).toBeInTheDocument();
-    expect(screen.getByText(/alice@example.com/)).toBeInTheDocument();
-    const decidedAt = screen.getByText(/2026/);
-    expect(decidedAt.tagName).toBe('TIME');
-    expect(decidedAt).toHaveAttribute('dateTime', '2026-11-08T15:00:00Z');
-    expect(screen.queryByText('2026-11-08T15:00:00Z')).toBeNull();
+    expect(screen.queryByText(/alice@example.com/)).toBeNull();
+    expect(screen.queryByText(/By/)).toBeNull();
+    expect(screen.queryByText(/2026/)).toBeNull();
+    expect(document.querySelector('time')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
   });

@@ -465,6 +465,11 @@ treated as absent, never as pending.
 A stale card can receive the terminal state in the 409 response body, so it can
 render the final status without waiting for another event.
 
+A terminal card shows a decision label (`Approved`, `Approved with edits`,
+`Rejected`, `Changes requested`, `Expired`, `Superseded` or `Unavailable`) and
+the optional decision comment. It does not render the decider's identifier or
+decision time, so embeddings and shared views do not expose user data.
+
 ## Refusal codes
 
 | Code                       | Typical HTTP status | Meaning                                                                                                                        |

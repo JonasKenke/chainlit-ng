@@ -1,4 +1,3 @@
-import { formatLocalDateTime } from '@/lib/datetime';
 import {
   ChainlitContext,
   IQuestion,
@@ -41,8 +40,6 @@ export const QuestionCard = ({ question }: Props) => {
   const isLive = question.live === true;
   const canAnswer = isPending && isLive;
   const answer = question.answer;
-  const decidedAtIso = question.decidedAt ?? null;
-  const decidedAtLabel = formatLocalDateTime(decidedAtIso);
   const submitDisabled = busy || (!selected && !text.trim());
 
   const submit = async () => {
@@ -203,25 +200,6 @@ export const QuestionCard = ({ question }: Props) => {
             ) : (
               <span>{t('chat.question.readOnly')}</span>
             )}
-            {question.decidedBy ? (
-              <span>
-                {' '}
-                · {t('chat.question.by')}{' '}
-                <bdi dir="auto">{question.decidedBy}</bdi>
-              </span>
-            ) : null}
-            {decidedAtLabel ? (
-              <span className="inline-block">
-                {' · '}
-                <time
-                  className="whitespace-nowrap"
-                  dateTime={decidedAtIso ?? undefined}
-                  title={decidedAtIso ?? ''}
-                >
-                  {decidedAtLabel}
-                </time>
-              </span>
-            ) : null}
           </div>
         )}
       </div>

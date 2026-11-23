@@ -85,7 +85,10 @@ describe('Approval edit and reject', () => {
       .click();
 
     cy.wait('@decide').its('response.statusCode').should('eq', 200);
-    cy.get('[data-testid="approval-card"]').should('not.contain', 'Edited');
+    cy.get('[data-testid="approval-card"]').should(
+      'contain',
+      'Approved with edits'
+    );
     cy.get('[data-testid="approval-diff"]')
       .should('contain', 'To')
       .and('contain', 'person@example.com')
@@ -143,6 +146,10 @@ describe('Approval edit and reject', () => {
       .click();
 
     cy.wait('@decide').its('response.statusCode').should('eq', 200);
+    cy.get('[data-testid="approval-card"]').should(
+      'contain',
+      'Changes requested'
+    );
     cy.get('[data-testid="approval-comment"]').should(
       'contain',
       'Use the finance alias.'
@@ -163,7 +170,11 @@ describe('Approval edit and reject', () => {
       .click();
 
     cy.wait('@decide').its('response.statusCode').should('eq', 200);
-    cy.get('[data-testid="approval-card"]').should('not.contain', 'Rejected');
+    cy.get('[data-testid="approval-card"]').should('contain', 'Rejected');
+    cy.get('[data-testid="approval-card"]')
+      .should('not.contain', 'approvals-user')
+      .find('time')
+      .should('not.exist');
     cy.get('[data-testid="approval-card"]').find('button').should('not.exist');
     cy.contains('not executed: reject');
   });
