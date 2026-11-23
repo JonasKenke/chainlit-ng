@@ -11,7 +11,7 @@ import BlinkingCursor from '@/components/BlinkingCursor';
 import { CompactSteps } from './CompactSteps';
 import { Message } from './Message';
 import { StepInteractions } from './StepInteractions';
-import { collectMessages, countVisibleSteps } from './compactSteps';
+import { collectMessages, countVisibleSteps } from './compact-steps';
 
 interface Props {
   messages: IStep[];
