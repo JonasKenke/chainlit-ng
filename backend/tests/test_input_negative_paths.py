@@ -2,12 +2,8 @@
 
 Covers validation, authentication and error handling for threads, file
 uploads, custom elements, actions, prompt-gallery CRUD and Socket.IO
-``client_message`` payloads. Tests marked ``xfail(strict=True)`` pin a
-confirmed defect from ``docs/research/input-negative-paths.md`` (KRE-187
-finding IDs); they turn into failures when the defect is fixed so the marker
-can be removed.
-
-No production code is changed by this module.
+``client_message`` payloads. The custom-element thread-id checks assert that
+server-side session state, not the request body, scopes writes and deletes.
 """
 
 import io
@@ -747,11 +743,9 @@ def test_element_update_rejects_non_custom_type(api, session):
     assert response.json() == {"success": False}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F4: custom-element writes use the caller-supplied threadId.",
-)
 def test_element_update_does_not_trust_client_thread_id(api, session, layer):
+    layer.get_element.return_value = {"id": "element-1"}
+    layer.get_thread_author.return_value = USER.identifier
     response = api.put(
         "/project/element",
         json={
@@ -759,7 +753,7 @@ def test_element_update_does_not_trust_client_thread_id(api, session, layer):
             "element": _custom_element(threadId="victim-thread"),
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
 
     for _ in range(200):
         if layer.create_element.await_count:
@@ -772,11 +766,9 @@ def test_element_update_does_not_trust_client_thread_id(api, session, layer):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KRE-187-F4: custom-element deletes use the caller-supplied threadId.",
-)
 def test_element_delete_does_not_trust_client_thread_id(api, session, layer):
+    layer.get_element.return_value = {"id": "victim-element"}
+    layer.get_thread_author.return_value = USER.identifier
     response = api.request(
         "DELETE",
         "/project/element",
@@ -785,7 +777,7 @@ def test_element_delete_does_not_trust_client_thread_id(api, session, layer):
             "element": _custom_element(id="victim-element", threadId="victim-thread"),
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     element_id, thread_id = layer.delete_element.await_args.args
     assert thread_id == session.thread_id, f"deleted ({element_id!r}, {thread_id!r})"
 
