@@ -60,14 +60,53 @@ chainlit-ng run demo.py -w
 
 ## What's in 3.0
 
-- **Tool-call approvals.** Pause a tool with `@cl.step(requires_approval=True)` or the explicit `cl.Approval` API. The server keeps the real arguments; the card shows a redacted preview. Users can approve, reject, edit generated form fields, or request changes with a comment. See [docs/approvals.md](docs/approvals.md).
-- **Agent questions.** `cl.ask` pauses the step for an authored question with options, free text, or both. Answers carry explicit provenance and are marked as untrusted user input. See [docs/questions.md](docs/questions.md).
+- **Tool-call approvals.** Pause a tool with `@cl.step(requires_approval=True)` or the explicit `cl.Approval` API. The server keeps the real arguments; the card shows a redacted preview. Users can approve, reject, edit generated form fields, or request changes with a comment. Resolved cards show a colored decision status. See [docs/approvals.md](docs/approvals.md).
+- **Agent questions.** `cl.ask` supports a single question or a multi-field wizard with text, email, date, number, URL, phone, single-select, and checkbox multi-select fields. Fields can be prefilled or optional; free text can accompany checked options; the wizard has 1/N progress, Back and Next, and a review step. Answers carry per-field provenance and are marked as untrusted user input. See [docs/questions.md](docs/questions.md).
 - **Thread sharing and grants.** Opt-in read-only sharing with named users, scoped by the data layer. See [docs/thread-sharing.md](docs/thread-sharing.md).
 - **Safer MCP.** Servers are declared by name in server-side config, user-provided servers require an explicit URL allowlist, and per-user OAuth is supported for streamable HTTP. See [docs/mcp-oauth.md](docs/mcp-oauth.md).
 - **OpenTelemetry traces.** Opt-in OTLP/HTTP export from the step tree, with a fixed redaction allowlist and bounded span attributes. See [docs/telemetry.md](docs/telemetry.md).
 - **Library, prompts, and skills.** One Library dialog with Prompts and Skills tabs. Save, search, insert, edit, share, and version prompts; create, import, review, enable, share, and update skills. See [Prompt and skill Library](#prompt-and-skill-library).
 - **Scheduled prompts.** Carried forward from 2.12: recurring prompt runs with model selection, optional chat profiles, and optional after-hooks. See [Scheduled prompts](#scheduled-prompts).
 - **UI improvements.** Optional message timestamps, compact chain-of-thought display, side-view opening by element id, and a configurable upload directory outside `APP_ROOT`.
+
+## Structured questions
+
+`cl.ask` accepts one question or a typed multi-field form. Checkbox questions
+use `multiple=True` and can combine checked options with an optional Other
+answer.
+
+```python
+answer = await cl.ask(
+    questions=[
+        cl.Question("Email", id="email", type="email"),
+        cl.Question(
+            "Regions",
+            id="regions",
+            type="choice",
+            multiple=True,
+            options=[
+                cl.QuestionOption("eu", "Europe"),
+                cl.QuestionOption("us", "United States"),
+                cl.QuestionOption("apac", "Asia Pacific"),
+            ],
+            default=["eu", "us"],
+            allow_free_text=True,
+        ),
+        cl.Question("Start date", id="start", type="date"),
+        cl.Question("Notes", id="notes", type="text", required=False),
+    ]
+)
+
+answer.answers["email"].text
+answer.answers["regions"].option_ids
+answer.answers["regions"].labels
+```
+
+The card shows one field at a time with `1/6` progress, Back and Next, and a
+review step before Submit. Typed fields validate in the browser and again on the
+server; optional fields are omitted from the answer. Checkbox answers return
+`option_ids` plus `labels`, and their Other text is additive. See
+[docs/questions.md](docs/questions.md) for the full contract.
 
 ## Prompt and skill Library
 
@@ -137,15 +176,48 @@ contract, model application, after-hooks, and recurrence details.
 
 ## Screenshots
 
+### Approvals
+
 <table>
   <tr>
     <td width="50%">
-      <img src="images/approval-card.png" alt="Tool-call approval card showing a redacted argument table with Approve, Edit, Reject, and Request changes actions" />
-      <p align="center"><sub>Review a tool call, edit its fields, or request changes.</sub></p>
+      <img src="images/approval-card.png" alt="Pending tool-call approval card with a deploy table and Approve, Reject, and Request changes actions" />
+      <p align="center"><sub>Review a tool call and decide.</sub></p>
     </td>
     <td width="50%">
-      <img src="images/question-card.png" alt="Agent question card with Staging and Production options plus a free-text answer field" />
-      <p align="center"><sub><code>cl.ask</code> questions with options and free text.</sub></p>
+      <img src="images/approval-resolved.png" alt="Resolved approval card with a green check and Approved status" />
+      <p align="center"><sub>Resolved cards keep a clear status line.</sub></p>
+    </td>
+  </tr>
+</table>
+
+### Structured questions
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="images/question-card.png" alt="Single agent question with Staging, Production, and Preview options plus a free-text Other field" />
+      <p align="center"><sub>Single question with options and free text.</sub></p>
+    </td>
+    <td width="50%">
+      <img src="images/question-resolved.png" alt="Resolved question card showing the chosen Production answer" />
+      <p align="center"><sub>The answer stays visible after submission.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="images/multi-question.png" alt="Multi-question wizard showing the Email field, 2 of 6 progress, Back and Next" />
+      <p align="center"><sub>Typed fields with progress and Back/Next.</sub></p>
+    </td>
+    <td width="50%">
+      <img src="images/multi-select.png" alt="Checkbox multi-select question with Europe and United States checked, an and divider, and an Other text answer" />
+      <p align="center"><sub>Checkbox answers can add an Other answer.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="images/question-review.png" alt="Review step listing all six answers with pencil edit buttons and a Submit action" />
+      <p align="center"><sub>Review every answer before submitting.</sub></p>
     </td>
   </tr>
 </table>
