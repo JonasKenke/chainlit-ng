@@ -217,7 +217,11 @@ export const QuestionField = ({
             <>
               <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="h-px flex-1 bg-border" />
-                <span>{t('chat.question.or', { defaultValue: 'or' })}</span>
+                <span>
+                  {field.multiple
+                    ? t('chat.question.and', { defaultValue: 'and' })
+                    : t('chat.question.or', { defaultValue: 'or' })}
+                </span>
                 <span className="h-px flex-1 bg-border" />
               </div>
               <textarea

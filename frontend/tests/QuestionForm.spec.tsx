@@ -35,6 +35,8 @@ vi.mock('@/components/i18n/Translator', () => ({
           'chat.question.optional': 'Optional',
           'chat.question.selectMultiple': 'Select all that apply',
           'chat.question.otherAriaLabel': 'Other answer',
+          'chat.question.and': 'and',
+          'chat.question.or': 'or',
           'chat.question.notAnswered': 'Not answered',
           'chat.question.datePlaceholder': 'Pick a date',
           'chat.question.clear': 'Clear',
@@ -270,6 +272,8 @@ describe('QuestionForm', () => {
     renderCard({ questions: [environments], multi: false });
 
     expect(screen.getByText('Select all that apply')).toBeInTheDocument();
+    expect(screen.getByText('and')).toBeInTheDocument();
+    expect(screen.queryByText('or')).toBeNull();
     expect(screen.getByRole('checkbox', { name: /Staging/ })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /Production/ })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /Preview/ })).not.toBeChecked();

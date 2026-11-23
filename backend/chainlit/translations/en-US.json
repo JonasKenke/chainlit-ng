@@ -520,6 +520,7 @@
       "ariaLabel": "Question from the assistant",
       "options": "Options",
       "other": "Other",
+      "and": "and",
       "otherAriaLabel": "Other answer",
       "otherPlaceholder": "Type your answer...",
       "progress": "{{current}}/{{total}}",
