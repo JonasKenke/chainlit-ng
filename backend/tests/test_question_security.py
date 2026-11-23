@@ -18,10 +18,9 @@ from chainlit.approval import (
     ApprovalNotFound,
     ApprovalNotPending,
     QuestionInvalid,
-    QuestionOption,
-    ask,
     transition,
 )
+from chainlit.question import QuestionOption, ask
 from chainlit.step import Step
 from chainlit.thread_metadata import public_thread
 from tests.test_approval import FakeDataLayer

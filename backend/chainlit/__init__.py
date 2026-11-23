@@ -34,21 +34,16 @@ from chainlit.approval import (
     ApprovalSessionMismatch,
     ApprovalThreadMismatch,
     ApprovalUnsupported,
-    Question,
     QuestionAlreadyAsked,
-    QuestionAnswer,
     QuestionAuthRequired,
     QuestionError,
-    QuestionFieldAnswer,
     QuestionInvalid,
     QuestionLimitReached,
     QuestionNotPending,
     QuestionNotReady,
-    QuestionOption,
     QuestionPersistenceError,
     QuestionThreadMismatch,
     QuestionUnsupported,
-    ask,
 )
 from chainlit.cache import cache
 from chainlit.chat_context import chat_context
@@ -79,6 +74,13 @@ from chainlit.message import (
     Message,
 )
 from chainlit.mode import Mode, ModeOption
+from chainlit.question import (
+    Question,
+    QuestionAnswer,
+    QuestionFieldAnswer,
+    QuestionOption,
+    ask,
+)
 from chainlit.sidebar import ElementSidebar
 from chainlit.skill import (
     get_skill,

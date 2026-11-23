@@ -17,11 +17,8 @@ from chainlit.approval import (
     ApprovalPending,
     ApprovalPersistenceError,
     ApprovalUnsupported,
-    Question,
     QuestionAlreadyAsked,
     QuestionInvalid,
-    QuestionOption,
-    ask,
     guard_pending_approval,
     is_thread_deleted,
     mark_thread_deleted,
@@ -29,6 +26,7 @@ from chainlit.approval import (
     transition,
 )
 from chainlit.auth import get_current_user
+from chainlit.question import Question, QuestionOption, ask
 from chainlit.server import app
 from chainlit.step import Step
 from chainlit.user import User
