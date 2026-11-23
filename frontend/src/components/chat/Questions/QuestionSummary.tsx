@@ -1,3 +1,4 @@
+import { Pencil } from 'lucide-react';
 import { Fragment } from 'react';
 
 import { useTranslation } from '@/components/i18n/Translator';
@@ -25,7 +26,7 @@ export const QuestionSummary = ({ rows, emptyLabel, onEdit }: Props) => {
   return (
     <div
       data-testid="question-summary"
-      className={`mt-3 grid gap-x-4 gap-y-2 text-xs ${columns}`}
+      className={`mt-3 grid items-center gap-x-4 gap-y-1.5 text-xs leading-4 ${columns}`}
     >
       {rows.map((row) => (
         <Fragment key={row.key}>
@@ -47,12 +48,13 @@ export const QuestionSummary = ({ rows, emptyLabel, onEdit }: Props) => {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 px-1.5 text-xs font-normal text-muted-foreground hover:text-foreground"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
               aria-label={`${t('chat.question.edit')} ${row.prompt}`}
+              title={`${t('chat.question.edit')} ${row.prompt}`}
               onClick={() => onEdit(row.key)}
             >
-              {t('chat.question.edit')}
+              <Pencil />
             </Button>
           ) : null}
         </Fragment>
