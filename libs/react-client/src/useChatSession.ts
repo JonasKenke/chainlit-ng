@@ -159,6 +159,7 @@ const useChatSession = () => {
   const setThreadResumeError = useSetChainlitState('resumeThreadError');
   const setUnavailableThreadId = useSetChainlitState('unavailableThreadId');
   const setFavoriteMessages = useSetChainlitState('favoriteMessages');
+  const setThreadHistory = useSetChainlitState('threadHistory');
 
   const [currentThreadId, setCurrentThreadId] =
     useChainlitState('currentThreadId');
@@ -478,6 +479,22 @@ const useChatSession = () => {
         (event: { interaction: string; thread_id: string }) => {
           setFirstUserInteraction(event.interaction);
           setCurrentThreadId(event.thread_id);
+        }
+      );
+
+      socket.on(
+        'thread_title_updated',
+        ({ thread_id, name }: { thread_id: string; name: string }) => {
+          setThreadHistory((history) => {
+            if (!history?.threads) return history;
+
+            return {
+              ...history,
+              threads: history.threads.map((thread) =>
+                thread.id === thread_id ? { ...thread, name } : thread
+              )
+            };
+          });
         }
       );
 

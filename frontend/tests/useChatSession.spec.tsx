@@ -600,6 +600,96 @@ describe('useChatInteract clear', () => {
   });
 });
 
+describe('useChatSession thread title events', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    io.mockClear();
+    sockets.length = 0;
+  });
+
+  async function threadTitleHandler() {
+    const { store } = await connectWithResumeHandler();
+    const socket = sockets[0];
+    const handler = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'thread_title_updated'
+    )?.[1] as (event: { thread_id: string; name: string }) => void;
+    expect(handler).toBeTruthy();
+    return { store, handler };
+  }
+
+  it('renames a thread and recomputes grouped threads in place', async () => {
+    const { store, handler } = await threadTitleHandler();
+    const createdAt = new Date().toISOString();
+    act(() => {
+      store.setState({
+        threadHistory: {
+          threads: [
+            { id: 'thread-1', name: 'Old title', createdAt, steps: [] },
+            { id: 'thread-2', name: 'Other title', createdAt, steps: [] }
+          ],
+          currentThreadId: 'thread-1',
+          pageInfo: { hasNextPage: false }
+        }
+      });
+    });
+
+    act(() => {
+      handler({ thread_id: 'thread-1', name: 'New title' });
+    });
+
+    const history = store.getState().threadHistory;
+    expect(
+      history?.threads?.find((thread) => thread.id === 'thread-1')?.name
+    ).toBe('New title');
+    expect(
+      history?.threads?.find((thread) => thread.id === 'thread-2')?.name
+    ).toBe('Other title');
+    expect(history?.timeGroupedThreads).toBeDefined();
+    expect(
+      Object.values(history!.timeGroupedThreads!)
+        .flat()
+        .find((thread) => thread.id === 'thread-1')?.name
+    ).toBe('New title');
+  });
+
+  it('ignores unknown thread ids without disturbing history', async () => {
+    const { store, handler } = await threadTitleHandler();
+    const createdAt = new Date().toISOString();
+    act(() => {
+      store.setState({
+        threadHistory: {
+          threads: [
+            { id: 'thread-1', name: 'Old title', createdAt, steps: [] }
+          ],
+          currentThreadId: 'thread-1'
+        }
+      });
+    });
+
+    act(() => {
+      handler({ thread_id: 'missing-thread', name: 'New title' });
+    });
+
+    const history = store.getState().threadHistory;
+    expect(history?.threads).toHaveLength(1);
+    expect(history?.threads?.[0].name).toBe('Old title');
+  });
+
+  it('leaves history undefined when threads are not loaded', async () => {
+    const { store, handler } = await threadTitleHandler();
+    act(() => {
+      store.setState({ threadHistory: undefined });
+    });
+
+    act(() => {
+      handler({ thread_id: 'thread-1', name: 'New title' });
+    });
+
+    expect(store.getState().threadHistory).toBeUndefined();
+  });
+});
+
 describe('useChatSession open_side_view', () => {
   afterEach(() => {
     vi.useRealTimers();
