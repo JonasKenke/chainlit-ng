@@ -194,6 +194,8 @@ Tool-call approvals are opt-in. Existing steps keep their current behavior unles
 
 Approvals and questions share a cap of eight pending interactions per session. If your app previously started a tool immediately and never paused for input, review the new card behavior and the [approvals guide](approvals.md).
 
+`cl.Approval(title=...)` was misleading because the tool name is the card heading and the text renders below it. Use `subtitle=...` instead. `title` remains a deprecated alias during the alpha; omit either for no secondary text.
+
 ### LiteralAI data layer removed
 
 The LiteralAI data layer, debug UI, and SDK instrumentation helpers were removed. `literalai` is no longer installed transitively; declare it explicitly if your application imports it. Setting `LITERAL_API_KEY` now logs a warning instead of enabling the layer.

@@ -45,7 +45,7 @@ const approval: IApproval = {
   stepId: 'step-1',
   threadId: 'thread-1',
   tool: 'send_email',
-  title: 'Send the draft',
+  subtitle: 'Send the draft',
   status: 'pending',
   arguments: {
     to: 'person@example.com',
@@ -132,12 +132,26 @@ describe('ApprovalCard', () => {
     expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
   });
 
-  it('renders the title as text, never as HTML', () => {
-    const title = '<img src=x onerror="alert(1)">';
-    const { container } = renderCard({ title });
+  it('renders the subtitle as text, never as HTML', () => {
+    const subtitle = '<img src=x onerror="alert(1)">';
+    const { container } = renderCard({ subtitle });
 
-    expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.getByText(subtitle)).toBeInTheDocument();
     expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('falls back to the deprecated title field', () => {
+    renderCard({ subtitle: undefined, title: 'Legacy text' });
+
+    expect(screen.getByTestId('approval-subtitle')).toHaveTextContent(
+      'Legacy text'
+    );
+  });
+
+  it('hides the subtitle when neither field is set', () => {
+    renderCard({ subtitle: undefined, title: undefined });
+
+    expect(screen.queryByTestId('approval-subtitle')).toBeNull();
   });
 
   it('sends a decision without client-held arguments', async () => {

@@ -374,6 +374,79 @@ async def test_approval_content_is_capped_and_blank_becomes_none(
             )
 
 
+async def test_subtitle_is_secondary_text_and_mirrors_to_legacy_title(
+    layer, mock_chainlit_context, mock_session
+):
+    mock_session.generation = "gen-1"
+    mock_session.has_first_interaction = True
+
+    async with mock_chainlit_context as ctx:
+        ctx.emitter.send_approval = AsyncMock()
+        step = Step(name="tool", type="tool")
+        await step.send()
+        task = asyncio.create_task(
+            Approval(
+                step=step,
+                arguments={"rows": 1},
+                subtitle="Review the draft",
+                timeout=30,
+            ).ask()
+        )
+        entry = await _entry_for(step)
+        payload = ctx.emitter.send_approval.await_args.args[0]
+        assert payload["subtitle"] == "Review the draft"
+        assert payload["title"] == "Review the draft"
+        assert payload["tool"] == "tool"
+
+        record = layer.steps[step.id]["metadata"]["approval"]
+        assert record["subtitle"] == "Review the draft"
+        assert record["title"] == "Review the draft"
+
+        await _decide(mock_session, entry, "rejected")
+        await task
+
+
+async def test_title_is_a_deprecated_subtitle_alias(mock_chainlit_context):
+    async with mock_chainlit_context:
+        step = Step(name="tool", type="tool")
+
+        with pytest.warns(DeprecationWarning, match="subtitle"):
+            legacy = Approval(step=step, arguments={}, title="Legacy text")
+        assert legacy.subtitle == "Legacy text"
+        assert legacy.title == "Legacy text"
+
+        with pytest.warns(DeprecationWarning, match="subtitle"):
+            same = Approval(step=step, arguments={}, subtitle="Same", title="Same")
+        assert same.subtitle == "Same"
+
+        with pytest.raises(ValueError, match="subtitle"):
+            with pytest.warns(DeprecationWarning, match="subtitle"):
+                Approval(
+                    step=step,
+                    arguments={},
+                    subtitle="New",
+                    title="Different",
+                )
+
+        hidden = Approval(step=step, arguments={}, subtitle=None)
+        assert hidden.subtitle is None
+        assert hidden.title is None
+
+
+def test_payload_reads_legacy_title_as_subtitle():
+    record = {
+        "id": "approval-1",
+        "stepId": "step-1",
+        "threadId": "thread-1",
+        "tool": "tool",
+        "title": "Legacy text",
+        "status": "approved",
+    }
+    payload = approval_module._payload(record, {})
+    assert payload["subtitle"] == "Legacy text"
+    assert payload["title"] == "Legacy text"
+
+
 async def test_timeout_uses_the_same_transition_and_executes_nothing(
     layer, mock_chainlit_context, mock_session
 ):
@@ -1034,6 +1107,7 @@ async def test_pending_record_has_every_field_and_redacts_secrets(
             "stepId",
             "threadId",
             "tool",
+            "subtitle",
             "title",
             "status",
             "requestedBy",

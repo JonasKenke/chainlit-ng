@@ -32,6 +32,8 @@ export interface IApproval {
   stepId: string;
   threadId: string;
   tool: string;
+  subtitle?: string | null;
+  /** @deprecated Use subtitle. Kept for older servers. */
   title?: string | null;
   content?: string | null;
   status: ApprovalStatus;
