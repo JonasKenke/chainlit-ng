@@ -3,6 +3,8 @@ import {
   ChainlitContext,
   THREAD_HISTORY_PAGE_SIZE,
   getChainlitStore,
+  registerThreadHistoryRefresher,
+  unregisterThreadHistoryRefresher,
   useChatInteract,
   useChatSession
 } from '@chainlit-ng/react-client';
@@ -747,6 +749,50 @@ describe('useChatSession thread list events', () => {
         .flat()
         .map((thread) => thread.id)
     ).toEqual(['thread-new']);
+  });
+
+  it('delegates a thread list event to the registered sidebar refresher', async () => {
+    const { client, store, handler } = await threadListHandler();
+    const listThreads = vi.spyOn(client, 'listThreads');
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    registerThreadHistoryRefresher(client, refresh);
+
+    await act(async () => {
+      await handler();
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(listThreads).not.toHaveBeenCalled();
+    expect(store.getState().threadHistory?.threads).toBeUndefined();
+
+    unregisterThreadHistoryRefresher(client, refresh);
+  });
+
+  it('falls back to its own fetch when no sidebar is mounted', async () => {
+    const { client, store, handler } = await threadListHandler();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    registerThreadHistoryRefresher(client, refresh);
+    unregisterThreadHistoryRefresher(client, refresh);
+    vi.spyOn(client, 'listThreads').mockResolvedValue({
+      pageInfo: { hasNextPage: false },
+      data: [
+        {
+          id: 'thread-fallback',
+          name: 'Fallback',
+          createdAt: new Date().toISOString(),
+          steps: []
+        }
+      ]
+    });
+
+    await act(async () => {
+      await handler();
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(store.getState().threadHistory?.threads?.map((t) => t.id)).toEqual([
+      'thread-fallback'
+    ]);
   });
 
   it('preserves the current thread id while refreshing', async () => {

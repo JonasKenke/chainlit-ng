@@ -42,6 +42,8 @@ import { THREAD_HISTORY_PAGE_SIZE } from './constants';
 import { ChainlitContext } from './context';
 import {
   beginThreadHistoryRequest,
+  finishThreadHistoryRequest,
+  getThreadHistoryRefresher,
   invalidateThreadHistoryRequests,
   isLatestThreadHistoryRequest
 } from './threadHistoryRequests';
@@ -505,6 +507,14 @@ const useChatSession = () => {
       );
 
       socket.on('thread_list_updated', async () => {
+        // A mounted sidebar registers its first-page refresh so loading
+        // state and pagination coordinate with a single request.
+        const refresh = getThreadHistoryRefresher(client);
+        if (refresh) {
+          await refresh();
+          return;
+        }
+
         const requestId = beginThreadHistoryRequest(client);
         try {
           const { pageInfo, data } = await client.listThreads(
@@ -520,6 +530,8 @@ const useChatSession = () => {
         } catch (err) {
           if (!isLatestThreadHistoryRequest(client, requestId)) return;
           console.error('Failed to refresh thread history:', err);
+        } finally {
+          finishThreadHistoryRequest(client, requestId);
         }
       });
 

@@ -3,7 +3,8 @@ import {
   ChainlitContext,
   type IThread,
   beginThreadHistoryRequest,
-  getChainlitStore
+  getChainlitStore,
+  getThreadHistoryRefresher
 } from '@chainlit-ng/react-client';
 import { act, render } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -13,7 +14,19 @@ import { ThreadHistory } from '@/components/LeftSidebar/ThreadHistory';
 import { SidebarProvider } from '@/components/ui/sidebar';
 
 vi.mock('@/components/LeftSidebar/ThreadList', () => ({
-  ThreadList: () => null
+  ThreadList: ({
+    isFetching,
+    isLoadingMore
+  }: {
+    isFetching: boolean;
+    isLoadingMore: boolean;
+  }) => (
+    <output data-testid="thread-list-state">
+      {`${isFetching ? 'fetching' : 'idle'}:${
+        isLoadingMore ? 'loading-more' : 'idle'
+      }`}
+    </output>
+  )
 }));
 
 vi.mock('@/hooks/use-mobile', () => ({
@@ -27,6 +40,11 @@ function LocationProbe() {
 
 function path() {
   return document.querySelector('[data-testid="path"]')?.textContent;
+}
+
+function loadingState() {
+  return document.querySelector('[data-testid="thread-list-state"]')
+    ?.textContent;
 }
 
 const thread: IThread = {
@@ -48,15 +66,20 @@ function deferred<T>() {
 
 function setup({
   threads,
-  firstFetch
+  firstFetch,
+  fetchResults
 }: {
   threads?: IThread[];
   firstFetch?: Promise<ListThreadsResult>;
+  fetchResults?: Promise<ListThreadsResult>[];
 } = {}) {
   const client = new ChainlitAPI('http://localhost:8000', 'webapp');
   const pending = new Promise<ListThreadsResult>(() => {});
   const listThreads = vi.spyOn(client, 'listThreads');
-  if (firstFetch) {
+  if (fetchResults) {
+    fetchResults.forEach((result) => listThreads.mockReturnValueOnce(result));
+    listThreads.mockReturnValue(pending);
+  } else if (firstFetch) {
     listThreads.mockReturnValueOnce(firstFetch).mockReturnValue(pending);
   } else {
     listThreads.mockReturnValue(pending);
@@ -120,7 +143,7 @@ describe('ThreadHistory navigation', () => {
 
   it('ignores an initial fetch that a newer request superseded', async () => {
     const { promise, resolve } = deferred<ListThreadsResult>();
-    const { client, store } = setup({ firstFetch: promise });
+    const { client, listThreads, store } = setup({ firstFetch: promise });
 
     act(() => {
       beginThreadHistoryRequest(client);
@@ -135,5 +158,51 @@ describe('ThreadHistory navigation', () => {
     });
 
     expect(store.getState().threadHistory?.threads).toBeUndefined();
+    // A stale completion must not clear loading and trigger another fetch.
+    expect(listThreads).toHaveBeenCalledTimes(1);
+    expect(loadingState()).toBe('fetching:idle');
+  });
+
+  it('keeps loading owned by a refresh that superseded the initial fetch', async () => {
+    const initial = deferred<ListThreadsResult>();
+    const refresh = deferred<ListThreadsResult>();
+    const { client, listThreads, store } = setup({
+      fetchResults: [initial, refresh]
+    });
+
+    const refresher = getThreadHistoryRefresher(client);
+    expect(refresher).toBeTruthy();
+
+    let refreshRun!: Promise<void>;
+    act(() => {
+      refreshRun = refresher!();
+    });
+
+    await act(async () => {
+      initial.resolve({
+        pageInfo: { hasNextPage: false },
+        data: [{ ...thread, id: 'stale-thread' }]
+      });
+      await initial.promise;
+    });
+
+    // The stale initial fetch must not unlock loading owned by the refresh.
+    expect(store.getState().threadHistory?.threads).toBeUndefined();
+    expect(loadingState()).toBe('fetching:idle');
+    expect(listThreads).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      refresh.resolve({
+        pageInfo: { hasNextPage: false },
+        data: [{ ...thread, id: 'fresh-thread' }]
+      });
+      await refreshRun;
+    });
+
+    expect(
+      store.getState().threadHistory?.threads?.map((item) => item.id)
+    ).toEqual(['fresh-thread']);
+    expect(loadingState()).toBe('idle:idle');
+    expect(listThreads).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,8 +1,12 @@
 import {
   ChainlitContext,
   THREAD_HISTORY_PAGE_SIZE,
+  beginThreadHistoryPage,
   beginThreadHistoryRequest,
+  finishThreadHistoryRequest,
   isLatestThreadHistoryRequest,
+  registerThreadHistoryRefresher,
+  unregisterThreadHistoryRefresher,
   useChainlitState,
   useChatMessages
 } from '@chainlit-ng/react-client';
@@ -100,22 +104,28 @@ export function ThreadHistory() {
     setShouldLoadMore(atBottom);
   };
 
-  const fetchThreads = async (
-    cursor?: string | number,
-    isLoadingMore = false
-  ) => {
-    const requestId = beginThreadHistoryRequest(apiClient);
+  const fetchThreads = async (cursor?: string | number) => {
+    const isFirstPage = !cursor;
+    // First-page requests (mount and refresh events) supersede everything and
+    // own the loading state. Pagination only extends the current page, so it
+    // captures the generation without bumping it and waits for any refresh.
+    const requestId = isFirstPage
+      ? beginThreadHistoryRequest(apiClient)
+      : beginThreadHistoryPage(apiClient);
+
+    if (requestId === null) return;
+
     try {
-      setIsLoadingMore(!!cursor || isLoadingMore);
-      setIsFetching(!cursor && !isLoadingMore);
+      setIsLoadingMore(!isFirstPage);
+      setIsFetching(isFirstPage);
 
       const { pageInfo, data } = await apiClient.listThreads(
         { first: BATCH_SIZE, cursor },
         {}
       );
 
-      // A refresh event, reconnect, or newer page request may have started
-      // while this request was in flight. Never let a stale page win.
+      // A refresh event, reconnect, or newer request may have started while
+      // this request was in flight. Never let a stale response win.
       if (!isLatestThreadHistoryRequest(apiClient, requestId)) return;
 
       setError(undefined);
@@ -137,11 +147,27 @@ export function ThreadHistory() {
       if (!isLatestThreadHistoryRequest(apiClient, requestId)) return;
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
-      setShouldLoadMore(false);
-      setIsLoadingMore(false);
-      setIsFetching(false);
+      // Only the request that still owns the state may clear it. Otherwise a
+      // stale completion unlocks pagination or triggers another initial fetch.
+      if (isLatestThreadHistoryRequest(apiClient, requestId)) {
+        if (isFirstPage) finishThreadHistoryRequest(apiClient, requestId);
+        setShouldLoadMore(false);
+        setIsLoadingMore(false);
+        setIsFetching(false);
+      }
     }
   };
+
+  // Let session refresh events use this component's fetch so loading state and
+  // pagination stay coordinated with the single in-flight first-page request.
+  const fetchThreadsRef = useRef(fetchThreads);
+  fetchThreadsRef.current = fetchThreads;
+
+  useEffect(() => {
+    const refresh = () => fetchThreadsRef.current();
+    registerThreadHistoryRefresher(apiClient, refresh);
+    return () => unregisterThreadHistoryRefresher(apiClient, refresh);
+  }, [apiClient]);
 
   // Initial fetch
   useEffect(() => {

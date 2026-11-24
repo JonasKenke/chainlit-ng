@@ -3,6 +3,8 @@ import {
   ClientError,
   THREAD_HISTORY_PAGE_SIZE,
   beginThreadHistoryRequest,
+  finishThreadHistoryRequest,
+  getThreadHistoryRefresher,
   invalidateThreadHistoryRequests,
   isLatestThreadHistoryRequest,
   useAuth,
@@ -57,6 +59,14 @@ export default function UserNav() {
   const canClearAll = Boolean(config?.threadClearAll);
 
   const refetchThreadHistory = async () => {
+    // Route through the mounted sidebar when possible so loading state and
+    // pagination stay coordinated with the single in-flight first-page request.
+    const refresh = getThreadHistoryRefresher(apiClient);
+    if (refresh) {
+      await refresh();
+      return;
+    }
+
     const requestId = beginThreadHistoryRequest(apiClient);
     try {
       const { pageInfo, data } = await apiClient.listThreads(
@@ -67,6 +77,8 @@ export default function UserNav() {
       setThreadHistory({ threads: data, pageInfo });
     } catch {
       // The failed deletion is already reported; keep the current history.
+    } finally {
+      finishThreadHistoryRequest(apiClient, requestId);
     }
   };
 
