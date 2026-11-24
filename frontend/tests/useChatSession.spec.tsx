@@ -1,6 +1,7 @@
 import {
   ChainlitAPI,
   ChainlitContext,
+  THREAD_HISTORY_PAGE_SIZE,
   getChainlitStore,
   useChatInteract,
   useChatSession
@@ -251,7 +252,7 @@ async function connectWithResumeHandler() {
     ([event]: [string]) => event === 'resume_thread'
   )?.[1] as (thread: unknown) => void;
 
-  return { store, resumeHandler };
+  return { client, store, resumeHandler };
 }
 
 describe('useChatSession question resume', () => {
@@ -687,6 +688,163 @@ describe('useChatSession thread title events', () => {
     });
 
     expect(store.getState().threadHistory).toBeUndefined();
+  });
+});
+
+describe('useChatSession thread list events', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    io.mockClear();
+    sockets.length = 0;
+  });
+
+  async function threadListHandler() {
+    const { client, store } = await connectWithResumeHandler();
+    const socket = sockets[0];
+    const handler = socket.on.mock.calls.find(
+      ([event]: [string]) => event === 'thread_list_updated'
+    )?.[1] as () => Promise<void>;
+    expect(handler).toBeTruthy();
+    return { client, store, handler };
+  }
+
+  it('refetches the first page and refreshes the sidebar', async () => {
+    const { client, store, handler } = await threadListHandler();
+    const listThreads = vi.spyOn(client, 'listThreads').mockResolvedValue({
+      pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+      data: [
+        {
+          id: 'thread-new',
+          name: 'Brand new conversation',
+          createdAt: new Date().toISOString(),
+          steps: []
+        }
+      ]
+    });
+
+    await act(async () => {
+      await handler();
+    });
+
+    expect(listThreads).toHaveBeenCalledWith(
+      { first: THREAD_HISTORY_PAGE_SIZE },
+      {}
+    );
+    const history = store.getState().threadHistory;
+    expect(history?.threads?.map((thread) => thread.id)).toEqual([
+      'thread-new'
+    ]);
+    expect(history?.pageInfo).toEqual({
+      hasNextPage: true,
+      endCursor: 'cursor-1'
+    });
+    expect(history?.timeGroupedThreads).toBeDefined();
+    expect(
+      Object.values(history!.timeGroupedThreads!)
+        .flat()
+        .map((thread) => thread.id)
+    ).toEqual(['thread-new']);
+  });
+
+  it('preserves the current thread id while refreshing', async () => {
+    const { client, store, handler } = await threadListHandler();
+    vi.spyOn(client, 'listThreads').mockResolvedValue({
+      pageInfo: { hasNextPage: false },
+      data: []
+    });
+    act(() => {
+      store.setState({
+        threadHistory: {
+          threads: [
+            {
+              id: 'thread-1',
+              name: 'Old',
+              createdAt: new Date().toISOString(),
+              steps: []
+            }
+          ],
+          currentThreadId: 'thread-1'
+        }
+      });
+    });
+
+    await act(async () => {
+      await handler();
+    });
+
+    expect(store.getState().threadHistory?.threads).toEqual([]);
+    expect(store.getState().threadHistory?.currentThreadId).toBe('thread-1');
+  });
+
+  it('ignores an older refresh when a newer one wins', async () => {
+    const { client, store, handler } = await threadListHandler();
+    type Result = {
+      pageInfo: { hasNextPage: boolean };
+      data: any[];
+    };
+    let resolveFirst!: (value: Result) => void;
+    const first = new Promise<Result>((resolve) => {
+      resolveFirst = resolve;
+    });
+    vi.spyOn(client, 'listThreads')
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce({
+        pageInfo: { hasNextPage: false },
+        data: [
+          {
+            id: 'thread-newer',
+            name: 'Newer',
+            createdAt: new Date().toISOString(),
+            steps: []
+          }
+        ]
+      });
+
+    const firstRun = handler();
+    const secondRun = handler();
+    await act(async () => {
+      await secondRun;
+    });
+    await act(async () => {
+      resolveFirst({
+        pageInfo: { hasNextPage: false },
+        data: [
+          {
+            id: 'thread-older',
+            name: 'Older',
+            createdAt: new Date().toISOString(),
+            steps: []
+          }
+        ]
+      });
+      await firstRun;
+    });
+
+    const threads = store.getState().threadHistory?.threads ?? [];
+    expect(threads.map((thread) => thread.id)).toEqual(['thread-newer']);
+  });
+
+  it('keeps the existing history when the refresh fails', async () => {
+    const { client, store, handler } = await threadListHandler();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(client, 'listThreads').mockRejectedValue(new Error('offline'));
+    const createdAt = new Date().toISOString();
+    act(() => {
+      store.setState({
+        threadHistory: {
+          threads: [{ id: 'thread-1', name: 'Old', createdAt, steps: [] }]
+        }
+      });
+    });
+
+    await act(async () => {
+      await handler();
+    });
+
+    expect(store.getState().threadHistory?.threads).toEqual([
+      { id: 'thread-1', name: 'Old', createdAt, steps: [] }
+    ]);
   });
 });
 

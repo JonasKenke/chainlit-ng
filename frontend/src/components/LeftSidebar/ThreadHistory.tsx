@@ -1,5 +1,6 @@
 import {
   ChainlitContext,
+  THREAD_HISTORY_PAGE_SIZE,
   useChainlitState,
   useChatMessages
 } from '@chainlit-ng/react-client';
@@ -15,7 +16,7 @@ import {
 
 import { ThreadList } from './ThreadList';
 
-const BATCH_SIZE = 35;
+const BATCH_SIZE = THREAD_HISTORY_PAGE_SIZE;
 let _scrollTop = 0;
 
 export function ThreadHistory() {

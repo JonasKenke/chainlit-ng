@@ -1,6 +1,7 @@
 import {
   ChainlitContext,
   ClientError,
+  THREAD_HISTORY_PAGE_SIZE,
   useAuth,
   useChatInteract,
   useChatMessages,
@@ -35,8 +36,6 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Translator, useTranslation } from 'components/i18n';
-
-const THREAD_HISTORY_PAGE_SIZE = 35;
 
 export default function UserNav() {
   const { user, logout } = useAuth();

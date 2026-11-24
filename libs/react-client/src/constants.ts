@@ -1,0 +1,1 @@
+export const THREAD_HISTORY_PAGE_SIZE = 35;
