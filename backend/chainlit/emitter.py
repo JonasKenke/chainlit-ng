@@ -1,7 +1,17 @@
 import asyncio
 import uuid
 from dataclasses import replace
-from typing import Any, Dict, List, Literal, Optional, Union, cast, get_args
+from typing import (
+    Any,
+    Awaitable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Union,
+    cast,
+    get_args,
+)
 
 from socketio.exceptions import TimeoutError
 
@@ -225,9 +235,7 @@ class BaseChainlitEmitter:
         """Stub method to send the favorite messages to the UI."""
         pass
 
-    async def update_thread_title(
-        self, name: str, thread_id: Optional[str] = None
-    ):
+    async def update_thread_title(self, name: str, thread_id: Optional[str] = None):
         """Notify the UI that a thread title changed."""
         pass
 
@@ -578,28 +586,59 @@ class ChainlitEmitter(BaseChainlitEmitter):
             raise ValueError(f"Invalid toast type: {type}")
         await self.emit("toast", {"message": message, "type": type})
 
-    async def update_thread_title(
-        self, name: str, thread_id: Optional[str] = None
-    ):
-        """Notify the UI that a thread title changed.
+    def _thread_state_sessions(self) -> List[WebsocketSession]:
+        """Sessions that should receive this session's thread-list changes.
+
+        Thread titles and the sidebar list belong to the user, not to a single
+        socket: every live session of the same authenticated user is notified,
+        including the originating one. Anonymous sessions stay session-scoped.
+        Sessions on other workers are not reached; a multi-worker deployment
+        needs a shared socket.io manager (or equivalent fan-out) for that.
+        """
+        user = getattr(self.session, "user", None)
+        identifier = getattr(user, "identifier", None)
+        if not isinstance(identifier, str) or not identifier:
+            return [self.session]
+
+        sessions = {
+            session.id: session
+            for session in WebsocketSession.sessions_for_user(identifier)
+        }
+        sessions[self.session.id] = self.session
+        return list(sessions.values())
+
+    async def _emit_thread_state(self, event: str, data: Any) -> None:
+        for session in self._thread_state_sessions():
+            try:
+                # Session emit is stored untyped; it returns the socket send.
+                await cast(Awaitable[Any], session.emit(event, data))
+            except Exception:
+                # One stale socket must not starve the user's other sessions.
+                logger.warning(
+                    "Failed to emit %s to a user session", event, exc_info=True
+                )
+
+    async def update_thread_title(self, name: str, thread_id: Optional[str] = None):
+        """Notify every live session of the user that a thread title changed.
 
         This only updates the sidebar in place; persist the title separately
         (for example with ``data_layer.update_thread``).
         """
-        await self.emit(
+        await self._emit_thread_state(
             "thread_title_updated",
             {"thread_id": thread_id or self.session.thread_id, "name": name},
         )
 
     async def refresh_threads(self):
-        """Ask the UI to refresh the thread list.
+        """Ask every live session of the user to refresh the thread list.
 
-        The session emits this automatically when a new thread is persisted.
-        Call it for other later changes (for example, threads created outside
-        the current session). Avoid emitting it at startup, which only
-        duplicates the sidebar's initial fetch.
+        The session emits this automatically when a new thread is persisted,
+        so other tabs of the same user see the new entry without a page
+        reload. Call it for other later changes (for example, threads created
+        outside the current session). Avoid emitting it at startup, which
+        only duplicates the sidebar's initial fetch.
         """
-        await self.emit("thread_list_updated", {})
+        await self._emit_thread_state("thread_list_updated", {})
 
 
 async def open_side_view(element_id: str):
@@ -613,19 +652,19 @@ async def open_side_view(element_id: str):
 
 
 async def update_thread_title(name: str, thread_id: Optional[str] = None):
-    """Notify the UI that a thread title changed.
+    """Notify every live session of the user that a thread title changed.
 
-    The sidebar entry is updated in place. Persist the title separately, for
-    example with ``data_layer.update_thread``.
+    The sidebar entry is updated in place in all of them. Persist the title
+    separately, for example with ``data_layer.update_thread``.
     """
     await context.emitter.update_thread_title(name, thread_id=thread_id)
 
 
 async def refresh_threads():
-    """Ask the UI to refresh the thread list.
+    """Ask every live session of the user to refresh the thread list.
 
-    New threads created in the current session refresh the sidebar
-    automatically. Call this for other later changes; avoid calling it at
-    startup, which only duplicates the sidebar's initial fetch.
+    New threads created in the current session refresh the sidebar of all the
+    user's sessions automatically. Call this for other later changes; avoid
+    calling it at startup, which only duplicates the sidebar's initial fetch.
     """
     await context.emitter.refresh_threads()

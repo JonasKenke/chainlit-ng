@@ -5,7 +5,17 @@ import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Deque,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Union,
+)
 
 import aiofiles
 from starlette.requests import Request
@@ -561,6 +571,20 @@ class WebsocketSession(BaseSession):
     def get_by_id(cls, session_id: str):
         """Get session by session id."""
         return ws_sessions_id.get(session_id)
+
+    @classmethod
+    def sessions_for_user(cls, user_identifier: str) -> List["WebsocketSession"]:
+        """Return the live sessions authenticated as this user.
+
+        One user can hold several sessions (multiple tabs, devices, or hosts).
+        Thread-level UI state belongs to the user, so emitters fan it out to
+        every session in this list.
+        """
+        return [
+            session
+            for session in ws_sessions_id.values()
+            if session.user is not None and session.user.identifier == user_identifier
+        ]
 
     @classmethod
     def require(cls, socket_id: str):
