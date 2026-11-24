@@ -356,6 +356,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 "thread_id": self.session.thread_id,
             },
         )
+        if get_data_layer():
+            # A new thread was just persisted. Refresh the sidebar in place
+            # instead of making the client reload or re-fetch on its own.
+            await self.refresh_threads()
 
     async def process_message(self, payload: MessagePayload):
         step_dict = payload["message"]
@@ -590,8 +594,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
     async def refresh_threads(self):
         """Ask the UI to refresh the thread list.
 
-        Use this after creating a thread outside the current interaction so
-        new conversations show up without reloading the page.
+        The session emits this automatically when a new thread is persisted.
+        Call it for other later changes (for example, threads created outside
+        the current session). Avoid emitting it at startup, which only
+        duplicates the sidebar's initial fetch.
         """
         await self.emit("thread_list_updated", {})
 
@@ -618,7 +624,8 @@ async def update_thread_title(name: str, thread_id: Optional[str] = None):
 async def refresh_threads():
     """Ask the UI to refresh the thread list.
 
-    Use this after creating a thread so new conversations show up without
-    reloading the page.
+    New threads created in the current session refresh the sidebar
+    automatically. Call this for other later changes; avoid calling it at
+    startup, which only duplicates the sidebar's initial fetch.
     """
     await context.emitter.refresh_threads()

@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { io, sockets } from './mocks/socket.io-client';
 
+type ListThreadsResult = Awaited<ReturnType<ChainlitAPI['listThreads']>>;
+
 function deferredStickyCookie(client: ChainlitAPI) {
   const pending = new Map<string, () => void>();
   vi.spyOn(client, 'stickyCookie').mockImplementation(
@@ -252,7 +254,7 @@ async function connectWithResumeHandler() {
     ([event]: [string]) => event === 'resume_thread'
   )?.[1] as (thread: unknown) => void;
 
-  return { client, store, resumeHandler };
+  return { client, session, store, resumeHandler };
 }
 
 describe('useChatSession question resume', () => {
@@ -700,13 +702,13 @@ describe('useChatSession thread list events', () => {
   });
 
   async function threadListHandler() {
-    const { client, store } = await connectWithResumeHandler();
+    const { client, session, store } = await connectWithResumeHandler();
     const socket = sockets[0];
     const handler = socket.on.mock.calls.find(
       ([event]: [string]) => event === 'thread_list_updated'
     )?.[1] as () => Promise<void>;
     expect(handler).toBeTruthy();
-    return { client, store, handler };
+    return { client, session, store, handler };
   }
 
   it('refetches the first page and refreshes the sidebar', async () => {
@@ -823,6 +825,40 @@ describe('useChatSession thread list events', () => {
 
     const threads = store.getState().threadHistory?.threads ?? [];
     expect(threads.map((thread) => thread.id)).toEqual(['thread-newer']);
+  });
+
+  it('discards a refresh that was in flight when the session disconnects', async () => {
+    const { client, session, store, handler } = await threadListHandler();
+    const createdAt = new Date().toISOString();
+    act(() => {
+      store.setState({
+        threadHistory: {
+          threads: [{ id: 'thread-1', name: 'Old', createdAt, steps: [] }]
+        }
+      });
+    });
+    let resolveList!: (value: ListThreadsResult) => void;
+    vi.spyOn(client, 'listThreads').mockReturnValue(
+      new Promise<ListThreadsResult>((resolve) => {
+        resolveList = resolve;
+      })
+    );
+
+    const inFlight = handler();
+    act(() => {
+      session.disconnect();
+    });
+    await act(async () => {
+      resolveList({
+        pageInfo: { hasNextPage: false },
+        data: [{ id: 'stale-thread', name: 'Stale', createdAt, steps: [] }]
+      });
+      await inFlight;
+    });
+
+    expect(store.getState().threadHistory?.threads?.map((t) => t.id)).toEqual([
+      'thread-1'
+    ]);
   });
 
   it('keeps the existing history when the refresh fails', async () => {

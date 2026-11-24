@@ -1,6 +1,8 @@
 import {
   ChainlitContext,
   THREAD_HISTORY_PAGE_SIZE,
+  beginThreadHistoryRequest,
+  isLatestThreadHistoryRequest,
   useChainlitState,
   useChatMessages
 } from '@chainlit-ng/react-client';
@@ -40,9 +42,7 @@ export function ThreadHistory() {
 
   // Handle first interaction
   useEffect(() => {
-    let cancelled = false;
-
-    const handleFirstInteraction = async () => {
+    const handleFirstInteraction = () => {
       if (!firstInteraction) return;
 
       const isActualResume =
@@ -51,10 +51,8 @@ export function ThreadHistory() {
 
       if (isActualResume) return;
 
-      await fetchThreads(undefined, true);
-
-      if (cancelled) return;
-
+      // Navigate right away; the mount fetch and `thread_list_updated`
+      // events keep history current without blocking the chat view.
       const currentPage = new URL(window.location.href);
       if (threadId && currentPage.pathname === '/') {
         navigate(`/thread/${threadId}`);
@@ -62,10 +60,6 @@ export function ThreadHistory() {
     };
 
     handleFirstInteraction();
-
-    return () => {
-      cancelled = true;
-    };
   }, [firstInteraction]);
 
   // Reorder thread to top when a new message is sent in the current thread
@@ -110,6 +104,7 @@ export function ThreadHistory() {
     cursor?: string | number,
     isLoadingMore = false
   ) => {
+    const requestId = beginThreadHistoryRequest(apiClient);
     try {
       setIsLoadingMore(!!cursor || isLoadingMore);
       setIsFetching(!cursor && !isLoadingMore);
@@ -118,6 +113,10 @@ export function ThreadHistory() {
         { first: BATCH_SIZE, cursor },
         {}
       );
+
+      // A refresh event, reconnect, or newer page request may have started
+      // while this request was in flight. Never let a stale page win.
+      if (!isLatestThreadHistoryRequest(apiClient, requestId)) return;
 
       setError(undefined);
 
@@ -135,6 +134,7 @@ export function ThreadHistory() {
         }));
       }
     } catch (err) {
+      if (!isLatestThreadHistoryRequest(apiClient, requestId)) return;
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
       setShouldLoadMore(false);

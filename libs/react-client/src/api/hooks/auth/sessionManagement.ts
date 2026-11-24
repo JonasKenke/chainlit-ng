@@ -1,6 +1,7 @@
 import { useContext } from 'react';
 import { ChainlitContext } from 'src/index';
 import { useResetChainlitState } from 'src/state';
+import { invalidateThreadHistoryRequests } from 'src/threadHistoryRequests';
 
 import { useAuthState } from './state';
 
@@ -14,6 +15,8 @@ export const useSessionManagement = () => {
     // logout cannot leave them at rest on a shared browser.
     resetMcps();
     await apiClient.logout();
+    // Any in-flight history request belongs to the previous account.
+    invalidateThreadHistoryRequests(apiClient);
     setUser(undefined);
     setThreadHistory(undefined);
 

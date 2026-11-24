@@ -274,3 +274,40 @@ async def test_module_update_thread_title(monkeypatch: pytest.MonkeyPatch) -> No
     mock_context.emitter.update_thread_title.assert_awaited_once_with(
         "Renamed", thread_id="thread-2"
     )
+
+
+async def test_init_thread_refreshes_thread_list(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.thread_id = "test_thread_id"
+    mock_websocket_session.user = None
+    mock_websocket_session.chat_profile = None
+    mock_websocket_session.flush_method_queue = AsyncMock()
+    monkeypatch.setattr(emitter_module, "get_data_layer", lambda: AsyncMock())
+
+    await emitter.init_thread("Hello")
+
+    mock_websocket_session.emit.assert_any_call(
+        "first_interaction",
+        {"interaction": "Hello", "thread_id": "test_thread_id"},
+    )
+    mock_websocket_session.emit.assert_any_call("thread_list_updated", {})
+
+
+async def test_init_thread_skips_refresh_without_data_layer(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.thread_id = "test_thread_id"
+    monkeypatch.setattr(emitter_module, "get_data_layer", lambda: None)
+
+    await emitter.init_thread("Hello")
+
+    emitted = [
+        call.args[0] for call in mock_websocket_session.emit.call_args_list
+    ]
+    assert "first_interaction" in emitted
+    assert "thread_list_updated" not in emitted

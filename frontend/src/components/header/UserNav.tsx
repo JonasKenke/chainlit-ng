@@ -2,6 +2,9 @@ import {
   ChainlitContext,
   ClientError,
   THREAD_HISTORY_PAGE_SIZE,
+  beginThreadHistoryRequest,
+  invalidateThreadHistoryRequests,
+  isLatestThreadHistoryRequest,
   useAuth,
   useChatInteract,
   useChatMessages,
@@ -54,11 +57,13 @@ export default function UserNav() {
   const canClearAll = Boolean(config?.threadClearAll);
 
   const refetchThreadHistory = async () => {
+    const requestId = beginThreadHistoryRequest(apiClient);
     try {
       const { pageInfo, data } = await apiClient.listThreads(
         { first: THREAD_HISTORY_PAGE_SIZE },
         {}
       );
+      if (!isLatestThreadHistoryRequest(apiClient, requestId)) return;
       setThreadHistory({ threads: data, pageInfo });
     } catch {
       // The failed deletion is already reported; keep the current history.
@@ -77,6 +82,8 @@ export default function UserNav() {
     toast.promise(apiClient.deleteAllThreads(), {
       loading: t('threadHistory.clearAll.inProgress'),
       success: () => {
+        // Any in-flight fetch belongs to the now-cleared history.
+        invalidateThreadHistoryRequests(apiClient);
         setThreadHistory({
           threads: [],
           timeGroupedThreads: {},

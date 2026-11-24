@@ -40,6 +40,11 @@ import { OutputAudioChunk } from './types/audio';
 import { ClientError } from './api';
 import { THREAD_HISTORY_PAGE_SIZE } from './constants';
 import { ChainlitContext } from './context';
+import {
+  beginThreadHistoryRequest,
+  invalidateThreadHistoryRequests,
+  isLatestThreadHistoryRequest
+} from './threadHistoryRequests';
 import type { IToken } from './useChatData';
 
 function approvalFromStep(step: IStep): IApproval | null {
@@ -175,7 +180,6 @@ const useChatSession = () => {
   // Only the latest connect may open its socket. Closing an older socket is
   // not enough: it could still resolve after a newer connect and replace it.
   const connectIdRef = useRef(0);
-  const threadListRefreshIdRef = useRef(0);
 
   const _connect = useCallback(
     async ({
@@ -501,19 +505,20 @@ const useChatSession = () => {
       );
 
       socket.on('thread_list_updated', async () => {
-        const refreshId = ++threadListRefreshIdRef.current;
+        const requestId = beginThreadHistoryRequest(client);
         try {
           const { pageInfo, data } = await client.listThreads(
             { first: THREAD_HISTORY_PAGE_SIZE },
             {}
           );
-          if (refreshId !== threadListRefreshIdRef.current) return;
+          if (!isLatestThreadHistoryRequest(client, requestId)) return;
           setThreadHistory((history) => ({
             ...(history ?? {}),
             threads: data,
             pageInfo
           }));
         } catch (err) {
+          if (!isLatestThreadHistoryRequest(client, requestId)) return;
           console.error('Failed to refresh thread history:', err);
         }
       });
@@ -788,7 +793,8 @@ const useChatSession = () => {
       session.socket.removeAllListeners();
       session.socket.close();
     }
-  }, [session]);
+    invalidateThreadHistoryRequests(client);
+  }, [session, client]);
 
   return {
     connect,
