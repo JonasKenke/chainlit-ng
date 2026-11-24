@@ -916,3 +916,32 @@ class TestMessageElementsPosition:
             restored = MessageBase.from_dict(step_dict)
 
             assert restored.to_dict()["metadata"] == {}
+
+
+class TestMessageSleep:
+    """Creating messages must not block the event loop on resume."""
+
+    def test_from_dict_many_steps_does_not_sleep(self):
+        types = ["user_message", "assistant_message", "system_message"]
+        steps = [
+            {
+                "id": f"msg_{i}",
+                "createdAt": f"2024-01-01T00:00:00.{i:06d}Z",
+                "output": f"content {i}",
+                "type": types[i % 3],
+            }
+            for i in range(1000)
+        ]
+
+        with mock_chainlit_context(), patch("time.sleep") as mock_sleep:
+            messages = [MessageBase.from_dict(step) for step in steps]
+
+        mock_sleep.assert_not_called()
+        assert [m.created_at for m in messages] == [s["createdAt"] for s in steps]
+        assert [m.type for m in messages] == [s["type"] for s in steps]
+
+    def test_message_init_does_not_sleep(self):
+        with mock_chainlit_context(), patch("time.sleep") as mock_sleep:
+            Message(content="x")
+
+        mock_sleep.assert_not_called()

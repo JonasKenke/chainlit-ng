@@ -1,6 +1,5 @@
 import asyncio
 import json
-import time
 import uuid
 from abc import ABC
 from typing import Dict, List, Literal, Optional, Union, cast
@@ -297,7 +296,6 @@ class Message(MessageBase):
                 f"elements_position must be 'above' or 'below', got {elements_position!r}"
             )
 
-        time.sleep(0.001)
         self.language = language
         if isinstance(content, dict):
             try:

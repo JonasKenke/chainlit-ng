@@ -4,6 +4,21 @@ All notable changes to Chainlit will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Resuming a conversation no longer blocks the event loop while rebuilding its
+  history: creating a message no longer sleeps for 1 ms, which added up to
+  seconds for long threads and froze other requests and websockets meanwhile.
+- Auth cookies left at the legacy `/` path by a version before 3.0.0 are now
+  deleted whenever the auth cookies are set or cleared with a different path.
+  Browsers sent both, Starlette kept the one at `/`, and logout therefore did
+  not end a session started before the upgrade.
+- The message feedback buttons keep their hook order when the feedback setting
+  changes between renders, instead of crashing with "Rendered fewer hooks than
+  expected".
+
 ## [3.0.0] - 2026-11-15
 
 ### Changed
@@ -163,6 +178,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 
+- Validate the Socket.IO session id (`[A-Za-z0-9_-]{1,128}`) before using it as
+  a files-directory path component, so a client cannot make the server write
+  uploads into, or recursively delete, a directory outside the session files
+  directory, or alias another session's files directory
+  (CVE-2026-86099 / GHSA-5q2m-cqhf-xw26; ported from upstream
+  Chainlit/chainlit#3075).
 - Harden prompt/skill sharing: deleting someone else's prompt now returns `404`
   without touching their version history or notices; sharing and adding from a
   link fail closed in no-auth apps (`403`); public and reader version routes
