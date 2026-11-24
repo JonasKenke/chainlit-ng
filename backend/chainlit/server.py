@@ -560,7 +560,9 @@ def get_html_template(root_path):
     JS_PLACEHOLDER = "<!-- JS INJECTION PLACEHOLDER -->"
     CSS_PLACEHOLDER = "<!-- CSS INJECTION PLACEHOLDER -->"
 
-    default_url = config.ui.custom_meta_url or "https://github.com/Chainlit/chainlit"
+    default_url = (
+        config.ui.custom_meta_url or "https://github.com/JonasKenke/chainlit-ng"
+    )
     default_meta_image_url = (
         "https://chainlit-cloud.s3.eu-west-3.amazonaws.com/logo/chainlit_banner.png"
     )
@@ -3122,7 +3124,7 @@ async def delete_user_skill(
     return JSONResponse(content={"success": True})
 
 
-_SHARED_SKILL_AUTHOR_LABEL = "Chainlit user"
+_SHARED_SKILL_AUTHOR_LABEL = "Chainlit NG user"
 
 
 @skills_router.post("/project/skills/{skill_id}/share")

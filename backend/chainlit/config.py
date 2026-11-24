@@ -301,7 +301,7 @@ alert_style = "classic"
 # login_page_image_dark_filter = "contrast-200 blur-sm"
 
 # Specify a custom meta URL (used for meta tags like og:url)
-# custom_meta_url = "https://github.com/Chainlit/chainlit"
+# custom_meta_url = "https://github.com/JonasKenke/chainlit-ng"
 
 # Specify a custom meta image url.
 # custom_meta_image_url = "https://chainlit-cloud.s3.eu-west-3.amazonaws.com/logo/chainlit_banner.png"
@@ -325,7 +325,7 @@ default_avatar_file_url = ""
 #     name = "Issues"
 #     display_name = "Report Issue"
 #     icon_url = "https://avatars.githubusercontent.com/u/128686189?s=200&v=4"
-#     url = "https://github.com/Chainlit/chainlit/issues"
+#     url = "https://github.com/JonasKenke/chainlit-ng/issues"
 #     target = "_blank" (default)  # Optional: "_self", "_parent", "_top".
 
 [meta]

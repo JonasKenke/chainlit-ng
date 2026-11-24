@@ -19,7 +19,7 @@ CL_RUN_NAMES = ["on_chat_start", "on_message", "on_audio_end"]
 
 
 class ChainlitContextException(Exception):
-    def __init__(self, msg="Chainlit context not found", *args, **kwargs):
+    def __init__(self, msg="Chainlit NG context not found", *args, **kwargs):
         super().__init__(msg, *args, **kwargs)
 
 

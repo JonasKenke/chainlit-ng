@@ -166,7 +166,7 @@ def init() -> None:
             trace.set_tracer_provider(provider)
         else:
             logger.info(
-                "telemetry: using Chainlit's own tracer provider; "
+                "telemetry: using Chainlit NG's own tracer provider; "
                 "the app provider was not modified"
             )
     except Exception:
