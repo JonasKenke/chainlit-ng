@@ -14,7 +14,7 @@ Every behavior change **MUST** ship with unit and UI tests. Cover negative and e
 
 When available, **ALWAYS** prefer MCP servers over manual alternatives. Use **Context7** for docs/API references and **Serena** for code navigation/refactoring/memory. Fall back to CLI tools, direct file reads, or web searches **ONLY IF** the corresponding MCP is unavailable or cannot fulfill the request.
 
-This repository is hosted on a self-managed Git server. For pull request, issue, review, and merge operations, use that host's web UI and REST API, authenticating with the token the host provides. The host and project id are configured outside this file.
+This repository is hosted on GitHub at [JonasKenke/chainlit-ng](https://github.com/JonasKenke/chainlit-ng). For pull request, issue, review, and merge operations, use GitHub's web UI or REST API (`gh` CLI is fine), authenticating with a token that has access to the repository.
 
 ## Overview
 
