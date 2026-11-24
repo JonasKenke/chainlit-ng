@@ -56,7 +56,12 @@ const thread: IThread = {
 
 type ListThreadsResult = Awaited<ReturnType<ChainlitAPI['listThreads']>>;
 
-function deferred<T>() {
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
     resolve = res;
@@ -71,13 +76,15 @@ function setup({
 }: {
   threads?: IThread[];
   firstFetch?: Promise<ListThreadsResult>;
-  fetchResults?: Promise<ListThreadsResult>[];
+  fetchResults?: Deferred<ListThreadsResult>[];
 } = {}) {
   const client = new ChainlitAPI('http://localhost:8000', 'webapp');
   const pending = new Promise<ListThreadsResult>(() => {});
   const listThreads = vi.spyOn(client, 'listThreads');
   if (fetchResults) {
-    fetchResults.forEach((result) => listThreads.mockReturnValueOnce(result));
+    fetchResults.forEach((result) =>
+      listThreads.mockReturnValueOnce(result.promise)
+    );
     listThreads.mockReturnValue(pending);
   } else if (firstFetch) {
     listThreads.mockReturnValueOnce(firstFetch).mockReturnValue(pending);
