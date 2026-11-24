@@ -94,15 +94,15 @@ field whose name is not caught by the built-in patterns should use the explicit
 
 ### Advanced: explicit `Approval`
 
-Use `cl.Approval` when you need a title, a custom timeout, extra redaction keys,
-or a decision that is not tied to the decorator:
+Use `cl.Approval` when you need a subtitle, a custom timeout, extra redaction
+keys, or a decision that is not tied to the decorator:
 
 ```python
 step = cl.Step(name="wire_transfer", type="tool")
 decision = await cl.Approval(
     step=step,
     arguments={"amount": 100, "iban": "..."},
-    title="Approve the transfer",
+    subtitle="Approve the transfer",
     arguments_schema=TransferArgs,
     redact=("iban",),
     timeout=120,
@@ -115,6 +115,12 @@ if decision.approved:
 The explicit API never runs the tool; the app decides what to do with
 `decision.arguments`. Always use those final arguments, not the originals. On
 reject, expiry, supersede or orphan, `decision.approved` is `False`.
+
+`subtitle` is optional secondary text rendered under the tool name. The tool
+name is already the card heading, so omit `subtitle` when it would just repeat
+the heading; `subtitle=None` (the default) hides it. The former `title`
+parameter is a deprecated alias for `subtitle` and still works during the
+alpha.
 
 ### Restricting the actions on a card
 
@@ -167,7 +173,7 @@ records and on resume.
 ### Markdown content without a JSON block
 
 The card never renders raw approval arguments. Send the content as a normal
-markdown message, then gate it with a title-only approval:
+markdown message, then gate it with a subtitle-only approval:
 
 ```python
 DRAFT = """# Release notes
@@ -182,7 +188,7 @@ async with cl.Step(name="publish_release", type="tool") as step:
     decision = await cl.Approval(
         step=step,
         arguments={},
-        title="Publish this document?",
+        subtitle="Publish this document?",
         timeout=120,
     ).ask()
 
@@ -190,7 +196,7 @@ if decision.approved:
     publish()
 ```
 
-The card then shows only the title and Approve / Reject, directly below the
+The card then shows only the subtitle and Approve / Reject, directly below the
 message. Use this when users should review rendered content rather than edited
 JSON; add an `arguments_schema` only when structured edits are required.
 
@@ -208,7 +214,7 @@ async with cl.Step(name="apply_changes", type="tool") as step:
     decision = await cl.Approval(
         step=step,
         arguments={"rows": 3, "target": "production"},
-        title="Apply these changes?",
+        subtitle="Apply these changes?",
         content="""\
 | change | risk |
 | --- | --- |
@@ -304,7 +310,7 @@ decision = await cl.Approval(
     arguments=draft.model_dump(),
     arguments_schema=TicketDraft,
     content=render_ticket(draft),
-    title="Create this ticket?",
+    subtitle="Create this ticket?",
 ).ask()
 
 if decision.decision == "request_changes":
@@ -402,7 +408,8 @@ record is refused without changing state.
 ## Persistence contract
 
 The record lives under `step.metadata["approval"]`. It contains the approval id,
-revision, tool, title, status, requesting user, timestamps, expiry, the two
+revision, tool, subtitle (mirrored to the legacy `title` key), status,
+requesting user, timestamps, expiry, the two
 action flags (`editAllowed`, `requestChangesAllowed`), a per-approval salt, an
 HMAC digest of the full arguments, a recursively redacted preview, and the
 validated decision comment (`reason`) when one was supplied.
@@ -534,8 +541,8 @@ echo the submitted value. Invalid arguments produce no write and no execution.
   user and the session generation. Session deletion orphans the waiter.
 - **Second run races the pause** – the shared entry guard refuses new runs while
   an approval is pending.
-- **XSS** – the card renders the tool name, title, arguments and diff as plain
-  text/JSON. A title is never interpreted as HTML or Markdown.
+- **XSS** – the card renders the tool name, subtitle, arguments and diff as
+  plain text/JSON. A subtitle is never interpreted as HTML or Markdown.
 - **Endpoint confusion** – approval decisions use a dedicated typed route with
   `extra="forbid"`. They never enter `action_callbacks` or `/project/action`.
 - **Type confusion on read-back** – SQLite may return metadata as a string,

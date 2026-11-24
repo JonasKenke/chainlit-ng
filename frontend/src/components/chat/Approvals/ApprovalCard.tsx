@@ -119,6 +119,8 @@ export const ApprovalCard = ({ approval }: Props) => {
   // Absent means allowed: older servers never send the flag.
   const canRequestChanges = approval.requestChangesAllowed !== false;
   const isPending = approval.status === 'pending';
+  // `title` is the deprecated server field for the same secondary text.
+  const subtitle = approval.subtitle ?? approval.title;
   const diff = useMemo(
     () =>
       diffPreviews(approval.argumentsPreview, approval.editedArgumentsPreview),
@@ -437,8 +439,13 @@ export const ApprovalCard = ({ approval }: Props) => {
         <div data-testid="approval-tool" className="text-sm font-semibold">
           {displayToolName(approval.tool)}
         </div>
-        {approval.title ? (
-          <div className="text-sm text-muted-foreground">{approval.title}</div>
+        {subtitle ? (
+          <div
+            data-testid="approval-subtitle"
+            className="text-sm text-muted-foreground"
+          >
+            {subtitle}
+          </div>
         ) : null}
       </div>
 

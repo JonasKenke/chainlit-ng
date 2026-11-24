@@ -54,12 +54,15 @@ function approvalFromStep(step: IStep): IApproval | null {
   if (!record || typeof record !== 'object' || !record.id) return null;
   // Questions share the approval metadata slot; they must not hydrate as cards.
   if (record.kind === 'question') return null;
+  // Older servers and their persisted records only have `title`.
+  const subtitle = record.subtitle ?? record.title ?? null;
   return {
     id: record.id,
     stepId: record.stepId ?? step.id,
     threadId: record.threadId ?? '',
     tool: record.tool ?? step.name,
-    title: record.title ?? null,
+    subtitle,
+    title: record.title ?? subtitle,
     content: record.content ?? null,
     status: record.status ?? 'orphaned',
     reason: record.reason ?? null,

@@ -15,6 +15,7 @@ import json
 import os
 import secrets
 import uuid
+import warnings
 import weakref
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -907,12 +908,18 @@ def _payload(
     edit_fields: Optional[list[Dict[str, Any]]] = None,
     server_held: set[str] | frozenset[str] = frozenset(),
 ) -> Dict[str, Any]:
+    # Records written before the rename only have `title`; it was always
+    # secondary text. Emit both keys so old and new clients agree.
+    subtitle = record.get("subtitle")
+    if subtitle is None:
+        subtitle = record.get("title")
     return {
         "id": record["id"],
         "stepId": record["stepId"],
         "threadId": record["threadId"],
         "tool": record["tool"],
-        "title": record.get("title"),
+        "subtitle": subtitle,
+        "title": subtitle,
         "content": record.get("content"),
         "status": record["status"],
         "requestedBy": record.get("requestedBy"),
@@ -1970,6 +1977,10 @@ async def _ask(entry: _Entry, timeout: float) -> Dict[str, Any]:
 class Approval:
     """A one-shot approval request bound to a Step.
 
+    ``subtitle`` is optional secondary text rendered under the step name, which
+    is the card heading; omit it for no subtitle. ``title`` is a deprecated
+    alias kept for compatibility.
+
     The server-held ``arguments`` are the only execution source; a decision
     never carries client-supplied arguments.
     """
@@ -1980,6 +1991,7 @@ class Approval:
         step: Step,
         arguments: Mapping[str, Any],
         tool: Optional[str] = None,
+        subtitle: Optional[str] = None,
         title: Optional[str] = None,
         content: Optional[str] = None,
         arguments_schema: Optional[type[BaseModel]] = None,
@@ -2007,10 +2019,25 @@ class Approval:
         ):
             if flag_value is not None and not isinstance(flag_value, bool):
                 raise ValueError(f"{flag_name} must be a bool")
+        if title is not None:
+            warnings.warn(
+                "Approval(title=...) is deprecated; use subtitle=... instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if subtitle is None:
+                subtitle = title
+            elif subtitle != title:
+                raise ValueError(
+                    "Approval accepts either subtitle or the deprecated title "
+                    "alias, not both"
+                )
         self.step = step
         self.arguments = deepcopy(dict(arguments))
         self.tool = tool or step.name
-        self.title = title[:200] if title else None
+        self.subtitle = subtitle[:200] if subtitle else None
+        # Deprecated read alias: the value has always been secondary text.
+        self.title = self.subtitle
         if content is not None:
             if not isinstance(content, str):
                 raise ValueError("content must be a string")
@@ -2057,7 +2084,9 @@ class Approval:
             "stepId": self.step.id,
             "threadId": self.step.thread_id,
             "tool": self.tool,
-            "title": self.title,
+            "subtitle": self.subtitle,
+            # Deprecated mirror for older frontends that read `title`.
+            "title": self.subtitle,
             "content": self.content,
             "status": "pending",
             "requestedBy": user.identifier,
