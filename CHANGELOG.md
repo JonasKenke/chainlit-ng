@@ -4,21 +4,6 @@ All notable changes to Chainlit will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
-
-### Fixed
-
-- Resuming a conversation no longer blocks the event loop while rebuilding its
-  history: creating a message no longer sleeps for 1 ms, which added up to
-  seconds for long threads and froze other requests and websockets meanwhile.
-- Auth cookies left at the legacy `/` path by a version before 3.0.0 are now
-  deleted whenever the auth cookies are set or cleared with a different path.
-  Browsers sent both, Starlette kept the one at `/`, and logout therefore did
-  not end a session started before the upgrade.
-- The message feedback buttons keep their hook order when the feedback setting
-  changes between renders, instead of crashing with "Rendered fewer hooks than
-  expected".
-
 ## [3.0.0] - 2026-11-15
 
 ### Changed
@@ -175,6 +160,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Compare a pinned prompt's source version instead of its local history counter when listing update notices, so syncing to a newer source and then downgrading cannot hide an unacknowledged update.
 - Label a free-text-only question as "Your answer" instead of "Other", and render question decision times in the viewer's locale rather than raw ISO.
 - Keep dialogs inset from narrow viewports and stack the Library title above its New Prompt action on phones so the header does not overlap or clip.
+- Resuming a conversation no longer blocks the event loop while rebuilding its
+  history: creating a message no longer sleeps for 1 ms, which added up to
+  seconds for long threads and froze other requests and websockets meanwhile.
+- Auth cookies left at the legacy `/` path by a version before 3.0.0 are now
+  deleted whenever the auth cookies are set or cleared with a different path.
+  Browsers sent both, Starlette kept the one at `/`, and logout therefore did
+  not end a session started before the upgrade.
+- The message feedback buttons keep their hook order when the feedback setting
+  changes between renders, instead of crashing with "Rendered fewer hooks than
+  expected".
 
 ### Security
 
