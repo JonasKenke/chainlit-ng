@@ -1,6 +1,6 @@
 # OpenTelemetry traces
 
-Chainlit can export one OpenTelemetry trace per chat turn to an OTLP/HTTP
+Chainlit NG can export one OpenTelemetry trace per chat turn to an OTLP/HTTP
 collector. Each turn is a root span; each `Step` that runs inside it becomes a
 child span.
 
@@ -52,7 +52,7 @@ changes the chat turn.
 
 ### Disable
 
-Set `enabled = false`, or remove the section, and restart the process. Chainlit
+Set `enabled = false`, or remove the section, and restart the process. Chainlit NG
 then creates no provider and exports nothing. To keep the config and override
 it for one run, start with `OTEL_SDK_DISABLED=true` or
 `OTEL_TRACES_EXPORTER=none`. Uninstalling the `otel` extra also stops export,
@@ -69,11 +69,11 @@ Endpoint precedence:
 2. `OTEL_EXPORTER_OTLP_ENDPOINT`, with `/v1/traces` appended.
 3. The default local endpoint.
 
-The endpoint must be an `http` or `https` URL with a host. Chainlit rejects
+The endpoint must be an `http` or `https` URL with a host. Chainlit NG rejects
 URLs that contain credentials, a query string, or a fragment. Startup logs
 only `scheme://host:port`; the path, query, and userinfo are never logged.
 
-If the endpoint is plain `http` and the host is not loopback, Chainlit logs a
+If the endpoint is plain `http` and the host is not loopback, Chainlit NG logs a
 warning once but still starts. Put credentials in headers, not in the URL.
 
 Header precedence:
@@ -85,7 +85,7 @@ The value is a comma-separated list of `name=value` pairs. Malformed entries
 are dropped. Startup logs the number of dropped entries and the validated
 header names, never the header values. Header values are percent-decoded.
 
-`OTEL_EXPORTER_OTLP_PROTOCOL` is not supported for gRPC: Chainlit logs one
+`OTEL_EXPORTER_OTLP_PROTOCOL` is not supported for gRPC: Chainlit NG logs one
 warning and uses OTLP/HTTP.
 
 The following standard variables are passed through to the SDK where they
@@ -97,10 +97,10 @@ treat it as another place where PII could be configured.
 ## Sampling
 
 When `OTEL_TRACES_SAMPLER` is set, it wins, together with
-`OTEL_TRACES_SAMPLER_ARG`. Chainlit does not override the standard sampler
+`OTEL_TRACES_SAMPLER_ARG`. Chainlit NG does not override the standard sampler
 environment.
 
-When `OTEL_TRACES_SAMPLER` is unset, Chainlit uses
+When `OTEL_TRACES_SAMPLER` is unset, Chainlit NG uses
 `ParentBased(TraceIdRatioBased(sample_ratio))`. The default `sample_ratio` is
 `0.1`, so a busy app does not create an unobserved trace bill. The root span
 makes the decision and child spans inherit it. `sample_ratio` is ignored when
@@ -133,7 +133,7 @@ is access-controlled for that data.
 
 ## Attributes and privacy
 
-By default Chainlit exports only these attributes:
+By default Chainlit NG exports only these attributes:
 
 | Attribute                          | Span         | Value                                |
 | ---------------------------------- | ------------ | ------------------------------------ |
@@ -147,7 +147,7 @@ By default Chainlit exports only these attributes:
 | `chainlit.span.unclosed`           | step         | boolean, only when cleanup closed it |
 | `error.type`                       | root or step | sanitized exception class name       |
 
-Chainlit does not attach message text, prompt or completion text, tool
+Chainlit NG does not attach message text, prompt or completion text, tool
 arguments or results, element content, uploaded file names, user ids, session
 ids, request headers, cookies, environment variables, hostnames, exception
 messages, or stack traces.
@@ -156,40 +156,40 @@ messages, or stack traces.
 created. An invalid value is omitted without raising. The value is
 **client-supplied correlation, not authorization**: thread ownership is
 enforced by the connect authentication path and thread routes, never by
-telemetry. Chainlit does not hash the id in this version.
+telemetry. Chainlit NG does not hash the id in this version.
 
-Root spans carry no inbound parent. Chainlit does not read `traceparent`,
+Root spans carry no inbound parent. Chainlit NG does not read `traceparent`,
 `tracestate`, or `baggage` from the browser or from message payloads, and does
 not inject baggage. Do not treat a traced request as authenticated because it
 has a trace context.
 
 ## Bounds and failure behavior
 
-The bounds below apply to spans Chainlit creates. Spans made with
-`chainlit.otel.get_tracer()` export through Chainlit's exporter but are not
-filtered by Chainlit: their attributes, value length, events, and links are the
+The bounds below apply to spans Chainlit NG creates. Spans made with
+`chainlit.otel.get_tracer()` export through Chainlit NG's exporter but are not
+filtered by Chainlit NG: their attributes, value length, events, and links are the
 app's responsibility. Enforcing the bound on app spans is out of scope for this
 slice.
 
-For each turn, Chainlit exports at most 200 of its own step spans plus its
+For each turn, Chainlit NG exports at most 200 of its own step spans plus its
 root span. Steps after the cap are not exported and are counted in
 `chainlit.telemetry.dropped_spans` on the root, so a 1,000-step turn produces
 200 step spans and `dropped_spans=800`. The per-turn handle registry is released
 when the turn ends.
 
-Every span Chainlit creates carries at most 8 attributes, and every string
+Every span Chainlit NG creates carries at most 8 attributes, and every string
 value is at most 128 characters. Attribute values are scalars only: no dict,
-list, tuple, or set. Chainlit adds no events and no links to its spans.
+list, tuple, or set. Chainlit NG adds no events and no links to its spans.
 Resource attributes (`service.name`, `service.version`, and anything from
 `OTEL_RESOURCE_ATTRIBUTES`) are attached to the resource, not the span, and are
 excluded from the 8-attribute count. They are operator-controlled; bound them
 at the collector if they can contain sensitive values.
 
 Exporter failures, a full export queue, and a slow or unreachable collector are
-isolated from the turn: the turn completes normally. Chainlit's own warnings
+isolated from the turn: the turn completes normally. Chainlit NG's own warnings
 for a failure class are logged once per process; the queue-full warning is
 logged at most once per 60 seconds. Export failures inside the OTLP SDK are not
-filtered by Chainlit: the SDK logs a bounded set of records per failed batch (a
+filtered by Chainlit NG: the SDK logs a bounded set of records per failed batch (a
 warning per retry and one error per failed batch), not once per span or per
 window. Shutdown flushes on a daemon thread for at most 2 seconds, so a
 stalled collector cannot hold up process exit; spans still queued at that
@@ -198,7 +198,7 @@ point are dropped.
 ## App spans and propagation
 
 Use `chainlit.otel.get_tracer()` to create app spans that export through
-Chainlit's tracer and join the current turn:
+Chainlit NG's tracer and join the current turn:
 
 ```python
 from chainlit.otel import current_traceparent, get_tracer
@@ -210,32 +210,32 @@ async with cl.Step(name="call downstream", type="tool"):
         traceparent = current_traceparent()
 ```
 
-`get_tracer()` returns Chainlit's tracer when telemetry is enabled, even when
+`get_tracer()` returns Chainlit NG's tracer when telemetry is enabled, even when
 the app has installed its own global provider. It returns a no-op tracer when
-telemetry is disabled. Spans created with it use Chainlit's instrumentation
-scope and therefore export through Chainlit's exporter.
+telemetry is disabled. Spans created with it use Chainlit NG's instrumentation
+scope and therefore export through Chainlit NG's exporter.
 
 `current_traceparent()` returns the W3C `traceparent` string for the current
 span, root or step, or `None` when telemetry is disabled or there is no valid
 span. Use it when you must pass trace context across a process boundary
-yourself. Chainlit does not propagate context to MCP or HTTP calls on your
+yourself. Chainlit NG does not propagate context to MCP or HTTP calls on your
 behalf; use the app's standard OpenTelemetry instrumentation for outbound
 calls.
 
-Provider ownership: Chainlit creates its own tracer provider and only installs
+Provider ownership: Chainlit NG creates its own tracer provider and only installs
 it as the global provider when the global slot is still empty. If the app
-already has a provider, Chainlit leaves it unchanged and keeps using its own.
-If Chainlit started first, a later `trace.set_tracer_provider()` from the app
-is rejected by OpenTelemetry. Configure the app provider before Chainlit
+already has a provider, Chainlit NG leaves it unchanged and keeps using its own.
+If Chainlit NG started first, a later `trace.set_tracer_provider()` from the app
+is rejected by OpenTelemetry. Configure the app provider before Chainlit NG
 starts, or use `chainlit.otel.get_tracer()`.
 
 ## Retention and multi-tenant deployments
 
-Chainlit does not store spans. The operator supplies the OTLP endpoint and is
+Chainlit NG does not store spans. The operator supplies the OTLP endpoint and is
 responsible for trace-backend access control, retention, and PII handling.
 
 One process can serve many users. Default attributes are pseudonymous, but
 `chainlit.thread.id` and opt-in step names can be personal data when combined
 with operator-side records. For multi-tenant deployments, keep
-`capture_names` off or restrict trace-backend access. Chainlit does not send
+`capture_names` off or restrict trace-backend access. Chainlit NG does not send
 telemetry to a vendor by default.

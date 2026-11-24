@@ -1,10 +1,10 @@
 # Skills
 
 A skill is a Markdown file with a small frontmatter header that ships instructions
-for one task. Chainlit discovers app skills in `APP_ROOT/skills` and can store
+for one task. Chainlit NG discovers app skills in `APP_ROOT/skills` and can store
 per-user skills in the data layer. Both sources use one parser and one resolver:
 a catalog plus a tool for loading a body on demand. Skills are inert text:
-Chainlit never executes, imports, or fetches anything they mention.
+Chainlit NG never executes, imports, or fetches anything they mention.
 
 ## Format
 
@@ -107,7 +107,7 @@ Imported skills carry provenance in the API payload:
 | `importedAt`   | Import timestamp                                   |
 | `contentHash`  | SHA-256 of the imported Markdown                   |
 
-`importedFrom` is a label, not a fetch: Chainlit never downloads the source. The
+`importedFrom` is a label, not a fetch: Chainlit NG never downloads the source. The
 export response includes the same Markdown and an `X-Skill-Content-Hash` header so
 a receiver can compare it with `contentHash`. Editing an imported skill keeps its
 provenance; the hash describes the version that was imported.
@@ -331,18 +331,18 @@ Handler behaviour:
   of raising, so a hallucinated name cannot crash the app loop.
 - Body over the cap: returns an error string and never returns the body. Files
   over the cap are already rejected at load time; this is a second guard.
-- Step emission happens inside the handler and needs an active Chainlit session.
+- Step emission happens inside the handler and needs an active Chainlit NG session.
   Call the handler from `on_message`, `on_chat_start`, or another request path.
 
 ## Refusal rules
 
 The design note for skills (KRE-179 sections 3-5) sets the boundaries:
 
-- **No execution.** A skill is Markdown. Chainlit does not run scripts, shell
+- **No execution.** A skill is Markdown. Chainlit NG does not run scripts, shell
   commands, imports, or bundled resources, and neither does the tool helper.
 - **No remote fetch.** App skills come only from `APP_ROOT/skills`; per-user
   skills come only from the data layer. URLs, package names, and links inside a
-  body are text; Chainlit never downloads them.
+  body are text; Chainlit NG never downloads them.
 - **Caps are enforced.** Skill count, description size, body size, and catalog
   size are validated before a body can reach a model. Per-user skills share the
   same caps; the create and import routes validate with the app-skill parser.

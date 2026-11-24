@@ -1,20 +1,20 @@
-# Embedding Chainlit Copilot: supported authentication model
+# Embedding Chainlit NG Copilot: supported authentication model
 
 Copilot is a shadow-DOM widget mounted into the host page. Its REST and
-WebSocket requests go to the Chainlit origin, and both authenticate with the
+WebSocket requests go to the Chainlit NG origin, and both authenticate with the
 `access_token` cookie (set by `/login`, `/auth/jwt`, or the OAuth callback).
 
 The browser decides whether that cookie is first-party or third-party from the
-relationship between the host page and the Chainlit origin. That relationship,
+relationship between the host page and the Chainlit NG origin. That relationship,
 not the widget configuration, decides whether Copilot can authenticate.
 
 ## Support matrix
 
-| Host page vs. Chainlit origin                                                         | Cookie behavior                                                                         | Supported                                                                           |
-| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Same origin, or same registrable domain (e.g. `www.example.com` + `chat.example.com`) | First-party/same-site cookie; the default `SameSite=lax` cookie is sent.                | **Yes** (recommended)                                                               |
-| Different registrable domain, `CHAINLIT_COOKIE_SAMESITE=none`, HTTPS                  | Third-party cookie; works only where the browser allows third-party cookies.            | **Conditional.** Not Safari/ITP and not private browsing.                           |
-| Different registrable domain, cookie blocked                                          | `/auth/jwt` returns 200 but stores no session cookie; the socket connection is refused. | **No.** Serve Chainlit on the same site, or put a same-origin proxy in front of it. |
+| Host page vs. Chainlit NG origin                                                      | Cookie behavior                                                                         | Supported                                                                              |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Same origin, or same registrable domain (e.g. `www.example.com` + `chat.example.com`) | First-party/same-site cookie; the default `SameSite=lax` cookie is sent.                | **Yes** (recommended)                                                                  |
+| Different registrable domain, `CHAINLIT_COOKIE_SAMESITE=none`, HTTPS                  | Third-party cookie; works only where the browser allows third-party cookies.            | **Conditional.** Not Safari/ITP and not private browsing.                              |
+| Different registrable domain, cookie blocked                                          | `/auth/jwt` returns 200 but stores no session cookie; the socket connection is refused. | **No.** Serve Chainlit NG on the same site, or put a same-origin proxy in front of it. |
 
 "Same-site" means the registrable domain (eTLD+1) and scheme: `customer.com` +
 `chat.customer.com` is same-site, but `customer.com` + `chainlit.app` is not.
@@ -22,8 +22,8 @@ not the widget configuration, decides whether Copilot can authenticate.
 ## HTTPS and `CHAINLIT_COOKIE_SAMESITE`
 
 `CHAINLIT_COOKIE_SAMESITE` accepts `lax` (default), `strict`, or `none`.
-Cross-site cookie transport requires `none`; Chainlit then also marks the cookie
-`Secure`, so the Chainlit origin must be served over HTTPS. Browsers usually
+Cross-site cookie transport requires `none`; Chainlit NG then also marks the cookie
+`Secure`, so the Chainlit NG origin must be served over HTTPS. Browsers usually
 exempt `localhost` during development.
 
 `SameSite=none` enables cookie transport. It does not make the cookie survive
@@ -44,14 +44,14 @@ The upstream issue,
 
 ## Recommended deployment: same site or proxy
 
-1. **Serve Chainlit on the same registrable domain as the host page**, for
+1. **Serve Chainlit NG on the same registrable domain as the host page**, for
    example `chat.example.com` for a widget on `www.example.com`. The cookie is
    same-site, so the default `SameSite=lax` works and Safari is fine.
-2. **Proxy Chainlit through the host origin** when a subdomain is not possible.
+2. **Proxy Chainlit NG through the host origin** when a subdomain is not possible.
    Route a path on the host site (e.g. `https://www.example.com/chainlit`) to the
-   Chainlit server, so the browser sees one origin. The proxy must forward HTTP
+   Chainlit NG server, so the browser sees one origin. The proxy must forward HTTP
    and the WebSocket upgrade for `/ws/socket.io`, and preserve cookies and
-   redirects. Set `CHAINLIT_ROOT_PATH` when Chainlit is mounted under a path.
+   redirects. Set `CHAINLIT_ROOT_PATH` when Chainlit NG is mounted under a path.
 
 Neither option requires an application code change.
 
@@ -61,7 +61,7 @@ After `/auth/jwt` succeeds, Copilot verifies the session with `GET /user`. When
 that check returns 401, the widget shows:
 
 > Authentication failed. This browser may be blocking third-party cookies.
-> Serve Chainlit on the same site as this page (recommended), or allow
+> Serve Chainlit NG on the same site as this page (recommended), or allow
 > third-party cookies for this site.
 
 A transient network failure keeps the existing error path and does not show the

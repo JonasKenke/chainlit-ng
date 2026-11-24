@@ -35,7 +35,7 @@ The callback may return a user-specific list. Return one model to keep the dropd
 
 ## Apply the selected model
 
-Use the same `model` session setting as the normal Chainlit settings panel. The scheduler calls `on_settings_update` with the saved model before it calls `on_message`.
+Use the same `model` session setting as the normal Chainlit NG settings panel. The scheduler calls `on_settings_update` with the saved model before it calls `on_message`.
 
 ```python
 @cl.on_chat_start

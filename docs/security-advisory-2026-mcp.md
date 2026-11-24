@@ -23,7 +23,7 @@
 
 ## Summary
 
-Two vulnerabilities were identified in Chainlit's `/mcp` endpoint, which handles Model Context
+Two vulnerabilities were identified in Chainlit NG's `/mcp` endpoint, which handles Model Context
 Protocol connectivity. Both require `features.mcp.enabled = true` to be exploitable.
 
 | ID           | CVE            | Title                              | CVSS v3.1 | Severity |
@@ -54,7 +54,7 @@ an attacker could send:
 
 The server spawned the subprocess before the MCP handshake completed, so the shell command
 executed even though the MCP connection subsequently failed. This gave an unauthenticated
-attacker code execution on the host running Chainlit.
+attacker code execution on the host running Chainlit NG.
 
 **Root cause**: The design placed subprocess command construction in client-controlled input.
 No argument-level filtering can safely sandbox this because the attacker controls the full
@@ -62,13 +62,13 @@ argument list.
 
 ### Impact
 
-An unauthenticated remote attacker can execute arbitrary shell commands on the Chainlit server
-with the privileges of the Chainlit process. This allows reading and writing files, exfiltrating
+An unauthenticated remote attacker can execute arbitrary shell commands on the Chainlit NG server
+with the privileges of the Chainlit NG process. This allows reading and writing files, exfiltrating
 secrets, installing backdoors, and pivoting into internal networks.
 
 ### Affected configuration
 
-Any Chainlit deployment with:
+Any Chainlit NG deployment with:
 
 ```toml
 [features.mcp]
@@ -88,7 +88,7 @@ The `POST /mcp` endpoint accepted arbitrary `url` and `headers` from the client 
 HTTP client with no scheme check, no hostname validation, and no allowlist. The attacker also
 controlled all HTTP headers, enabling header injection attacks.
 
-An attacker could force the Chainlit server to make outbound HTTP requests to internal
+An attacker could force the Chainlit NG server to make outbound HTTP requests to internal
 services (cloud metadata endpoints, internal APIs, databases) and forge sensitive headers
 (`Authorization`, `Cookie`, `X-Internal-Secret`) in those requests:
 
@@ -107,7 +107,7 @@ and side-effect attacks via header injection.
 
 ### Impact
 
-An unauthenticated remote attacker can cause the Chainlit server to make arbitrary outbound
+An unauthenticated remote attacker can cause the Chainlit NG server to make arbitrary outbound
 HTTP requests to internal network hosts, forge HTTP headers on those requests, and probe
 cloud instance metadata services.
 
@@ -319,7 +319,7 @@ If upgrading to the fork 2.12.0 port is not immediately possible:
 1. **Disable MCP entirely** — set `features.mcp.enabled = false` in your config (this is
    the default). This fully prevents exploitation of both vulnerabilities.
 
-2. **Restrict network access** — place the Chainlit server behind a firewall that prevents
+2. **Restrict network access** — place the Chainlit NG server behind a firewall that prevents
    outbound connections to internal networks and cloud metadata endpoints.
 
 3. **Enable authentication** — configure `@cl.password_auth_callback`, `@cl.header_auth_callback`,

@@ -1,6 +1,6 @@
 # Per-user OAuth for MCP connections
 
-Chainlit can connect a user-provided MCP server with OAuth on behalf of the
+Chainlit NG can connect a user-provided MCP server with OAuth on behalf of the
 signed-in user. Each user authorizes their own account at the server's
 authorization server; access and refresh tokens stay on the server, keyed by the
 user and the MCP server, and are never shared between users.
@@ -71,7 +71,7 @@ max_pending_per_user = 3
   `max_starts_per_user_per_minute` (default `5`) and
   `max_pending_per_user` (default `3`) limits bound sign-in attempts.
 - The authorization server must support **Dynamic Client Registration**
-  (RFC 7591). Chainlit registers a client per user and server and has no manual
+  (RFC 7591). Chainlit NG registers a client per user and server and has no manual
   `client_id`/`client_secret` setting; an authorization server without DCR
   cannot complete the flow.
 
@@ -89,7 +89,7 @@ explicitly in `oauth_authorization_origins`.
    `mcp_authorization_required` with an authorization URL; the pending entry
    shows **Sign in to <host>**. Follow that link, approve access at the
    authorization server, and return to the chat; the connection completes when
-   Chainlit receives `mcp_connected`.
+   Chainlit NG receives `mcp_connected`.
 4. You can remove a pending entry to cancel the flow.
 
 With `@chainlit-ng/react-client`, the same request is:

@@ -1,6 +1,6 @@
 # Tool-call approvals
 
-Chainlit can pause an async tool call until an authenticated user decides
+Chainlit NG can pause an async tool call until an authenticated user decides
 whether it may run. The server owns the execution arguments and sends only the
 non-secret fields to the authorized user's live card; the persisted record keeps
 only a redacted preview. A decision is accepted only for the user, thread, step
@@ -440,7 +440,7 @@ return from `update_step`, or a read-back mismatch are all failures.
 
 Layers with a conditional write should override `write_approval` and return
 `True` only after the database confirms the condition and the row. The built-in
-SQLAlchemy, DynamoDB and Chainlit data layers do this with rowcount, a
+SQLAlchemy, DynamoDB and Chainlit NG data layers do this with rowcount, a
 conditional expression, or a returned row.
 
 When no data layer is configured, approvals work in process. There is no

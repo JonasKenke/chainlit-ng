@@ -1,4 +1,4 @@
-# Documentation for Chainlit developers, contributors, and AI coding assistants.
+# Documentation for Chainlit NG developers, contributors, and AI coding assistants.
 
 Repository, issues, and releases: [JonasKenke/chainlit-ng](https://github.com/JonasKenke/chainlit-ng).
 
@@ -15,7 +15,7 @@ See also:
 - [Prompt versioning and pinned sharing](prompt-versioning.md)
 - [Per-user OAuth for MCP connections](mcp-oauth.md)
 - [Scheduled prompts integration](scheduled-prompts.md)
-- [Embedding Chainlit Copilot: supported authentication model](copilot-embedding.md)
+- [Embedding Chainlit NG Copilot: supported authentication model](copilot-embedding.md)
 - [SDK-native LLM instrumentation](integrations/sdk-instrumentation.md)
 - [Controlling automatic side-panel opening](side-panel-auto-expand.md)
 - [Thread resume with unavailable chat profiles](thread-resume.md)

@@ -3,7 +3,7 @@
 A saved thread records the chat profile that created it. If that profile is
 later removed or renamed, the saved profile no longer exists in the app.
 
-Chainlit validates the saved profile during thread resume. If the profile is
+Chainlit NG validates the saved profile during thread resume. If the profile is
 unavailable, the thread becomes read-only history instead of failing:
 
 - History and elements render in the existing read-only thread view.
@@ -15,7 +15,7 @@ unavailable, the thread becomes read-only history instead of failing:
   call `on_chat_end`.
 
 The saved thread and its metadata are not changed. Leaving the read-only view
-clears the session. If the selected profile no longer exists, Chainlit selects
+clears the session. If the selected profile no longer exists, Chainlit NG selects
 the configured default profile, or the first available profile.
 
 Threads whose profile still exists resume normally. No schema migration or

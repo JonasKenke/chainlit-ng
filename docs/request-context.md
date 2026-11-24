@@ -28,12 +28,12 @@ In plain HTTP routes it is the request being served. Reading the body or form is
 not supported.
 
 `cl.context.session.request` returns the same connection request from inside a
-Chainlit context.
+Chainlit NG context.
 
 ## Optional `request` parameter
 
 Callbacks that need the request can declare an optional `request` parameter.
-Chainlit detects it by signature, so callbacks that do not declare it behave
+Chainlit NG detects it by signature, so callbacks that do not declare it behave
 exactly as before.
 
 ```python

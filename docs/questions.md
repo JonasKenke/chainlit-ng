@@ -2,7 +2,7 @@
 
 `cl.ask` pauses the current step until the authenticated user answers an
 agent-authored question. A question can offer fixed options, free text, or
-both. The answer is returned to the app; Chainlit never feeds it to a model on
+both. The answer is returned to the app; Chainlit NG never feeds it to a model on
 its own.
 
 ```python
