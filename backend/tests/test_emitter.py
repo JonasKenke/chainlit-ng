@@ -1,7 +1,8 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import chainlit.emitter as emitter_module
 from chainlit.element import ElementDict
 from chainlit.emitter import ChainlitEmitter
 from chainlit.step import StepDict
@@ -219,3 +220,94 @@ async def test_open_side_view(
     mock_websocket_session.emit.assert_called_once_with(
         "open_side_view", {"id": "element-1"}
     )
+
+
+async def test_update_thread_title_uses_session_thread(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    mock_websocket_session.thread_id = "thread-1"
+
+    await emitter.update_thread_title("Renamed thread")
+
+    mock_websocket_session.emit.assert_called_once_with(
+        "thread_title_updated",
+        {"thread_id": "thread-1", "name": "Renamed thread"},
+    )
+
+
+async def test_update_thread_title_accepts_explicit_thread(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    await emitter.update_thread_title("Renamed thread", thread_id="thread-2")
+
+    mock_websocket_session.emit.assert_called_once_with(
+        "thread_title_updated",
+        {"thread_id": "thread-2", "name": "Renamed thread"},
+    )
+
+
+async def test_refresh_threads(
+    emitter: ChainlitEmitter, mock_websocket_session: MagicMock
+) -> None:
+    await emitter.refresh_threads()
+
+    mock_websocket_session.emit.assert_called_once_with("thread_list_updated", {})
+
+
+async def test_module_refresh_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_context = MagicMock()
+    mock_context.emitter.refresh_threads = AsyncMock()
+    monkeypatch.setattr(emitter_module, "context", mock_context)
+
+    await emitter_module.refresh_threads()
+
+    mock_context.emitter.refresh_threads.assert_awaited_once_with()
+
+
+async def test_module_update_thread_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_context = MagicMock()
+    mock_context.emitter.update_thread_title = AsyncMock()
+    monkeypatch.setattr(emitter_module, "context", mock_context)
+
+    await emitter_module.update_thread_title("Renamed", thread_id="thread-2")
+
+    mock_context.emitter.update_thread_title.assert_awaited_once_with(
+        "Renamed", thread_id="thread-2"
+    )
+
+
+async def test_init_thread_refreshes_thread_list(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.thread_id = "test_thread_id"
+    mock_websocket_session.user = None
+    mock_websocket_session.chat_profile = None
+    mock_websocket_session.flush_method_queue = AsyncMock()
+    monkeypatch.setattr(emitter_module, "get_data_layer", lambda: AsyncMock())
+
+    await emitter.init_thread("Hello")
+
+    mock_websocket_session.emit.assert_any_call(
+        "first_interaction",
+        {"interaction": "Hello", "thread_id": "test_thread_id"},
+    )
+    mock_websocket_session.emit.assert_any_call("thread_list_updated", {})
+
+
+async def test_init_thread_skips_refresh_without_data_layer(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.thread_id = "test_thread_id"
+    monkeypatch.setattr(emitter_module, "get_data_layer", lambda: None)
+
+    await emitter.init_thread("Hello")
+
+    emitted = [
+        call.args[0] for call in mock_websocket_session.emit.call_args_list
+    ]
+    assert "first_interaction" in emitted
+    assert "thread_list_updated" not in emitted

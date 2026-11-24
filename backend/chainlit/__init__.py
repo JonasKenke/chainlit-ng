@@ -64,7 +64,7 @@ from chainlit.element import (
     Text,
     Video,
 )
-from chainlit.emitter import open_side_view
+from chainlit.emitter import open_side_view, refresh_threads, update_thread_title
 from chainlit.message import (
     AskActionMessage,
     AskElementMessage,
@@ -282,6 +282,7 @@ __all__ = [
     "on_window_message",
     "open_side_view",
     "password_auth_callback",
+    "refresh_threads",
     "render_skill",
     "request",
     "run_sync",
@@ -294,6 +295,7 @@ __all__ = [
     "skills_catalog",
     "sleep",
     "step",
+    "update_thread_title",
     "user_session",
 ]
 

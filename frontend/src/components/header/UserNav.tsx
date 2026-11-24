@@ -1,6 +1,12 @@
 import {
   ChainlitContext,
   ClientError,
+  THREAD_HISTORY_PAGE_SIZE,
+  beginThreadHistoryRequest,
+  finishThreadHistoryRequest,
+  getThreadHistoryRefresher,
+  invalidateThreadHistoryRequests,
+  isLatestThreadHistoryRequest,
   useAuth,
   useChatInteract,
   useChatMessages,
@@ -36,8 +42,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Translator, useTranslation } from 'components/i18n';
 
-const THREAD_HISTORY_PAGE_SIZE = 35;
-
 export default function UserNav() {
   const { user, logout } = useAuth();
   const { config } = useConfig();
@@ -55,14 +59,26 @@ export default function UserNav() {
   const canClearAll = Boolean(config?.threadClearAll);
 
   const refetchThreadHistory = async () => {
+    // Route through the mounted sidebar when possible so loading state and
+    // pagination stay coordinated with the single in-flight first-page request.
+    const refresh = getThreadHistoryRefresher(apiClient);
+    if (refresh) {
+      await refresh();
+      return;
+    }
+
+    const requestId = beginThreadHistoryRequest(apiClient);
     try {
       const { pageInfo, data } = await apiClient.listThreads(
         { first: THREAD_HISTORY_PAGE_SIZE },
         {}
       );
+      if (!isLatestThreadHistoryRequest(apiClient, requestId)) return;
       setThreadHistory({ threads: data, pageInfo });
     } catch {
       // The failed deletion is already reported; keep the current history.
+    } finally {
+      finishThreadHistoryRequest(apiClient, requestId);
     }
   };
 
@@ -78,6 +94,8 @@ export default function UserNav() {
     toast.promise(apiClient.deleteAllThreads(), {
       loading: t('threadHistory.clearAll.inProgress'),
       success: () => {
+        // Any in-flight fetch belongs to the now-cleared history.
+        invalidateThreadHistoryRequests(apiClient);
         setThreadHistory({
           threads: [],
           timeGroupedThreads: {},

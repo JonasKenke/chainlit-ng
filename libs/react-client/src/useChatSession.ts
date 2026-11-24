@@ -38,7 +38,15 @@ import {
 import { OutputAudioChunk } from './types/audio';
 
 import { ClientError } from './api';
+import { THREAD_HISTORY_PAGE_SIZE } from './constants';
 import { ChainlitContext } from './context';
+import {
+  beginThreadHistoryRequest,
+  finishThreadHistoryRequest,
+  getThreadHistoryRefresher,
+  invalidateThreadHistoryRequests,
+  isLatestThreadHistoryRequest
+} from './threadHistoryRequests';
 import type { IToken } from './useChatData';
 
 function approvalFromStep(step: IStep): IApproval | null {
@@ -159,6 +167,7 @@ const useChatSession = () => {
   const setThreadResumeError = useSetChainlitState('resumeThreadError');
   const setUnavailableThreadId = useSetChainlitState('unavailableThreadId');
   const setFavoriteMessages = useSetChainlitState('favoriteMessages');
+  const setThreadHistory = useSetChainlitState('threadHistory');
 
   const [currentThreadId, setCurrentThreadId] =
     useChainlitState('currentThreadId');
@@ -481,6 +490,51 @@ const useChatSession = () => {
         }
       );
 
+      socket.on(
+        'thread_title_updated',
+        ({ thread_id, name }: { thread_id: string; name: string }) => {
+          setThreadHistory((history) => {
+            if (!history?.threads) return history;
+
+            return {
+              ...history,
+              threads: history.threads.map((thread) =>
+                thread.id === thread_id ? { ...thread, name } : thread
+              )
+            };
+          });
+        }
+      );
+
+      socket.on('thread_list_updated', async () => {
+        // A mounted sidebar registers its first-page refresh so loading
+        // state and pagination coordinate with a single request.
+        const refresh = getThreadHistoryRefresher(client);
+        if (refresh) {
+          await refresh();
+          return;
+        }
+
+        const requestId = beginThreadHistoryRequest(client);
+        try {
+          const { pageInfo, data } = await client.listThreads(
+            { first: THREAD_HISTORY_PAGE_SIZE },
+            {}
+          );
+          if (!isLatestThreadHistoryRequest(client, requestId)) return;
+          setThreadHistory((history) => ({
+            ...(history ?? {}),
+            threads: data,
+            pageInfo
+          }));
+        } catch (err) {
+          if (!isLatestThreadHistoryRequest(client, requestId)) return;
+          console.error('Failed to refresh thread history:', err);
+        } finally {
+          finishThreadHistoryRequest(client, requestId);
+        }
+      });
+
       socket.on('update_message', (message: IStep) => {
         setMessages((oldMessages) =>
           updateMessageById(oldMessages, message.id, message)
@@ -751,7 +805,8 @@ const useChatSession = () => {
       session.socket.removeAllListeners();
       session.socket.close();
     }
-  }, [session]);
+    invalidateThreadHistoryRequests(client);
+  }, [session, client]);
 
   return {
     connect,

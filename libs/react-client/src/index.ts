@@ -10,7 +10,9 @@ export * from './useScheduledTasks';
 export * from './api';
 export * from './types';
 export * from './context';
+export * from './constants';
 export * from './state';
+export * from './threadHistoryRequests';
 export { sanitizeMcpUrl } from './mcpStorage';
 export {
   mergePromptUpdates,

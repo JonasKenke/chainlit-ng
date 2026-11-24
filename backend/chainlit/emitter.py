@@ -225,6 +225,16 @@ class BaseChainlitEmitter:
         """Stub method to send the favorite messages to the UI."""
         pass
 
+    async def update_thread_title(
+        self, name: str, thread_id: Optional[str] = None
+    ):
+        """Notify the UI that a thread title changed."""
+        pass
+
+    async def refresh_threads(self):
+        """Ask the UI to refresh the thread list."""
+        pass
+
 
 class ChainlitEmitter(BaseChainlitEmitter):
     """
@@ -346,6 +356,10 @@ class ChainlitEmitter(BaseChainlitEmitter):
                 "thread_id": self.session.thread_id,
             },
         )
+        if get_data_layer():
+            # A new thread was just persisted. Refresh the sidebar in place
+            # instead of making the client reload or re-fetch on its own.
+            await self.refresh_threads()
 
     async def process_message(self, payload: MessagePayload):
         step_dict = payload["message"]
@@ -564,6 +578,29 @@ class ChainlitEmitter(BaseChainlitEmitter):
             raise ValueError(f"Invalid toast type: {type}")
         await self.emit("toast", {"message": message, "type": type})
 
+    async def update_thread_title(
+        self, name: str, thread_id: Optional[str] = None
+    ):
+        """Notify the UI that a thread title changed.
+
+        This only updates the sidebar in place; persist the title separately
+        (for example with ``data_layer.update_thread``).
+        """
+        await self.emit(
+            "thread_title_updated",
+            {"thread_id": thread_id or self.session.thread_id, "name": name},
+        )
+
+    async def refresh_threads(self):
+        """Ask the UI to refresh the thread list.
+
+        The session emits this automatically when a new thread is persisted.
+        Call it for other later changes (for example, threads created outside
+        the current session). Avoid emitting it at startup, which only
+        duplicates the sidebar's initial fetch.
+        """
+        await self.emit("thread_list_updated", {})
+
 
 async def open_side_view(element_id: str):
     """Open the element side view for an element the client already received.
@@ -573,3 +610,22 @@ async def open_side_view(element_id: str):
             Unknown ids are ignored by the client.
     """
     await context.emitter.open_side_view(element_id)
+
+
+async def update_thread_title(name: str, thread_id: Optional[str] = None):
+    """Notify the UI that a thread title changed.
+
+    The sidebar entry is updated in place. Persist the title separately, for
+    example with ``data_layer.update_thread``.
+    """
+    await context.emitter.update_thread_title(name, thread_id=thread_id)
+
+
+async def refresh_threads():
+    """Ask the UI to refresh the thread list.
+
+    New threads created in the current session refresh the sidebar
+    automatically. Call this for other later changes; avoid calling it at
+    startup, which only duplicates the sidebar's initial fetch.
+    """
+    await context.emitter.refresh_threads()
