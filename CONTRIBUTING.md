@@ -15,7 +15,7 @@ I've copy/pasted the whole document there, and then formatted it with prettier.
     - [Requirements](#requirements)
     - [Set up the repo](#set-up-the-repo)
     - [Install dependencies](#install-dependencies)
-  - [Start the Chainlit server from source](#start-the-chainlit-server-from-source)
+  - [Start the Chainlit NG server from source](#start-the-chainlit-ng-server-from-source)
   - [Start the UI from source](#start-the-ui-from-source)
   - [Lint \& Format](#lint--format)
   - [Run the tests](#run-the-tests)
@@ -78,7 +78,7 @@ The following command will install Python dependencies, Node (pnpm) dependencies
 uv sync --all-packages --all-extras --dev
 ```
 
-## Start the Chainlit server from source
+## Start the Chainlit NG server from source
 
 Start by running `backend/chainlit/sample/hello.py` as an example.
 
@@ -86,7 +86,7 @@ Start by running `backend/chainlit/sample/hello.py` as an example.
 uv run chainlit run backend/chainlit/sample/hello.py
 ```
 
-You should now be able to access the Chainlit app you just launched on `http://127.0.0.1:8000`.
+You should now be able to access the Chainlit NG app you just launched on `http://127.0.0.1:8000`.
 
 If you've made it this far, you can now replace `chainlit/sample/hello.py` by your own target. 😎
 

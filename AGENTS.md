@@ -150,7 +150,7 @@ The pnpm workspace includes `frontend/`, `libs/react-client/`, and `libs/copilot
 
 **Data layer pattern**: The data layer is optional (no persistence by default). Install the built-in layers with `pip install "chainlit[custom-data]"`. Register a custom implementation with `@cl.data_layer` decorator or use the built-in SQLAlchemy/DynamoDB implementations. The `@queue_until_user_message()` decorator on `BaseDataLayer` methods queues write operations until the first user message arrives.
 
-**Integrations**: `langchain/`, `llama_index/`, and `semantic_kernel/` provide callback handlers that bridge those frameworks into Chainlit steps/messages.
+**Integrations**: `langchain/`, `llama_index/`, and `semantic_kernel/` provide callback handlers that bridge those frameworks into Chainlit NG steps/messages.
 
 ### Frontend (`frontend/src/`)
 
@@ -186,7 +186,7 @@ State is managed with Zustand; consuming apps provide a `ChainlitAPI` instance v
 
 ### App configuration
 
-Apps configure Chainlit via `.chainlit/config.toml` (created automatically on first run). Key sections: `[project]` (auth, session timeouts, CORS), `[UI]` (name, theme, layout).
+Apps configure Chainlit NG via `.chainlit/config.toml` (created automatically on first run). Key sections: `[project]` (auth, session timeouts, CORS), `[UI]` (name, theme, layout).
 
 ---
 

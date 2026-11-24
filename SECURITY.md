@@ -30,7 +30,7 @@ of the likely impact. The more context you can provide, the faster we can triage
 
 ## Scope
 
-Chainlit is a Python/TypeScript framework for building conversational AI applications.
+Chainlit NG is a Python/TypeScript framework for building conversational AI applications.
 Security-relevant areas include the FastAPI/SocketIO backend, authentication flows (JWT,
 OAuth), the data persistence layer, and file upload handling.
 
@@ -38,7 +38,7 @@ When reporting, please note which features you had enabled and how the app was c
 as that context helps us triage accurately.
 
 Issues in third-party dependencies are generally best reported upstream, though we are happy
-to discuss whether a Chainlit-level workaround makes sense in the meantime.
+to discuss whether a Chainlit NG level workaround makes sense in the meantime.
 
 ## No Bug Bounty
 
@@ -53,4 +53,4 @@ If you act in good faith — give us a reasonable window to respond, avoid acces
 data beyond what is needed to demonstrate the issue, and avoid disrupting live services —
 we will treat your report with the same good faith in return.
 
-Thank you for helping keep Chainlit and its users safe.
+Thank you for helping keep Chainlit NG and its users safe.
