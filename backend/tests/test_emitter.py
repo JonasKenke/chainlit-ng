@@ -306,8 +306,126 @@ async def test_init_thread_skips_refresh_without_data_layer(
 
     await emitter.init_thread("Hello")
 
-    emitted = [
-        call.args[0] for call in mock_websocket_session.emit.call_args_list
-    ]
+    emitted = [call.args[0] for call in mock_websocket_session.emit.call_args_list]
     assert "first_interaction" in emitted
     assert "thread_list_updated" not in emitted
+
+
+def _user(identifier: str) -> MagicMock:
+    user = MagicMock()
+    user.identifier = identifier
+    return user
+
+
+def _session(session_id: str, identifier: str | None) -> MagicMock:
+    session = MagicMock()
+    session.id = session_id
+    session.emit = AsyncMock()
+    session.user = _user(identifier) if identifier else None
+    return session
+
+
+def _patch_user_sessions(
+    monkeypatch: pytest.MonkeyPatch, sessions: list[MagicMock]
+) -> None:
+    monkeypatch.setattr(
+        "chainlit.session.WebsocketSession.sessions_for_user",
+        classmethod(lambda cls, identifier: sessions),
+    )
+
+
+async def test_update_thread_title_broadcasts_to_user_sessions(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.id = "session-1"
+    mock_websocket_session.thread_id = "thread-1"
+    mock_websocket_session.user = _user("alice")
+    other = _session("session-2", "alice")
+    _patch_user_sessions(monkeypatch, [other, mock_websocket_session])
+
+    await emitter.update_thread_title("Renamed thread")
+
+    expected = {"thread_id": "thread-1", "name": "Renamed thread"}
+    other.emit.assert_awaited_once_with("thread_title_updated", expected)
+    mock_websocket_session.emit.assert_awaited_once_with(
+        "thread_title_updated", expected
+    )
+
+
+async def test_refresh_threads_broadcasts_to_user_sessions(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.id = "session-1"
+    mock_websocket_session.user = _user("alice")
+    other = _session("session-2", "alice")
+    _patch_user_sessions(monkeypatch, [other, mock_websocket_session])
+
+    await emitter.refresh_threads()
+
+    other.emit.assert_awaited_once_with("thread_list_updated", {})
+    mock_websocket_session.emit.assert_awaited_once_with("thread_list_updated", {})
+
+
+async def test_thread_events_stay_session_scoped_without_user(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.id = "session-1"
+    mock_websocket_session.thread_id = "thread-1"
+    mock_websocket_session.user = None
+    other = _session("session-2", "alice")
+    _patch_user_sessions(monkeypatch, [other])
+
+    await emitter.update_thread_title("Renamed thread")
+    await emitter.refresh_threads()
+
+    other.emit.assert_not_awaited()
+    mock_websocket_session.emit.assert_any_await(
+        "thread_title_updated",
+        {"thread_id": "thread-1", "name": "Renamed thread"},
+    )
+    mock_websocket_session.emit.assert_any_await("thread_list_updated", {})
+
+
+async def test_thread_events_do_not_duplicate_the_origin_session(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.id = "session-1"
+    mock_websocket_session.thread_id = "thread-1"
+    mock_websocket_session.user = _user("alice")
+    _patch_user_sessions(monkeypatch, [mock_websocket_session])
+
+    await emitter.update_thread_title("Renamed thread")
+
+    mock_websocket_session.emit.assert_awaited_once_with(
+        "thread_title_updated",
+        {"thread_id": "thread-1", "name": "Renamed thread"},
+    )
+
+
+async def test_thread_broadcast_survives_a_failing_session(
+    emitter: ChainlitEmitter,
+    mock_websocket_session: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_websocket_session.id = "session-1"
+    mock_websocket_session.thread_id = "thread-1"
+    mock_websocket_session.user = _user("alice")
+    broken = _session("session-2", "alice")
+    broken.emit = AsyncMock(side_effect=RuntimeError("socket is gone"))
+    _patch_user_sessions(monkeypatch, [broken, mock_websocket_session])
+
+    await emitter.update_thread_title("Renamed thread")
+
+    broken.emit.assert_awaited_once()
+    mock_websocket_session.emit.assert_awaited_once_with(
+        "thread_title_updated",
+        {"thread_id": "thread-1", "name": "Renamed thread"},
+    )
