@@ -111,6 +111,17 @@ def test_general_guard_rejects_http_origin_on_https_with_http_allowlist(monkeypa
     assert response.status_code == 403
 
 
+def test_general_guard_rejects_http_allowlist_when_chainlit_url_is_https(monkeypatch):
+    monkeypatch.setenv("CHAINLIT_URL", PUBLIC_ORIGIN)
+    monkeypatch.setattr(config.project, "allow_origins", ["http://public.example"])
+    response = TestClient(server.app, base_url="http://internal:8000").post(
+        "/set-session-cookie",
+        headers={"Origin": "http://public.example", "Host": INTERNAL_HOST},
+        json={"session_id": "valid-session"},
+    )
+    assert response.status_code == 403
+
+
 def test_approval_uses_the_same_proxy_aware_origin_guard(
     client: TestClient, proxy_env, authenticated_user
 ):

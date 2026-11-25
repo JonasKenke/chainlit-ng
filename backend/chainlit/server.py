@@ -1693,10 +1693,14 @@ def _require_same_origin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected")
 
     expected = _configured_external_origin(request)
-    if expected is not None and (
-        origin_scheme.lower() == expected[0] and origin_netloc.lower() == expected[1]
-    ):
-        return
+    if expected is not None:
+        if expected[0] == "https" and origin_scheme.lower() != "https":
+            raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+        if (
+            origin_scheme.lower() == expected[0]
+            and origin_netloc.lower() == expected[1]
+        ):
+            return
 
     for entry in config.project.allow_origins:
         if entry == "*":
