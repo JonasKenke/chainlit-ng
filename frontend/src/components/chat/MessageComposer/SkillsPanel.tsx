@@ -1,8 +1,4 @@
 import {
-  rememberReviewedSkill,
-  reviewedSkillHash
-} from '@/lib/skillReviewCache';
-import {
   MAX_SKILL_MARKDOWN_BYTES,
   SkillInput,
   downloadMarkdown,
@@ -59,7 +55,8 @@ interface UpdateTarget {
 
 /** Imported and linked copies must be reviewed before reaching a model. */
 function needsReview(skill: ISkill): boolean {
-  return !!skill.importedFrom || !!skill.sourcePromptId;
+  if (!skill.importedFrom && !skill.sourcePromptId) return false;
+  return !skill.reviewHash || skill.reviewedContentHash !== skill.reviewHash;
 }
 
 export function SkillsPanel() {
@@ -117,38 +114,24 @@ export function SkillsPanel() {
   const handleToggle = async (skill: ISkill, enabled: boolean) => {
     setError(undefined);
     if (enabled && needsReview(skill)) {
-      const reviewHash = reviewedSkillHash(skill);
-      if (!reviewHash) {
-        setReviewing(skill);
-        return;
-      }
-      try {
-        await updateSkill(skill.id, {
-          enabled: true,
-          reviewedContentHash: reviewHash
-        });
-      } catch (reason) {
-        if (promptErrorCode(reason) === 'content_changed') {
-          toast.error(t('chat.skills.review.changed'));
-          const refreshed = await fetchSkills().catch(() => null);
-          const current = refreshed?.find((item) => item.id === skill.id);
-          if (current) {
-            setReviewing(current);
-          } else {
-            setError(t('chat.skills.review.changed'));
-          }
-        } else {
-          setError(
-            skillErrorDetail(reason) || t('common.status.error.default')
-          );
-        }
-      }
+      setReviewing(skill);
       return;
     }
     try {
       await updateSkill(skill.id, { enabled });
     } catch (reason) {
-      setError(skillErrorDetail(reason) || t('common.status.error.default'));
+      if (promptErrorCode(reason) === 'content_changed') {
+        toast.error(t('chat.skills.review.changed'));
+        const refreshed = await fetchSkills().catch(() => null);
+        const current = refreshed?.find((item) => item.id === skill.id);
+        if (current) {
+          setReviewing(current);
+        } else {
+          setError(t('chat.skills.review.changed'));
+        }
+      } else {
+        setError(skillErrorDetail(reason) || t('common.status.error.default'));
+      }
     }
   };
 
@@ -159,7 +142,6 @@ export function SkillsPanel() {
         enabled: true,
         reviewedContentHash
       });
-      rememberReviewedSkill(reviewing, reviewedContentHash);
       toast.success(t('chat.skills.review.enabled'));
       setReviewing(null);
     } catch (reason) {
@@ -449,11 +431,6 @@ export function SkillsPanel() {
                             source: skill.importedFrom,
                             date: formatSkillTimestamp(skill.importedAt)
                           })}
-                        </p>
-                      )}
-                      {gated && !skill.enabled && (
-                        <p className="text-xs text-amber-600">
-                          {t('chat.skills.reviewBeforeEnabling')}
                         </p>
                       )}
                     </div>

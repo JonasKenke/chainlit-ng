@@ -2338,6 +2338,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             ("importedAt", "TEXT"),
             ("contentHash", "TEXT"),
             ("updateSeenVersionId", "TEXT"),
+            ("reviewHash", "TEXT"),
+            ("reviewedContentHash", "TEXT"),
         ):
             if name not in existing:
                 result = await self.execute_sql(
@@ -2383,6 +2385,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             sharedAt=row.get("sharedAt"),
             sharedVersion=row.get("sharedVersion"),
             updateSeenVersionId=row.get("updateSeenVersionId"),
+            reviewHash=row.get("reviewHash"),
+            reviewedContentHash=row.get("reviewedContentHash"),
         )
 
     @staticmethod
@@ -2424,12 +2428,14 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                          "description", "enabled", "importedFrom", "importedAt",
                          "contentHash", "createdAt", "updatedAt", "authorLabel", "version",
                          "sourcePromptId", "pinnedVersionId", "pinnedContentHash",
-                         "pinnedAt", "sharedAt", "sharedVersion", "updateSeenVersionId")
+                         "pinnedAt", "sharedAt", "sharedVersion", "updateSeenVersionId",
+                         "reviewHash", "reviewedContentHash")
                         VALUES (:id, :userId, :title, :content, :isShared, 'skill',
                                 :description, :enabled, :importedFrom, :importedAt,
                                 :contentHash, :createdAt, :updatedAt, :authorLabel, 1,
                                 :sourcePromptId, :pinnedVersionId, :pinnedContentHash,
-                                :pinnedAt, :sharedAt, :sharedVersion, :updateSeenVersionId)
+                                :pinnedAt, :sharedAt, :sharedVersion, :updateSeenVersionId,
+                                :reviewHash, :reviewedContentHash)
                         """,
                         {
                             "id": skill["id"],
@@ -2452,6 +2458,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "sharedAt": skill.get("sharedAt"),
                             "sharedVersion": skill.get("sharedVersion"),
                             "updateSeenVersionId": skill.get("updateSeenVersionId"),
+                            "reviewHash": digest,
+                            "reviewedContentHash": skill.get("reviewedContentHash"),
                         },
                     ),
                     (
@@ -2495,6 +2503,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "sharedAt": skill.get("sharedAt"),
                 "sharedVersion": skill.get("sharedVersion"),
                 "updateSeenVersionId": skill.get("updateSeenVersionId"),
+                "reviewHash": digest,
+                "reviewedContentHash": skill.get("reviewedContentHash"),
             }
         )
         return cast(PromptDict, result)
@@ -2574,7 +2584,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             text(
                                 """
                                 SELECT "version", "title", "description", "content",
-                                       "importedFrom", "sourcePromptId", "contentHash"
+                                       "importedFrom", "sourcePromptId", "contentHash",
+                                       "reviewedContentHash"
                                 FROM prompts
                                 WHERE "id" = :id AND "userId" = :userId
                                   AND "kind" = 'skill'
@@ -2599,10 +2610,17 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                     )
                     == digest
                 )
-                if not unchanged and (
+                imported_or_shared = bool(
                     stored["importedFrom"] or stored["sourcePromptId"]
-                ):
+                )
+                if not unchanged and imported_or_shared:
                     enabled = False
+
+                reviewed_hash = skill.get(
+                    "reviewedContentHash", stored["reviewedContentHash"]
+                )
+                if not unchanged and imported_or_shared:
+                    reviewed_hash = None
 
                 # Imported Markdown keep their provenance hash; owned and
                 # copied skills expose the current version fingerprint.
@@ -2666,7 +2684,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "pinnedAt" = :pinnedAt,
                             "sharedAt" = COALESCE(:sharedAt, "sharedAt"),
                             "sharedVersion" = COALESCE(:sharedVersion, "sharedVersion"),
-                            "updateSeenVersionId" = :updateSeenVersionId
+                            "updateSeenVersionId" = :updateSeenVersionId,
+                            "reviewHash" = :reviewHash,
+                            "reviewedContentHash" = :reviewedContentHash
                         WHERE "id" = :id AND "userId" = :userId
                           AND "kind" = 'skill'
                         """
@@ -2690,6 +2710,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         "sharedAt": skill.get("sharedAt"),
                         "sharedVersion": skill.get("sharedVersion"),
                         "updateSeenVersionId": skill.get("updateSeenVersionId"),
+                        "reviewHash": digest,
+                        "reviewedContentHash": reviewed_hash,
                     },
                 )
 
@@ -2740,6 +2762,8 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 "sharedAt": skill.get("sharedAt"),
                 "sharedVersion": skill.get("sharedVersion"),
                 "updateSeenVersionId": skill.get("updateSeenVersionId"),
+                "reviewHash": digest,
+                "reviewedContentHash": reviewed_hash,
             }
         )
         return cast(PromptDict, result)

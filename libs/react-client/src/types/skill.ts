@@ -25,6 +25,10 @@ export interface ISkill {
   pinnedAt?: string | null;
   /** Source version acknowledged for update notices. */
   updateSeenVersionId?: string | null;
+  /** Current version fingerprint checked by the enable review gate. */
+  reviewHash?: string | null;
+  /** Version fingerprint the owner already reviewed, if any. */
+  reviewedContentHash?: string | null;
 }
 
 export interface ISkillPayload {

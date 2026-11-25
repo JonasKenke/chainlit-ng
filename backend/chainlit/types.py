@@ -593,6 +593,9 @@ class PromptDict(TypedDict):
     sharedVersion: NotRequired[Optional[int]]
     # Highest source version the owner has acknowledged for this pinned skill.
     updateSeenVersionId: NotRequired[Optional[str]]
+    # Current review fingerprint and the fingerprint this user last reviewed.
+    reviewHash: NotRequired[Optional[str]]
+    reviewedContentHash: NotRequired[Optional[str]]
 
 
 class PromptVersionDict(TypedDict):

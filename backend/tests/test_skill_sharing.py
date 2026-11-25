@@ -487,6 +487,7 @@ async def test_update_from_source_forces_review_and_marks_seen(
     synced = response.json()
     assert synced["content"] == "v2"
     assert synced["enabled"] is False
+    assert synced["reviewedContentHash"] is None
     assert synced["version"] == 2
     assert synced["pinnedVersionId"] == target["id"]
     assert synced["pinnedVersion"] == target["version"]
@@ -699,6 +700,19 @@ async def test_review_gate_requires_the_current_version_hash(
     assert wrong.json()["detail"]["code"] == "content_changed"
     assert accepted.status_code == 200
     assert accepted.json()["enabled"] is True
+    assert accepted.json()["reviewHash"] == head["contentHash"]
+    assert accepted.json()["reviewedContentHash"] == head["contentHash"]
+
+    with acting_as(OWNER):
+        disabled = await api.put(
+            f"/project/skills/{imported['id']}", json={"enabled": False}
+        )
+        reenabled = await api.put(
+            f"/project/skills/{imported['id']}", json={"enabled": True}
+        )
+    assert disabled.status_code == 200
+    assert reenabled.status_code == 200
+    assert reenabled.json()["enabled"] is True
 
     # Owned, never-imported skills keep today's immediate enable path.
     local = await create_skill(data_layer, title="local")
@@ -708,6 +722,25 @@ async def test_review_gate_requires_the_current_version_hash(
         )
     assert local_enabled.status_code == 200
     assert local_enabled.json()["enabled"] is True
+
+
+async def test_disabled_gated_skill_cannot_gain_review_by_sending_disable(
+    api: AsyncClient, data_layer: SQLAlchemyDataLayer
+):
+    imported = await create_skill(
+        data_layer, title="imported-disabled", imported_from="review.md"
+    )
+    with acting_as(OWNER):
+        disabled = await api.put(
+            f"/project/skills/{imported['id']}", json={"enabled": False}
+        )
+        enable = await api.put(
+            f"/project/skills/{imported['id']}", json={"enabled": True}
+        )
+    assert disabled.status_code == 200
+    assert disabled.json()["reviewedContentHash"] is None
+    assert enable.status_code == 409
+    assert enable.json()["detail"]["code"] == "content_changed"
 
 
 async def test_local_skill_edit_keeps_it_enabled(
@@ -755,6 +788,7 @@ async def test_content_edit_disables_and_invalidates_the_review_hash(
     assert edited.status_code == 200
     assert edited.json()["enabled"] is False
     assert edited.json()["version"] == 2
+    assert edited.json()["reviewedContentHash"] is None
     assert stale.status_code == 409
     assert stale.json()["detail"]["code"] == "content_changed"
 
@@ -768,6 +802,7 @@ async def test_content_edit_disables_and_invalidates_the_review_hash(
             },
         )
     assert reviewed.status_code == 200
+    assert reviewed.json()["reviewedContentHash"] == current["contentHash"]
     assert reviewed.json()["enabled"] is True
 
 

@@ -3412,6 +3412,8 @@ async def _skill_review_hash(
     data_layer: BaseDataLayer, skill: PromptDict
 ) -> Optional[str]:
     """Return the current version fingerprint used by the enable review gate."""
+    if skill.get("reviewHash"):
+        return skill["reviewHash"]
     if _supports_skill_versions(data_layer):
         try:
             versions = await data_layer.list_prompt_versions(skill["id"])
@@ -3630,24 +3632,57 @@ async def update_user_skill(
         imported_or_shared = bool(
             existing.get("sourcePromptId") or existing.get("importedFrom")
         )
+        expected_hash = (
+            await _skill_review_hash(data_layer, existing)
+            if imported_or_shared
+            else None
+        )
         if content_changed:
             # A local, self-authored skill stays enabled across edits. Imported and
             # linked skills must be reviewed again because their body is untrusted.
             updated["enabled"] = (
                 False if imported_or_shared else existing.get("enabled", False)
             )
+            if imported_or_shared:
+                updated["reviewedContentHash"] = None
         elif payload.enabled is True:
             if imported_or_shared:
-                expected_hash = await _skill_review_hash(data_layer, existing)
-                if not expected_hash or payload.reviewedContentHash != expected_hash:
+                if not expected_hash:
                     raise _prompt_error(
                         409,
                         "content_changed",
                         "Review the current skill version before enabling it",
                     )
+                submitted_hash = payload.reviewedContentHash
+                if submitted_hash is not None:
+                    if submitted_hash != expected_hash:
+                        raise _prompt_error(
+                            409,
+                            "content_changed",
+                            "Review the current skill version before enabling it",
+                        )
+                elif existing.get("reviewedContentHash") != expected_hash:
+                    raise _prompt_error(
+                        409,
+                        "content_changed",
+                        "Review the current skill version before enabling it",
+                    )
+                updated["reviewHash"] = expected_hash
+                updated["reviewedContentHash"] = expected_hash
             updated["enabled"] = True
         elif payload.enabled is False:
             updated["enabled"] = False
+            # An enabled skill has already crossed the review gate. Record that
+            # fact when disabling so another replica can re-enable it without
+            # showing the warning again.
+            if (
+                imported_or_shared
+                and existing.get("enabled")
+                and expected_hash
+                and not existing.get("reviewedContentHash")
+            ):
+                updated["reviewHash"] = expected_hash
+                updated["reviewedContentHash"] = expected_hash
         updated["updatedAt"] = utc_now()
 
         result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
@@ -3986,6 +4021,7 @@ async def update_skill_from_source(
         updated["pinnedContentHash"] = target["contentHash"]
         updated["pinnedAt"] = now
         updated["updateSeenVersionId"] = target["id"]
+        updated["reviewedContentHash"] = None
         updated["updatedAt"] = now
         result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
         return JSONResponse(content=result)

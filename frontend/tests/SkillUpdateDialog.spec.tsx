@@ -198,7 +198,7 @@ describe('SkillUpdateDialog', () => {
     expect(screen.getByText('common.status.loading')).toBeInTheDocument();
   });
 
-  it('keeps the visible diff while another version loads', async () => {
+  it('clears the old diff while a selected version loads', async () => {
     renderDialog();
     expect(await screen.findByText('new line')).toBeInTheDocument();
 
@@ -208,10 +208,28 @@ describe('SkillUpdateDialog', () => {
       await screen.findByTestId('skill-update-version-option-sv1')
     );
 
-    await waitFor(() =>
-      expect(screen.getByTestId('skill-update-loading')).toBeInTheDocument()
+    expect(screen.queryByText('new line')).not.toBeInTheDocument();
+    expect(screen.getByText('common.status.loading')).toBeInTheDocument();
+  });
+
+  it('shows no changes instead of a diff for an identical version', async () => {
+    renderDialog();
+    await screen.findAllByTestId('skill-update-row');
+    fetchSkillVersionMock.mockResolvedValueOnce({
+      ...versions[1],
+      contentHash: 'sha256:same-content',
+      content: skill.content
+    });
+
+    fireEvent.pointerDown(screen.getByTestId('skill-update-version'));
+    fireEvent.click(
+      await screen.findByTestId('skill-update-version-option-sv1')
     );
-    expect(screen.getByText('new line')).toBeInTheDocument();
+
+    expect(
+      await screen.findByText('chat.skills.update.noChanges')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('skill-update-row')).toBeNull();
   });
 
   it('supports side-by-side rows and switching versions', async () => {

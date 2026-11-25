@@ -166,7 +166,6 @@ describe('SkillsPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
     state.skills = [];
     state.skillUpdates = [];
     state.config = { features: { latex: false } };
@@ -242,7 +241,6 @@ describe('SkillsPanel', () => {
     expect(row).toHaveTextContent('imported-skill');
     expect(row).toHaveTextContent('chat.skills.importedBadge');
     expect(row).toHaveTextContent('review.md');
-    expect(row).toHaveTextContent('chat.skills.reviewBeforeEnabling');
     expect(row).not.toHaveTextContent('sha256');
 
     expect(
@@ -289,53 +287,41 @@ describe('SkillsPanel', () => {
     );
   });
 
-  it('skips the warning when the same reviewed content is re-enabled', async () => {
-    state.skills = [imported];
+  it('skips the warning when the data layer has the reviewed hash', async () => {
+    const reviewHash = `sha256:${'a'.repeat(64)}`;
+    state.skills = [
+      {
+        ...imported,
+        reviewHash,
+        reviewedContentHash: reviewHash
+      }
+    ];
     render(<SkillsPanel />);
 
-    const toggle = await screen.findByRole('switch', {
-      name: 'chat.skills.enable imported-skill'
-    });
-    fireEvent.click(toggle);
-    const enable = await screen.findByRole('button', {
-      name: 'chat.skills.review.enable'
-    });
-    await waitFor(() => expect(enable).toBeEnabled());
-    fireEvent.click(enable);
-    await waitFor(() => expect(updateSkill).toHaveBeenCalled());
-
-    updateSkill.mockClear();
-    fireEvent.click(toggle);
+    fireEvent.click(
+      await screen.findByRole('switch', {
+        name: 'chat.skills.toggle imported-skill'
+      })
+    );
 
     await waitFor(() =>
-      expect(updateSkill).toHaveBeenCalledWith('s1', {
-        enabled: true,
-        reviewedContentHash: `sha256:${'a'.repeat(64)}`
-      })
+      expect(updateSkill).toHaveBeenCalledWith('s1', { enabled: true })
     );
     expect(screen.queryByTestId('skill-review-dialog')).toBeNull();
   });
 
-  it('reopens the warning when the reviewed content changes', async () => {
-    state.skills = [imported];
-    const { rerender } = render(<SkillsPanel />);
+  it('reopens the warning when the review hash changes', async () => {
+    state.skills = [
+      {
+        ...imported,
+        reviewHash: `sha256:${'b'.repeat(64)}`,
+        reviewedContentHash: `sha256:${'a'.repeat(64)}`
+      }
+    ];
+    render(<SkillsPanel />);
 
     fireEvent.click(
       await screen.findByRole('switch', {
-        name: 'chat.skills.enable imported-skill'
-      })
-    );
-    const enable = await screen.findByRole('button', {
-      name: 'chat.skills.review.enable'
-    });
-    await waitFor(() => expect(enable).toBeEnabled());
-    fireEvent.click(enable);
-    await waitFor(() => expect(updateSkill).toHaveBeenCalled());
-
-    state.skills = [{ ...imported, contentHash: `sha256:${'b'.repeat(64)}` }];
-    rerender(<SkillsPanel />);
-    fireEvent.click(
-      screen.getByRole('switch', {
         name: 'chat.skills.enable imported-skill'
       })
     );
