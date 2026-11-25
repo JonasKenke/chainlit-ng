@@ -1,4 +1,8 @@
 import {
+  rememberReviewedSkill,
+  reviewedSkillHash
+} from '@/lib/skillReviewCache';
+import {
   MAX_SKILL_MARKDOWN_BYTES,
   SkillInput,
   downloadMarkdown,
@@ -113,7 +117,32 @@ export function SkillsPanel() {
   const handleToggle = async (skill: ISkill, enabled: boolean) => {
     setError(undefined);
     if (enabled && needsReview(skill)) {
-      setReviewing(skill);
+      const reviewHash = reviewedSkillHash(skill);
+      if (!reviewHash) {
+        setReviewing(skill);
+        return;
+      }
+      try {
+        await updateSkill(skill.id, {
+          enabled: true,
+          reviewedContentHash: reviewHash
+        });
+      } catch (reason) {
+        if (promptErrorCode(reason) === 'content_changed') {
+          toast.error(t('chat.skills.review.changed'));
+          const refreshed = await fetchSkills().catch(() => null);
+          const current = refreshed?.find((item) => item.id === skill.id);
+          if (current) {
+            setReviewing(current);
+          } else {
+            setError(t('chat.skills.review.changed'));
+          }
+        } else {
+          setError(
+            skillErrorDetail(reason) || t('common.status.error.default')
+          );
+        }
+      }
       return;
     }
     try {
