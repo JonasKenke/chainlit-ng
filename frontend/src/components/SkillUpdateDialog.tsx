@@ -7,7 +7,14 @@ import {
   useSkills
 } from '@chainlit-ng/react-client';
 import { AlertTriangle, GitCompare, ShieldAlert } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -71,6 +78,7 @@ export function SkillUpdateDialog({
   const [updating, setUpdating] = useState(false);
   const [detaching, setDetaching] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const loadGeneration = useRef(0);
 
   const skillId = skill?.id;
   const sourceId = skill?.sourcePromptId ?? null;
@@ -79,12 +87,14 @@ export function SkillUpdateDialog({
 
   const loadVersions = useCallback(async () => {
     if (!versionSourceId) return;
+    const generation = ++loadGeneration.current;
     setLoadingVersions(true);
     setLoadError(false);
     try {
       const list = await fetchSkillVersions(versionSourceId, {
         shared: isPinned
       });
+      if (generation !== loadGeneration.current) return;
       const sorted = [...list].sort((a, b) => b.version - a.version);
       setVersions(sorted);
       const current = sorted.find(
@@ -102,8 +112,11 @@ export function SkillUpdateDialog({
       )
         ? initialVersionId
         : (fallback ?? current?.id ?? latest?.id);
+      setTarget(null);
+      setLoadingTarget(Boolean(preferred));
       setTargetId(preferred ?? null);
     } catch (error) {
+      if (generation !== loadGeneration.current) return;
       const status = (error as { status?: number })?.status;
       if (isPinned && status === 404) {
         setSourceUnavailable(true);
@@ -111,7 +124,9 @@ export function SkillUpdateDialog({
       setVersions([]);
       setLoadError(true);
     } finally {
-      setLoadingVersions(false);
+      if (generation === loadGeneration.current) {
+        setLoadingVersions(false);
+      }
     }
   }, [
     versionSourceId,
@@ -121,12 +136,23 @@ export function SkillUpdateDialog({
     initialVersionId
   ]);
 
-  useEffect(() => {
-    if (!open || !skillId || !versionSourceId) return;
+  useLayoutEffect(() => {
+    loadGeneration.current += 1;
+    if (!open) return;
+    setVersions([]);
+    setTargetId(null);
+    setTarget(null);
+    setLoadingVersions(true);
+    setLoadingTarget(false);
+    setLoadError(false);
     setConfirmLocal(false);
     setStale(false);
     setSourceUnavailable(false);
     setActionError(null);
+  }, [open, skillId, versionSourceId, initialVersionId]);
+
+  useEffect(() => {
+    if (!open || !skillId || !versionSourceId) return;
     void loadVersions();
   }, [open, skillId, versionSourceId, initialVersionId, loadVersions]);
 
@@ -136,6 +162,7 @@ export function SkillUpdateDialog({
       return;
     }
     let cancelled = false;
+    setTarget(null);
     setLoadingTarget(true);
     setConfirmLocal(false);
     setStale(false);
@@ -471,6 +498,8 @@ export function SkillUpdateDialog({
                   onClick={() => handleUpdate(false)}
                   disabled={
                     !targetId ||
+                    !target ||
+                    loadingTarget ||
                     updating ||
                     alreadyCurrent ||
                     sourceUnavailable ||

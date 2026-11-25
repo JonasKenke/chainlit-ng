@@ -174,6 +174,30 @@ describe('SkillUpdateDialog', () => {
     expect(onOpenChangeMock).toHaveBeenCalledWith(false);
   });
 
+  it('clears the previous diff while another skill loads', async () => {
+    const { rerender } = renderDialog();
+    expect(await screen.findByText('new line')).toBeInTheDocument();
+
+    fetchSkillVersionsMock.mockReturnValueOnce(new Promise(() => {}));
+    rerender(
+      <SkillUpdateDialog
+        open
+        skill={{
+          ...skill,
+          id: 's2',
+          title: 'next-skill',
+          sourcePromptId: 'source-2'
+        }}
+        initialVersionId={null}
+        onOpenChange={onOpenChangeMock}
+        onUpdated={onUpdatedMock}
+      />
+    );
+
+    expect(screen.queryByText('new line')).not.toBeInTheDocument();
+    expect(screen.getByText('common.status.loading')).toBeInTheDocument();
+  });
+
   it('supports side-by-side rows and switching versions', async () => {
     renderDialog();
 
