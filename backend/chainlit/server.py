@@ -1686,6 +1686,12 @@ def _require_same_origin(request: Request) -> None:
     if origin_scheme not in ("http", "https") or not origin_netloc:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected")
 
+    # Keep the pre-CHAINLIT_URL downgrade protection: an HTTPS request must not
+    # be driven by an HTTP browser origin, even if the configured external URL
+    # or an explicit allowlist says HTTP.
+    if request.url.scheme == "https" and origin_scheme.lower() != "https":
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
     expected = _configured_external_origin(request)
     if expected is not None and (
         origin_scheme.lower() == expected[0] and origin_netloc.lower() == expected[1]
@@ -4502,6 +4508,10 @@ def _is_json_same_origin(request: Request) -> bool:
         return True
     parsed = urllib.parse.urlsplit(origin)
     if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        return False
+    # Preserve the original downgrade check: an HTTPS request must not accept
+    # an HTTP Origin solely because CHAINLIT_URL was configured as HTTP.
+    if request.url.scheme == "https" and parsed.scheme.lower() != "https":
         return False
     expected = _configured_external_origin(request)
     return expected is not None and (

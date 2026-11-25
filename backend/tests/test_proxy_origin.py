@@ -90,6 +90,27 @@ def test_without_chainlit_url_proxy_host_still_requires_an_exact_origin(
     assert response.status_code == 403
 
 
+def test_json_guard_rejects_http_origin_on_https_even_with_http_chainlit_url(
+    monkeypatch, authenticated_user
+):
+    monkeypatch.setenv("CHAINLIT_URL", "http://public.example")
+    https_client = TestClient(server.app, base_url="https://internal:8000")
+    response = post("/project/question", https_client, "http://public.example")
+    assert response.status_code == 403
+
+
+def test_general_guard_rejects_http_origin_on_https_with_http_allowlist(monkeypatch):
+    monkeypatch.setenv("CHAINLIT_URL", "http://public.example")
+    monkeypatch.setattr(config.project, "allow_origins", ["http://public.example"])
+    https_client = TestClient(server.app, base_url="https://internal:8000")
+    response = https_client.post(
+        "/set-session-cookie",
+        headers={"Origin": "http://public.example", "Host": INTERNAL_HOST},
+        json={"session_id": "valid-session"},
+    )
+    assert response.status_code == 403
+
+
 def test_approval_uses_the_same_proxy_aware_origin_guard(
     client: TestClient, proxy_env, authenticated_user
 ):
