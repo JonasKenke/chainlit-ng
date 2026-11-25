@@ -1686,30 +1686,10 @@ def _require_same_origin(request: Request) -> None:
     if origin_scheme not in ("http", "https") or not origin_netloc:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected")
 
-    if request.url.scheme == "https" and origin_scheme != "https":
-        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
-
-    chainlit_url = os.environ.get("CHAINLIT_URL")
-    chainlit_netloc = ""
-    if chainlit_url:
-        try:
-            chainlit_origin = URL(chainlit_url)
-            chainlit_netloc = chainlit_origin.netloc
-            if chainlit_origin.scheme == "https" and origin_scheme != "https":
-                raise HTTPException(
-                    status_code=403, detail="Cross-origin request rejected"
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            chainlit_netloc = ""
-
-    allowed = {
-        str(request.headers.get("host") or ""),
-        URL(get_user_facing_url(request.base_url)).netloc,
-        chainlit_netloc,
-    }
-    if origin_netloc in allowed:
+    expected = _configured_external_origin(request)
+    if expected is not None and (
+        origin_scheme.lower() == expected[0] and origin_netloc.lower() == expected[1]
+    ):
         return
 
     for entry in config.project.allow_origins:
@@ -4493,6 +4473,26 @@ async def delete_user_threads(current_user: UserParam):
         return JSONResponse(content={"success": True, "deleted": deleted})
 
 
+def _configured_external_origin(request: Request) -> Optional[tuple[str, str]]:
+    """Return the browser origin this deployment expects, or None.
+
+    ``CHAINLIT_URL`` is authoritative when configured. A reverse proxy may
+    present a different Host/scheme to the app than the browser used, so the
+    configured external URL must win over the request-derived origin.
+    """
+    chainlit_url = os.environ.get("CHAINLIT_URL")
+    if chainlit_url:
+        parsed = urllib.parse.urlsplit(chainlit_url)
+        if parsed.scheme.lower() in ("http", "https") and parsed.netloc:
+            return parsed.scheme.lower(), parsed.netloc.lower()
+        return None
+
+    host = request.headers.get("host")
+    if not host:
+        return None
+    return request.url.scheme.lower(), host.lower()
+
+
 def _is_json_same_origin(request: Request) -> bool:
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type != "application/json":
@@ -4500,11 +4500,13 @@ def _is_json_same_origin(request: Request) -> bool:
     origin = request.headers.get("origin")
     if not origin:
         return True
-    host = request.headers.get("host")
-    if not host:
-        return False
     parsed = urllib.parse.urlsplit(origin)
-    return parsed.scheme == request.url.scheme and parsed.netloc == host
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+        return False
+    expected = _configured_external_origin(request)
+    return expected is not None and (
+        parsed.scheme.lower() == expected[0] and parsed.netloc.lower() == expected[1]
+    )
 
 
 _APPROVAL_STATUS_BY_DECISION: Dict[str, ApprovalStatus] = {

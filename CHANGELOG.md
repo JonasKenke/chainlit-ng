@@ -37,6 +37,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Serialize prompt, skill, grant, and pinned-copy mutations; bind authenticated
   HTTP and socket sessions to the persisted user generation; and enforce the
   MCP connection cap atomically across concurrent starts.
+- Use `CHAINLIT_URL` as the authoritative browser origin for JSON CSRF guards
+  (approvals/questions) and state-changing routes, so reverse-proxy Host/scheme
+  differences do not break or weaken origin checks.
 - Apply a shared URL-fetch policy to element and Langflow fetches: HTTP(S) only,
   private/link-local denial by default, bounded redirects, timeouts, and a hard
   streamed byte cap. MCP destinations are resolved and pinned to public
