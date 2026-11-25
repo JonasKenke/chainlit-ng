@@ -160,6 +160,25 @@ def oauth_callback(
     return func
 
 
+def set_shared_author_label(
+    func: Callable[[Optional[User]], Union[str, Awaitable[Optional[str]], None]],
+) -> Callable:
+    """Set the public author label shown on shared prompts and skills.
+
+    The callback receives the authenticated user (or ``None``) and may be
+    synchronous or asynchronous. Return ``None`` to omit the label. By default,
+    Chainlit uses the user's display name or email. Anyone with a share link can
+    see the chosen label, so do not return private information.
+
+    Example:
+        @cl.set_shared_author_label
+        def author_label(user):
+            return "Example team" if user else None
+    """
+    config.code.shared_author_label = func
+    return func
+
+
 def on_logout(func: Callable[[Request, Response], Any]) -> Callable:
     """
     Function called when the user logs out.

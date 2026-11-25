@@ -55,6 +55,8 @@ interface Props {
 }
 
 const LIBRARY_OPEN_EVENT = 'chainlit:library-open';
+const AUTHOR_LABEL_DISCLOSURE =
+  'Anyone with the link can see the author label (your name or email).';
 
 function requestLibrary(tab: 'prompts' | 'skills') {
   window.dispatchEvent(
@@ -258,7 +260,11 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
         const basename = getRouterBasename().replace(/\/$/, '');
         const fullUrl = `${window.location.origin}${basename}${shareUrl}`;
         await copyToClipboard(fullUrl);
-        toast.success(t('chat.promptGallery.copied'));
+        toast.success(t('chat.promptGallery.copied'), {
+          description: t('chat.share.authorLabelDisclosure', {
+            defaultValue: AUTHOR_LABEL_DISCLOSURE
+          })
+        });
       } else {
         toast.success(t('chat.promptGallery.unshared'));
       }
@@ -470,6 +476,12 @@ export function PromptGalleryButton({ disabled = false, onSelect }: Props) {
                                         ? t('chat.promptGallery.unshare')
                                         : t('chat.promptGallery.share.title')
                                     }
+                                    title={t(
+                                      'chat.share.authorLabelDisclosure',
+                                      {
+                                        defaultValue: AUTHOR_LABEL_DISCLOSURE
+                                      }
+                                    )}
                                     onPointerDown={(e) => e.stopPropagation()}
                                     onClick={(e) => {
                                       e.stopPropagation();

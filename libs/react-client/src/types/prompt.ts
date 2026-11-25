@@ -26,7 +26,8 @@ export interface IPrompt {
 
 /**
  * The anonymous public projection of a shared prompt: never contains
- * `userId`, `createdBy` or any other owner identity.
+ * `userId`, `createdBy` or internal owner identifiers. It may include an
+ * app-selected public author label.
  */
 export interface ISharedPrompt {
   id: string;
@@ -38,6 +39,8 @@ export interface ISharedPrompt {
   version: number;
   currentVersionId: string | null;
   currentContentHash: string | null;
+  /** Public label chosen server-side; omitted when unavailable. */
+  authorLabel?: string | null;
 }
 
 export interface IPromptVersionSummary {

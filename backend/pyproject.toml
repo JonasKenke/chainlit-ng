@@ -149,10 +149,54 @@ artifacts = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["chainlit"]
+include = [
+    "/chainlit/**/*.py",
+    "/chainlit/py.typed",
+    "/chainlit/translations/*.json",
+    "/chainlit/sample/skills/**/*.md",
+]
+exclude = [
+    "/chainlit/**/.*",
+    "/chainlit/**/.*/**",
+    "/chainlit/**/.env*",
+    "/chainlit/**/.chainlit/**",
+    "/chainlit/**/.uploads/**",
+    "/chainlit/**/__pycache__/**",
+    "/chainlit/**/*.py[cod]",
+    "/chainlit/**/*.key",
+    "/chainlit/**/*.pem",
+    "/chainlit/**/*.crt",
+    "/chainlit/**/*.cer",
+    "/chainlit/**/*.p12",
+    "/chainlit/**/*.pfx",
+    "/chainlit/**/id_rsa",
+    "/chainlit/**/id_dsa",
+    "/chainlit/**/id_ecdsa",
+    "/chainlit/**/id_ed25519",
+    "/chainlit/sample/eval.md",
+    "/chainlit/sample/whats_new_after_2_12/**",
+    "/chainlit/**/security-audit/**",
+]
 artifacts = [
-    "chainlit/frontend/dist/**/*",
-    "chainlit/copilot/dist/**/*"
+    "/chainlit/frontend/dist/**/*",
+    "/chainlit/copilot/dist/**/*",
+    "!/chainlit/**/*.map",
+    "!/chainlit/**/.*",
+    "!/chainlit/**/.*/**",
+    "!/chainlit/**/.env*",
+    "!/chainlit/**/.uploads/**",
+    "!/chainlit/**/__pycache__/**",
+    "!/chainlit/**/*.py[cod]",
+    "!/chainlit/**/*.key",
+    "!/chainlit/**/*.pem",
+    "!/chainlit/**/*.crt",
+    "!/chainlit/**/*.cer",
+    "!/chainlit/**/*.p12",
+    "!/chainlit/**/*.pfx",
+    "!/chainlit/**/id_rsa",
+    "!/chainlit/**/id_dsa",
+    "!/chainlit/**/id_ecdsa",
+    "!/chainlit/**/id_ed25519",
 ]
 
 [tool.hatch.version]

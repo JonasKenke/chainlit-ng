@@ -23,6 +23,8 @@ interface Props {
   onClose: () => void;
   onChanged?: (skill: ISkill) => void;
 }
+const AUTHOR_LABEL_DISCLOSURE =
+  'Anyone with the link can see the author label (your name or email).';
 
 /**
  * Small share surface for one skill: a link can be copied only while the skill
@@ -111,6 +113,11 @@ export function SkillShareDialog({ open, skill, onClose, onChanged }: Props) {
               ? t('chat.skills.share.description')
               : t('chat.skills.share.descriptionOff')}
           </DialogDescription>
+          <p className="text-xs text-muted-foreground">
+            {t('chat.share.authorLabelDisclosure', {
+              defaultValue: AUTHOR_LABEL_DISCLOSURE
+            })}
+          </p>
         </DialogHeader>
 
         {shared ? (

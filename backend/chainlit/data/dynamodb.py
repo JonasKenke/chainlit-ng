@@ -9,7 +9,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
 
 import aiofiles
-import aiohttp
 import boto3  # type: ignore
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
@@ -32,6 +31,7 @@ from chainlit.types import (
     ThreadGrant,
     ThreadOwner,
 )
+from chainlit.url_fetch import fetch_url_bytes
 from chainlit.user import PersistedUser, User
 
 if TYPE_CHECKING:
@@ -283,14 +283,7 @@ class DynamoDBDataLayer(BaseDataLayer):
 
         elif element.url:
             _logger.debug("DynamoDB: create_element http %s", element.url)
-            async with aiohttp.ClientSession() as session:
-                async with session.get(element.url) as response:
-                    if response.status == 200:
-                        content = await response.read()
-                    else:
-                        raise ValueError(
-                            f"Failed to read content from {element.url} status {response.status}",
-                        )
+            content = await fetch_url_bytes(element.url)
 
         else:
             raise ValueError("Element url, path or content must be provided")

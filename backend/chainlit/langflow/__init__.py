@@ -5,20 +5,17 @@ if not check_module_version("langflow", "0.1.4"):
         "Expected Langflow version >= 0.1.4. Run `pip install langflow --upgrade`"
     )
 
+import json
 from typing import Dict, Optional, Union
 
-import httpx
+from chainlit.url_fetch import fetch_url_bytes
 
 
 async def load_flow(schema: Union[Dict, str], tweaks: Optional[Dict] = None):
     from langflow import load_flow_from_json
 
     if isinstance(schema, str):
-        async with httpx.AsyncClient() as client:
-            response = await client.get(schema)
-            if response.status_code != 200:
-                raise ValueError(f"Error: {response.text}")
-            schema = response.json()
+        schema = json.loads(await fetch_url_bytes(schema))
 
     flow = load_flow_from_json(flow=schema, tweaks=tweaks)
 

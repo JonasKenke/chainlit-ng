@@ -54,7 +54,8 @@ export interface ISkillExport {
 
 /**
  * The anonymous public projection of a shared skill: never contains `userId`,
- * `enabled`, import provenance or any other owner identity.
+ * `enabled`, import provenance or internal owner identifiers. It may include
+ * an app-selected public author label.
  */
 export interface ISharedSkill {
   id: string;
@@ -66,8 +67,8 @@ export interface ISharedSkill {
   contentHash: string | null;
   updatedAt: string;
   sharedAt?: string | null;
-  /** Fixed, non-identifying author label. */
-  authorLabel: string;
+  /** Public label chosen server-side; omitted when unavailable. */
+  authorLabel?: string | null;
 }
 
 export interface ISkillShareResult {

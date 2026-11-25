@@ -5,9 +5,9 @@ import { visit } from 'unist-util-visit';
  * Active-content allowlist for raw Markdown HTML.
  *
  * `unsafe_allow_html` opts into HTML formatting, not into executable
- * documents. An unsandboxed `iframe srcdoc` inherits the embedding origin and
- * can run script with the app's session, so active containers are removed
- * rather than merely cleaned of attributes.
+ * documents. Active containers are removed rather than merely cleaned of
+ * attributes. Raw style elements can import remote CSS or apply global rules
+ * to the embedding document, so they are blocked while style attributes remain.
  */
 const BLOCKED_TAGS: Record<string, true> = {
   base: true,
@@ -22,6 +22,7 @@ const BLOCKED_TAGS: Record<string, true> = {
   option: true,
   script: true,
   select: true,
+  style: true,
   textarea: true
 };
 

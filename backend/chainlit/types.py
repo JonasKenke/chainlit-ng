@@ -26,6 +26,8 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 from pydantic.dataclasses import dataclass
 from typing_extensions import NotRequired
 
+from chainlit.prompt_versioning import enforce_title_limit, validate_unicode_scalar
+
 InputWidgetType = Literal[
     "switch",
     "slider",
@@ -254,13 +256,26 @@ class AskElementResponse(TypedDict, total=False):
 
 
 def _reject_blank(value: str) -> str:
+    validate_unicode_scalar(value, "text")
     if not value.strip():
         raise ValueError("must not be blank")
     return value
 
 
+def _reject_non_scalar(value: str) -> str:
+    validate_unicode_scalar(value, "text")
+    return value
+
+
+def _validate_prompt_title(value: str) -> str:
+    enforce_title_limit(value)
+    return value
+
+
 # Validates without rewriting, so valid values are stored byte-for-byte.
 NonBlankStr = Annotated[str, AfterValidator(_reject_blank)]
+ScalarStr = Annotated[str, AfterValidator(_reject_non_scalar)]
+BoundedPromptTitle = Annotated[NonBlankStr, AfterValidator(_validate_prompt_title)]
 
 
 class UpdateThreadRequest(BaseModel):
@@ -573,6 +588,7 @@ class PromptDict(TypedDict):
     pinnedContentHash: NotRequired[Optional[str]]
     pinnedAt: NotRequired[Optional[str]]
     sharedAt: NotRequired[Optional[str]]
+    authorLabel: NotRequired[Optional[str]]
     # First version made public by the current share link.
     sharedVersion: NotRequired[Optional[int]]
     # Highest source version the owner has acknowledged for this pinned skill.
@@ -658,12 +674,12 @@ PromptDiffDict = TypedDict(
 
 
 class CreatePromptRequest(BaseModel):
-    title: NonBlankStr
+    title: BoundedPromptTitle
     content: NonBlankStr
 
 
 class UpdatePromptRequest(BaseModel):
-    title: Optional[NonBlankStr] = None
+    title: Optional[BoundedPromptTitle] = None
     content: Optional[NonBlankStr] = None
 
 
@@ -689,23 +705,23 @@ class SyncPromptRequest(BaseModel):
 
 
 class CreateSkillRequest(BaseModel):
-    name: str
-    description: str
-    content: str
+    name: ScalarStr
+    description: ScalarStr
+    content: ScalarStr
     enabled: bool = False
 
 
 class UpdateSkillRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    content: Optional[str] = None
+    name: Optional[ScalarStr] = None
+    description: Optional[ScalarStr] = None
+    content: Optional[ScalarStr] = None
     enabled: Optional[bool] = None
     reviewedContentHash: Optional[str] = None
 
 
 class ImportSkillRequest(BaseModel):
-    markdown: str
-    imported_from: str = Field(min_length=1, max_length=2048)
+    markdown: ScalarStr
+    imported_from: Annotated[ScalarStr, Field(min_length=1, max_length=2048)]
 
 
 class ShareSkillRequest(BaseModel):

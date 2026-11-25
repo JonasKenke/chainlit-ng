@@ -263,16 +263,30 @@ class BaseSession:
                 "Either path or content must be provided to persist a file"
             )
 
-        self.files_dir.mkdir(exist_ok=True)
+        from chainlit.config import FILES_DIRECTORY
+
+        files_dir = self.files_dir
+        resolved_root = FILES_DIRECTORY.resolve()
+        if files_dir.is_symlink() or resolved_root not in files_dir.resolve().parents:
+            raise ValueError("Invalid session directory")
+
+        files_dir.mkdir(exist_ok=True)
+
+        # Re-check after creation and before opening the generated file path.
+        if files_dir.is_symlink() or resolved_root not in files_dir.resolve().parents:
+            raise ValueError("Invalid session directory")
 
         file_id = str(uuid.uuid4())
 
-        file_path = self.files_dir / file_id
+        file_path = files_dir / file_id
 
         file_extension = mimetypes.guess_extension(mime)
 
         if file_extension:
             file_path = file_path.with_suffix(file_extension)
+
+        if resolved_root not in file_path.resolve().parents:
+            raise ValueError("Invalid file path")
 
         try:
             if path:
@@ -397,6 +411,9 @@ class WebsocketSession(BaseSession):
     # In-flight OAuth connects, keyed by connection name. They are cancelled
     # before a new attempt for the same name and when the session ends.
     mcp_oauth_tasks: dict[str, asyncio.Task]
+    # Connect attempts reserve a name before any transport await. Counts allow
+    # concurrent same-name replacements to share one slot safely.
+    mcp_reservations: dict[str, int]
 
     def __init__(
         self,
@@ -444,6 +461,7 @@ class WebsocketSession(BaseSession):
         self.thread_queues: Dict[str, ThreadQueue] = {}
         self.mcp_sessions = {}
         self.mcp_oauth_tasks = {}
+        self.mcp_reservations = {}
         # Serialize user turns and keep every owned task so stop/disconnect
         # can cancel the whole fan-out, not only the newest pointer.
         self.run_lock = asyncio.Lock()
@@ -588,6 +606,7 @@ class WebsocketSession(BaseSession):
                     exc_info=True,
                 )
         self.mcp_sessions.clear()
+        self.mcp_reservations.clear()
 
     async def flush_method_queue(self):
         for method_name, queue in self.thread_queues.items():

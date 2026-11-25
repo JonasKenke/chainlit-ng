@@ -117,6 +117,7 @@ export default function SkillSharePage() {
     selected === LATEST
       ? null
       : (versions.find((version) => version.id === selected) ?? null);
+  const authorLabel = skill?.authorLabel?.trim();
 
   const handleAdd = async () => {
     if (!id || nameConflict) return;
@@ -185,8 +186,17 @@ export default function SkillSharePage() {
                 {skill.description}
               </p>
               <p className="text-xs text-muted-foreground">
-                {t('chat.skills.share.by', { author: skill.authorLabel })}
-                {' · '}
+                {authorLabel ? (
+                  <>
+                    <span>
+                      {t('chat.skills.share.by', {
+                        author: authorLabel,
+                        defaultValue: 'By {{author}}'
+                      })}
+                    </span>
+                    {' · '}
+                  </>
+                ) : null}
                 {t('chat.skills.share.versionLabel', {
                   version: skill.version
                 })}

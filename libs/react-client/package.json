@@ -4,7 +4,7 @@
   "version": "3.0.0",
   "scripts": {
     "dev": "tsup src/index.ts --clean --format esm,cjs --dts  --external react --minify --sourcemap --treeshake",
-    "build": "tsup src/index.ts --tsconfig tsconfig.build.json --clean --format esm,cjs --dts  --external react --minify --sourcemap --treeshake",
+    "build": "tsup src/index.ts --tsconfig tsconfig.build.json --clean --format esm,cjs --dts  --external react --minify --treeshake",
     "type-check": "tsc --noemit",
     "test": "vitest run"
   },
@@ -26,7 +26,12 @@
   "author": "Chainlit NG contributors",
   "license": "Apache-2.0",
   "files": [
-    "dist",
+    "dist/**/*.js",
+    "dist/**/*.mjs",
+    "dist/**/*.cjs",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.mts",
+    "dist/**/*.d.cts",
     "README.md"
   ],
   "main": "dist/index.js",

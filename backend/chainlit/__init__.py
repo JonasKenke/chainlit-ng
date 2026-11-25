@@ -136,6 +136,7 @@ from .callbacks import (
     send_window_message,
     set_chat_profiles,
     set_scheduled_task_models,
+    set_shared_author_label,
     set_starter_categories,
     set_starters,
 )
@@ -289,6 +290,7 @@ __all__ = [
     "send_window_message",
     "set_chat_profiles",
     "set_scheduled_task_models",
+    "set_shared_author_label",
     "set_starter_categories",
     "set_starters",
     "skill_tool",

@@ -1,8 +1,11 @@
 import ipaddress
+import os
 import re
+import socket
 from typing import Callable, Dict, Literal, Optional, Union
 from urllib.parse import unquote, urlsplit
 
+import anyio
 import httpx2
 from pydantic import BaseModel
 
@@ -335,6 +338,159 @@ class McpDestinationError(Exception):
     """An MCP transport tried to reach a destination outside its grant."""
 
 
+def _mcp_address_is_public(
+    address: Union[ipaddress.IPv4Address, ipaddress.IPv6Address],
+) -> bool:
+    # Classify the embedded address, not just the IPv6 wrapper. Otherwise an
+    # IPv4-mapped loopback/private destination can inherit different flags.
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return (
+        address.is_global
+        and not address.is_loopback
+        and not address.is_link_local
+        and not address.is_private
+        and not address.is_multicast
+        and not address.is_reserved
+        and not address.is_unspecified
+    )
+
+
+async def _resolve_mcp_destination(
+    url: httpx2.URL, *, allow_private: bool
+) -> list[str]:
+    """Resolve every A/AAAA answer and reject the whole set if any is unsafe."""
+    host = url.raw_host.decode("ascii")
+    port = _effective_port(url)
+    try:
+        answers = await anyio.getaddrinfo(
+            host,
+            port,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+        )
+    except OSError as exc:
+        raise McpDestinationError(
+            f"MCP destination host {host!r} could not be resolved."
+        ) from exc
+
+    addresses: list[str] = []
+    for _family, _type, _proto, _canonname, sockaddr in answers:
+        try:
+            address = ipaddress.ip_address(sockaddr[0])
+        except (IndexError, TypeError, ValueError) as exc:
+            raise McpDestinationError(
+                f"MCP destination host {host!r} returned an invalid address."
+            ) from exc
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        normalized = str(address)
+        if normalized not in addresses:
+            addresses.append(normalized)
+
+    if not addresses:
+        raise McpDestinationError(
+            f"MCP destination host {host!r} returned no addresses."
+        )
+
+    if not allow_private:
+        unsafe = [
+            address
+            for address in addresses
+            if not _mcp_address_is_public(ipaddress.ip_address(address))
+        ]
+        if unsafe:
+            raise McpDestinationError(
+                f"MCP destination host {host!r} resolved to non-public "
+                f"address(es): {', '.join(unsafe)}. Set "
+                "CHAINLIT_MCP_ALLOW_PRIVATE=true only for intentional internal "
+                "MCP deployments."
+            )
+    return addresses
+
+
+class _DnsPinnedMcpTransport(httpx2.AsyncBaseTransport):
+    """Revalidate DNS per request and connect only to a validated numeric IP.
+
+    httpx2/anyio do not expose a resolved-address connect option. Rewriting the
+    transport URL to the validated address closes the DNS-rebinding TOCTOU: the
+    socket layer receives an IP literal and cannot perform a second lookup. The
+    original authority remains in Host, and HTTPS keeps the original hostname
+    for SNI and certificate verification. A separate underlying pool per origin
+    prevents TLS connections from being reused across hostnames.
+
+    An explicit transport also bypasses environment proxies, which would
+    otherwise resolve the destination outside this policy.
+    """
+
+    def __init__(
+        self,
+        *,
+        allow_private: bool,
+        on_blocked: Optional[Callable[[McpDestinationError], None]],
+    ) -> None:
+        self._allow_private = allow_private
+        self._on_blocked = on_blocked
+        self._pins: dict[tuple[str, bytes, int], str] = {}
+        self._transports: dict[tuple[str, bytes, int], httpx2.AsyncHTTPTransport] = {}
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        origin = (
+            request.url.scheme,
+            request.url.raw_host,
+            _effective_port(request.url),
+        )
+        try:
+            addresses = await _resolve_mcp_destination(
+                request.url, allow_private=self._allow_private
+            )
+        except McpDestinationError as exc:
+            if self._on_blocked is not None:
+                self._on_blocked(exc)
+            raise
+
+        transport = self._transports.get(origin)
+        if transport is None:
+            pinned_address = addresses[0]
+            self._pins[origin] = pinned_address
+            transport = httpx2.AsyncHTTPTransport()
+            self._transports[origin] = transport
+        else:
+            # Reconnect/retry uses the same address that passed validation,
+            # rather than introducing another DNS lookup at connect time.
+            pinned_address = self._pins[origin]
+
+        raw_host = request.url.raw_host.decode("ascii")
+        authority = f"[{raw_host}]" if ":" in raw_host else raw_host
+        if request.url.port is not None:
+            authority += f":{request.url.port}"
+        headers = request.headers.copy()
+        headers["Host"] = authority
+        extensions = dict(request.extensions)
+        if request.url.scheme == "https":
+            extensions["sni_hostname"] = raw_host
+
+        pinned_request = httpx2.Request(
+            request.method,
+            request.url.copy_with(
+                host=pinned_address,
+                username=None,
+                password=None,
+            ),
+            headers=headers,
+            stream=request.stream,
+            extensions=extensions,
+        )
+        return await transport.handle_async_request(pinned_request)
+
+    async def aclose(self) -> None:
+        transports = list(self._transports.values())
+        self._transports.clear()
+        self._pins.clear()
+        for transport in transports:
+            await transport.aclose()
+
+
 def _destination_in_allowlist(allowed_urls: list[str]):
     """Permit only destinations the user's allowlist covers."""
 
@@ -389,19 +545,24 @@ def make_mcp_http_client_factory(
     """Build the httpx2 client factory used by the SSE and streamable-http transports.
 
     Mirrors the MCP SDK's ``create_mcp_http_client`` — which sets only
-    ``follow_redirects``, ``timeout``, ``headers`` and ``auth`` — with two
-    additions, both there because validating the URL we were *handed* does not
-    constrain the requests the transport actually makes:
+    ``follow_redirects``, ``timeout``, ``headers`` and ``auth`` — with three
+    additions, because validating the URL we were *handed* does not constrain
+    the requests the transport actually makes:
 
-    - Redirects are not followed at the client level. Only the first hop is
-      checked, and any permitted origin could redirect the connection
-      somewhere else, forwarding headers to the target.
+    - Redirects are not followed at the client level, so a permitted origin
+      cannot move the connection and forward headers to another target.
     - Every outgoing request is re-checked against ``check_destination``. The
       SSE transport takes its POST target from the server's ``endpoint`` event,
       and the SDK accepts any same-origin value — including one outside the
       path subtree the allowlist granted. Hooking the client binds the grant to
       the wire rather than to a single string, so this holds for the initial
       GET, the endpoint POSTs, and anything the SDK adds later.
+    - Every transport request resolves all A/AAAA answers, rejects the entire
+      set if any address is non-public, and pins the connection to a validated
+      numeric address. This closes the DNS-rebinding check/connect TOCTOU.
+      Redirects and reconnects resolve again; low-level retries reuse the
+      already validated pin. Operators with intentional internal MCP servers
+      must explicitly set ``CHAINLIT_MCP_ALLOW_PRIVATE=true``.
 
     ``on_blocked``, if given, is called synchronously with the raised
     ``McpDestinationError`` before it propagates. This is a fail-fast side
@@ -414,6 +575,10 @@ def make_mcp_http_client_factory(
     threaded through here) so this module stays free of asyncio primitives
     and stays synchronously testable.
     """
+
+    allow_private = (
+        os.environ.get("CHAINLIT_MCP_ALLOW_PRIVATE", "").strip().lower() == "true"
+    )
 
     def factory(
         headers: Optional[Dict[str, str]] = None,
@@ -434,6 +599,10 @@ def make_mcp_http_client_factory(
             headers=headers,
             auth=auth,
             event_hooks={"request": [_check_request]},
+            transport=_DnsPinnedMcpTransport(
+                allow_private=allow_private,
+                on_blocked=on_blocked,
+            ),
         )
 
     return factory

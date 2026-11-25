@@ -34,6 +34,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Sanitize active raw Markdown HTML, strip storage keys from share/element
   responses, reject NUL static paths, verify SQL TLS certificates, and use
   consistent DynamoDB authorization reads.
+- Serialize prompt, skill, grant, and pinned-copy mutations; bind authenticated
+  HTTP and socket sessions to the persisted user generation; and enforce the
+  MCP connection cap atomically across concurrent starts.
+- Apply a shared URL-fetch policy to element and Langflow fetches: HTTP(S) only,
+  private/link-local denial by default, bounded redirects, timeouts, and a hard
+  streamed byte cap. MCP destinations are resolved and pinned to public
+  addresses by default.
+- Default missing spontaneous-upload configuration to 20 files / 500 MiB;
+  verify branding paths remain inside their roots; and return 401 for malformed
+  Slack timestamps.
+- Remove the network-resolving `npx only-allow` install hooks and enforce the
+  pinned pnpm and supported Node versions through package metadata.
+- Restrict Python wheels to intended package resources, excluding local notes,
+  dotfiles, uploads, caches, private keys, audit files, and source maps.
+- Disable production frontend and React-client source maps. Set
+  `CHAINLIT_SOURCEMAP=1` for a local frontend debugging build; the React-client
+  `dev` build also retains maps.
 
 ### Inherited from 2.12
 
@@ -59,7 +76,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   disabled; enabling them requires reviewing the current content. Local
   self-authored edits stay enabled, while imported or pinned edits disable for
   review. See [the skills guide](docs/skills.md).
-- Add opt-in read-only thread sharing with named users (`feat(data)`):
+- Add configurable public author labels to shared prompt and skill previews:
+  use `@cl.set_shared_author_label` to choose the label, or return `None` to
+  omit it. The default is the user's display name or email. The label is
+  captured server-side when sharing, cleared on unshare, never accepted from
+  the browser, and disclosed as public in the share UI.
+- Add opt-in read-only thread sharing with named users (`feat/data`):
   `[features] thread_grants = true` plus a data layer that implements the grant
   contract. `SQLAlchemyDataLayer` stores grants in a lazily created
   `thread_grants` table, a grantee's thread list includes the threads they own

@@ -34,7 +34,6 @@
     "typescript-eslint": "^8.72.1"
   },
   "scripts": {
-    "preinstall": "npx only-allow pnpm",
     "prepare": "husky",
     "build": "pnpm run --recursive build",
     "lint": "eslint",
@@ -47,6 +46,9 @@
     "test": "pnpm run --recursive test",
     "test:e2e": "cypress run",
     "test:e2e:interactive": "cypress open"
+  },
+  "engines": {
+    "node": ">=24"
   },
   "packageManager": "pnpm@12.15.0"
 }

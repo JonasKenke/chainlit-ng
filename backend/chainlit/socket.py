@@ -69,6 +69,9 @@ def _session_owner_matches_user(
     if session.user is None or user is None:
         return False
 
+    if isinstance(session.user, PersistedUser) and isinstance(user, PersistedUser):
+        return (session.user.id, session.user.createdAt) == (user.id, user.createdAt)
+
     return session.user.identifier == user.identifier
 
 
@@ -542,11 +545,12 @@ def _mark_message_once(session: WebsocketSession, payload: MessagePayload) -> bo
     if seen is None:
         seen = set()
         session.processed_message_ids = seen
-    if raw in seen:
+    message_id = str(parsed)
+    if message_id in seen:
         return False
     if len(seen) >= 1000:
         seen.clear()
-    seen.add(raw)
+    seen.add(message_id)
     return True
 
 

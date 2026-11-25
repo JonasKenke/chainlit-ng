@@ -425,8 +425,8 @@
       },
       "share": {
         "title": "Share skill",
-        "description": "Anyone with the link can preview and add a copy.",
-        "descriptionOff": "Create a link to share this skill.",
+        "description": "Anyone with the link can preview and add a copy. The author label is public.",
+        "descriptionOff": "Create a link to preview and add a copy. The author label will be public.",
         "link": "Share link",
         "copy": "Copy link",
         "copied": "Link copied!",

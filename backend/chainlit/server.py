@@ -1,6 +1,7 @@
 import asyncio
 import fnmatch
 import glob
+import hashlib
 import hmac
 import json
 import mimetypes
@@ -109,15 +110,21 @@ from chainlit.prompt_versioning import (
     MAX_DIFF_BYTES,
     MAX_DIFF_ROWS,
     PromptContentTooLarge,
+    PromptDiffTooLarge,
+    PromptTitleTooLarge,
+    PromptValidationError,
     PromptVersionConflict,
     PromptVersionError,
     PromptVersionLimitReached,
+    SkillNameConflict,
     build_diff,
     enforce_content_limit,
+    enforce_title_limit,
     fingerprint,
     latest_head,
     public_version,
     public_versions,
+    validate_unicode_scalar,
 )
 from chainlit.scheduled_task import (
     next_run_at,
@@ -128,6 +135,7 @@ from chainlit.scheduled_task import (
 from chainlit.scheduler import ScheduledTaskWorker
 from chainlit.secret import random_secret
 from chainlit.session import WebsocketSession
+from chainlit.share_author import resolve_shared_author_label
 from chainlit.skill import (
     MAX_SKILLS,
     Skill,
@@ -137,7 +145,7 @@ from chainlit.skill import (
     skill_content_hash,
     skill_to_markdown,
 )
-from chainlit.state_store import close_state_store
+from chainlit.state_store import LockNotAcquired, close_state_store, get_state_store
 from chainlit.thread_metadata import public_thread
 from chainlit.types import (
     AckPromptUpdateRequest,
@@ -427,14 +435,50 @@ def _socket_origin_allowed(origin: Optional[str], environ: Dict[str, Any]) -> bo
     if not parsed.netloc:
         return False
 
-    host = str(environ.get("HTTP_HOST") or "").lower()
-    if host and parsed.netloc.lower() == host:
-        return True
-
     chainlit_url = os.environ.get("CHAINLIT_URL")
+    effective_scheme = None
     if chainlit_url:
         try:
-            if parsed.netloc.lower() == URL(chainlit_url).netloc.lower():
+            effective_scheme = URL(chainlit_url).scheme.lower()
+        except Exception:
+            pass
+    if effective_scheme is None:
+        forwarded_proto = str(environ.get("HTTP_X_FORWARDED_PROTO") or "")
+        forwarded_scheme = forwarded_proto.split(",", 1)[0].strip().lower()
+        if forwarded_scheme in ("http", "https"):
+            effective_scheme = forwarded_scheme
+    if effective_scheme is None:
+        scope = environ.get("asgi.scope")
+        if isinstance(scope, dict):
+            scope_scheme = str(scope.get("scheme") or "").lower()
+            effective_scheme = {"ws": "http", "wss": "https"}.get(
+                scope_scheme, scope_scheme
+            )
+    if effective_scheme is None:
+        request_scheme = str(environ.get("wsgi.url_scheme") or "").lower()
+        effective_scheme = {"ws": "http", "wss": "https"}.get(
+            request_scheme, request_scheme
+        )
+    if effective_scheme not in ("http", "https"):
+        # Preserve compatibility for non-browser/internal transports that do
+        # not provide enough scheme information to enforce a comparison.
+        effective_scheme = parsed.scheme.lower()
+
+    host = str(environ.get("HTTP_HOST") or "").lower()
+    if (
+        effective_scheme == parsed.scheme.lower()
+        and host
+        and parsed.netloc.lower() == host
+    ):
+        return True
+
+    if chainlit_url:
+        try:
+            configured = URL(chainlit_url)
+            if (
+                parsed.scheme.lower() == configured.scheme.lower()
+                and parsed.netloc.lower() == configured.netloc.lower()
+            ):
                 return True
         except Exception:
             pass
@@ -521,6 +565,15 @@ def _resolve_static_file(base_path: Path, filename: str) -> Path:
     return file_path
 
 
+def _resolve_selected_static_file(file_path: str, root_path: Path) -> Path:
+    """Resolve a glob-selected file while confining it to root_path."""
+    try:
+        relative_path = Path(file_path).relative_to(root_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename") from None
+    return _resolve_static_file(root_path, str(relative_path))
+
+
 @router.get("/public/{filename:path}")
 async def serve_public_file(
     filename: str,
@@ -561,6 +614,17 @@ async def serve_copilot_file(
 #                               SLACK HTTP HANDLER
 # -------------------------------------------------------------------------------
 
+
+def _validate_slack_timestamp(timestamp: Optional[str]) -> None:
+    """Reject malformed Slack timestamps before Bolt's verifier raises 500."""
+    if timestamp is None:
+        return
+    try:
+        int(timestamp)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Unauthorized") from None
+
+
 if (
     os.environ.get("SLACK_BOT_TOKEN")
     and os.environ.get("SLACK_SIGNING_SECRET")
@@ -570,6 +634,7 @@ if (
 
     @router.post("/slack/events")
     async def slack_endpoint(req: Request):
+        _validate_slack_timestamp(req.headers.get("X-Slack-Request-Timestamp"))
         return await slack_app_handler.handle(req)
 
 
@@ -814,9 +879,17 @@ def _mcp_capacity_reached(session, name: str) -> bool:
     """Whether a new (non-replacement) MCP connection exceeds the cap."""
     if _MAX_MCP_SESSIONS <= 0:
         return False
+    reservations = getattr(session, "mcp_reservations", None)
+    if not isinstance(reservations, dict):
+        reservations = {}
     if name in session.mcp_sessions or name in session.mcp_oauth_tasks:
         return False
-    return len(session.mcp_sessions) + len(session.mcp_oauth_tasks) >= _MAX_MCP_SESSIONS
+    if name in reservations:
+        return True
+    occupied = (
+        set(session.mcp_sessions) | set(session.mcp_oauth_tasks) | set(reservations)
+    )
+    return len(occupied) >= _MAX_MCP_SESSIONS
 
 
 def get_mcp_oauth_callback_url(request: Request) -> str:
@@ -929,7 +1002,8 @@ _LOGIN_WINDOW_SECONDS = max(
 
 def _login_attempt_key(request: Request, username: str) -> str:
     client = request.client.host if request.client else "unknown"
-    return f"login-attempt:{client}:{username.lower()[:200]}"
+    identity = f"{client}\0{username.lower()}".encode()
+    return f"login-attempt:{hashlib.sha256(identity).hexdigest()}"
 
 
 async def _enforce_login_rate_limit(request: Request, username: str) -> None:
@@ -1515,7 +1589,8 @@ def _supports_delete_all_threads(data_layer: Optional[BaseDataLayer]) -> bool:
 
 
 @router.get("/user")
-async def get_user(current_user: UserParam) -> GenericUser:
+async def get_user(current_user: UserParam, response: Response) -> GenericUser:
+    response.headers["Cache-Control"] = "private, no-store"
     return redact_sensitive_metadata(current_user)
 
 
@@ -1699,6 +1774,96 @@ def _same_principal(one: Optional[User], other: Optional[User]) -> bool:
     return one.identifier == other.identifier
 
 
+@asynccontextmanager
+async def _mutation_lock(key: str, label: str):
+    """Serialize one stateful HTTP mutation and map contention to HTTP 409."""
+    try:
+        async with get_state_store().lock(key, ttl=10, wait=5):
+            yield
+    except LockNotAcquired as exc:
+        raise HTTPException(status_code=409, detail=f"{label} is busy; retry") from exc
+
+
+@asynccontextmanager
+async def _mutation_locks(keys: List[str], label: str):
+    """Acquire related mutation locks in a stable order across workers."""
+    async with AsyncExitStack() as stack:
+        for key in sorted(set(keys)):
+            await stack.enter_async_context(_mutation_lock(key, label))
+        yield
+
+
+@asynccontextmanager
+async def _locked_pinned_source(
+    data_layer: BaseDataLayer,
+    user_id: str,
+    copy_id: str,
+    *,
+    skill: bool,
+):
+    """Re-read a pinned copy and its source while both mutation locks are held."""
+    label = "Skill" if skill else "Prompt"
+    prefix = "skill-mutation" if skill else "prompt-mutation"
+    while True:
+        if skill:
+            initial = await _dl_skill(data_layer.get_skill(copy_id, user_id))
+        else:
+            initial = await _dl_prompt(data_layer.get_prompt(copy_id))
+        if not initial or initial["userId"] != user_id:
+            raise HTTPException(status_code=404, detail=f"{label} not found")
+        initial_source_id = initial.get("sourcePromptId")
+        if not initial_source_id:
+            raise _prompt_error(
+                409, "not_pinned", f"This {label.lower()} is not pinned to a source"
+            )
+
+        async with _mutation_locks(
+            [f"{prefix}:{copy_id}", f"{prefix}:{initial_source_id}"], label
+        ):
+            if skill:
+                copy = await _dl_skill(data_layer.get_skill(copy_id, user_id))
+            else:
+                copy = await _dl_prompt(data_layer.get_prompt(copy_id))
+            if not copy or copy["userId"] != user_id:
+                raise HTTPException(status_code=404, detail=f"{label} not found")
+            source_id = copy.get("sourcePromptId")
+            if not source_id:
+                raise _prompt_error(
+                    409, "not_pinned", f"This {label.lower()} is not pinned to a source"
+                )
+            if source_id != initial_source_id:
+                continue
+
+            if skill:
+                source = await _dl_skill(data_layer.get_shared_skill(source_id))
+                available = bool(source)
+            else:
+                source = await _dl_prompt(data_layer.get_prompt(source_id))
+                available = bool(source and source.get("isShared"))
+            if not available:
+                raise _prompt_error(
+                    409,
+                    "source_unavailable",
+                    f"The source {label.lower()} is no longer available",
+                )
+            yield copy, source
+        return
+
+
+def _require_session_principal(
+    session: "WebsocketSession",
+    current_user: Optional[User],
+    *,
+    status_code: int = 401,
+    detail: str = "You are not authorized to use this session",
+) -> None:
+    """Bind authenticated HTTP calls to the session's persisted generation."""
+    if current_user is None:
+        return
+    if not _same_principal(session.user, current_user):
+        raise HTTPException(status_code=status_code, detail=detail)
+
+
 async def _authorize_feedback_update(
     update: UpdateFeedbackRequest,
     current_user: Optional[User],
@@ -1864,6 +2029,7 @@ async def project_settings(
         }
 
     return JSONResponse(
+        headers={"Cache-Control": "private, no-store"},
         content={
             "ui": cfg.ui.model_dump(),
             # Explicit origins are the only cross-origin window-message peers
@@ -1911,7 +2077,7 @@ async def project_settings(
             "scheduledTaskModels": scheduled_models,
             "starters": starters,
             "starterCategories": starter_categories,
-        }
+        },
     )
 
 
@@ -2376,6 +2542,21 @@ async def _dl_prompt(coro: Any) -> Any:
             status_code=501,
             detail=str(exc) or "Prompt gallery is not supported by this data layer",
         ) from exc
+    except PromptValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    except PromptTitleTooLarge as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "title_too_large", "message": str(exc)},
+        ) from exc
+    except PromptDiffTooLarge as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "diff_too_large", "message": str(exc)},
+        ) from exc
     except PromptContentTooLarge as exc:
         raise HTTPException(
             status_code=413,
@@ -2404,12 +2585,28 @@ def _prompt_error(status_code: int, code: str, message: str) -> HTTPException:
     )
 
 
+def _validate_prompt_title(title: str) -> None:
+    try:
+        enforce_title_limit(title)
+    except PromptValidationError as exc:
+        raise _prompt_error(422, "validation_error", str(exc)) from exc
+    except PromptTitleTooLarge as exc:
+        raise _prompt_error(413, "title_too_large", str(exc)) from exc
+
+
 def _validate_prompt_content(content: str) -> None:
     """Enforce the prompt body cap before any data-layer call."""
     try:
         enforce_content_limit(content)
+    except PromptValidationError as exc:
+        raise _prompt_error(422, "validation_error", str(exc)) from exc
     except PromptContentTooLarge as exc:
         raise _prompt_error(413, "content_too_large", str(exc)) from exc
+
+
+def _validate_prompt(title: str, content: str) -> None:
+    _validate_prompt_title(title)
+    _validate_prompt_content(content)
 
 
 @router.get("/project/prompts")
@@ -2439,7 +2636,7 @@ async def create_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    _validate_prompt_content(payload.content)
+    _validate_prompt(payload.title, payload.content)
     import uuid as _uuid
 
     now = utc_now()
@@ -2468,20 +2665,20 @@ async def update_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    user_id = await _get_user_id(current_user, data_layer)
-    existing = await _dl_prompt(data_layer.get_prompt(prompt_id))
-    if not existing or existing["userId"] != user_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    if payload.content is not None:
-        _validate_prompt_content(payload.content)
-    updated = dict(existing)
-    if payload.title is not None:
-        updated["title"] = payload.title
-    if payload.content is not None:
-        updated["content"] = payload.content
-    updated["updatedAt"] = utc_now()
-    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
-    return JSONResponse(content=result)
+    async with _mutation_lock(f"prompt-mutation:{prompt_id}", "Prompt"):
+        user_id = await _get_user_id(current_user, data_layer)
+        existing = await _dl_prompt(data_layer.get_prompt(prompt_id))
+        if not existing or existing["userId"] != user_id:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        updated = dict(existing)
+        if payload.title is not None:
+            updated["title"] = payload.title
+        if payload.content is not None:
+            updated["content"] = payload.content
+        _validate_prompt(updated["title"], updated["content"])
+        updated["updatedAt"] = utc_now()
+        result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+        return JSONResponse(content=result)
 
 
 @router.delete("/project/prompts/{prompt_id}")
@@ -2495,14 +2692,15 @@ async def delete_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    deleted = await _dl_prompt(
-        data_layer.delete_prompt(
-            prompt_id, await _get_user_id(current_user, data_layer)
+    async with _mutation_lock(f"prompt-mutation:{prompt_id}", "Prompt"):
+        deleted = await _dl_prompt(
+            data_layer.delete_prompt(
+                prompt_id, await _get_user_id(current_user, data_layer)
+            )
         )
-    )
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    return JSONResponse(content={"success": True})
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        return JSONResponse(content={"success": True})
 
 
 @router.post("/project/prompts/{prompt_id}/share")
@@ -2518,18 +2716,28 @@ async def share_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    user_id = await _get_user_id(current_user, data_layer)
-    existing = await _dl_prompt(data_layer.get_prompt(prompt_id))
-    if not existing or existing["userId"] != user_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    updated = dict(existing)
-    updated["isShared"] = payload.isShared
-    if payload.isShared and not existing.get("isShared"):
-        updated["sharedAt"] = utc_now()
-        updated["sharedVersion"] = int(existing.get("version") or 1)
-    updated["updatedAt"] = utc_now()
-    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
-    return JSONResponse(content={"prompt": result, "shareUrl": f"/prompt/{prompt_id}"})
+    async with _mutation_lock(f"prompt-mutation:{prompt_id}", "Prompt"):
+        user_id = await _get_user_id(current_user, data_layer)
+        existing = await _dl_prompt(data_layer.get_prompt(prompt_id))
+        if not existing or existing["userId"] != user_id:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        if payload.isShared:
+            _validate_prompt(existing["title"], existing["content"])
+        updated = dict(existing)
+        updated["isShared"] = payload.isShared
+        updated["authorLabel"] = (
+            await resolve_shared_author_label(current_user)
+            if payload.isShared
+            else None
+        )
+        if payload.isShared and not existing.get("isShared"):
+            updated["sharedAt"] = utc_now()
+            updated["sharedVersion"] = int(existing.get("version") or 1)
+        updated["updatedAt"] = utc_now()
+        result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+        return JSONResponse(
+            content={"prompt": result, "shareUrl": f"/prompt/{prompt_id}"}
+        )
 
 
 async def _shared_prompt_or_404(
@@ -2564,19 +2772,20 @@ async def get_shared_prompt(
     # Public projection only: this endpoint is unauthenticated, so owner-only
     # fields (userId, createdBy and future provenance fields) must never leak.
     # Version metadata is limited to the head number, id and content hash.
-    return JSONResponse(
-        content={
-            "id": prompt["id"],
-            "title": prompt["title"],
-            "content": prompt["content"],
-            "isShared": prompt["isShared"],
-            "createdAt": prompt["createdAt"],
-            "updatedAt": prompt["updatedAt"],
-            "version": int(prompt.get("version") or 1),
-            "currentVersionId": current_version_id,
-            "currentContentHash": prompt.get("contentHash"),
-        }
-    )
+    content = {
+        "id": prompt["id"],
+        "title": prompt["title"],
+        "content": prompt["content"],
+        "isShared": prompt["isShared"],
+        "createdAt": prompt["createdAt"],
+        "updatedAt": prompt["updatedAt"],
+        "version": int(prompt.get("version") or 1),
+        "currentVersionId": current_version_id,
+        "currentContentHash": prompt.get("contentHash"),
+    }
+    if "authorLabel" in prompt:
+        content["authorLabel"] = prompt.get("authorLabel")
+    return JSONResponse(content=content)
 
 
 @router.get("/project/prompt/share/{prompt_id}/versions")
@@ -2651,78 +2860,93 @@ async def add_shared_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    source = await _dl_prompt(data_layer.get_prompt(prompt_id))
-    if not source or not source["isShared"]:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-
     user_id = await _get_user_id(current_user, data_layer)
-    existing = await _dl_prompt(data_layer.list_prompts(user_id))
-    if any(item.get("sourcePromptId") == prompt_id for item in existing):
-        raise _prompt_error(
-            409, "already_added", "This shared prompt is already in your gallery"
-        )
-
-    title = source["title"]
-    content = source["content"]
-    pinned_version_id: Optional[str] = None
-    pinned_content_hash: Optional[str] = source.get("contentHash") or fingerprint(
-        source
-    )
-    requested_version = payload.versionId if payload else None
-    target: Optional[Dict[str, Any]] = None
-
-    if _supports_prompt_versioning(data_layer):
-        versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
-        visible = (
-            public_versions(source, versions) if isinstance(versions, list) else []
-        )
-        if requested_version:
-            if requested_version not in {version["id"] for version in visible}:
-                raise HTTPException(status_code=404, detail="Prompt version not found")
-            target = await _dl_prompt(
-                data_layer.get_prompt_version(prompt_id, requested_version)
-            )
-            if not target:
-                raise HTTPException(status_code=404, detail="Prompt version not found")
-        else:
-            head = latest_head(visible)
-            target = (
-                await _dl_prompt(data_layer.get_prompt_version(prompt_id, head["id"]))
-                if head
-                else None
-            )
-        if target:
-            title = target["title"]
-            content = target["content"]
-            pinned_version_id = target["id"]
-            pinned_content_hash = target["contentHash"]
-        else:
+    async with _mutation_locks(
+        [f"prompt-copy:{user_id}:{prompt_id}", f"prompt-mutation:{prompt_id}"],
+        "Prompt",
+    ):
+        source = await _dl_prompt(data_layer.get_prompt(prompt_id))
+        if not source or not source["isShared"]:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        _validate_prompt(source["title"], source["content"])
+        existing = await _dl_prompt(data_layer.list_prompts(user_id))
+        if any(item.get("sourcePromptId") == prompt_id for item in existing):
             raise _prompt_error(
-                409, "source_unavailable", "The shared prompt has no public versions"
+                409, "already_added", "This shared prompt is already in your gallery"
             )
-    elif requested_version:
-        raise HTTPException(status_code=501, detail="Prompt versioning is unavailable")
 
-    import uuid as _uuid
+        title = source["title"]
+        content = source["content"]
+        pinned_version_id: Optional[str] = None
+        pinned_content_hash: Optional[str] = source.get("contentHash") or fingerprint(
+            source
+        )
+        requested_version = payload.versionId if payload else None
+        target: Optional[Dict[str, Any]] = None
 
-    now = utc_now()
-    copy = {
-        "id": str(_uuid.uuid4()),
-        "title": title,
-        "content": content,
-        "userId": user_id,
-        "isShared": False,
-        "createdAt": now,
-        "updatedAt": now,
-        "sourcePromptId": prompt_id,
-        "pinnedVersionId": pinned_version_id,
-        "pinnedContentHash": pinned_content_hash,
-        "pinnedAt": now,
-    }
-    if target:
-        copy["pinnedVersion"] = target["version"]
-    created = await _dl_prompt(data_layer.create_prompt(copy))  # type: ignore[arg-type]
-    return JSONResponse(content=created)
+        if _supports_prompt_versioning(data_layer):
+            versions = await _dl_prompt(data_layer.list_prompt_versions(prompt_id))
+            visible = (
+                public_versions(source, versions) if isinstance(versions, list) else []
+            )
+            if requested_version:
+                if requested_version not in {version["id"] for version in visible}:
+                    raise HTTPException(
+                        status_code=404, detail="Prompt version not found"
+                    )
+                target = await _dl_prompt(
+                    data_layer.get_prompt_version(prompt_id, requested_version)
+                )
+                if not target:
+                    raise HTTPException(
+                        status_code=404, detail="Prompt version not found"
+                    )
+            else:
+                head = latest_head(visible)
+                target = (
+                    await _dl_prompt(
+                        data_layer.get_prompt_version(prompt_id, head["id"])
+                    )
+                    if head
+                    else None
+                )
+            if target:
+                title = target["title"]
+                content = target["content"]
+                pinned_version_id = target["id"]
+                pinned_content_hash = target["contentHash"]
+            else:
+                raise _prompt_error(
+                    409,
+                    "source_unavailable",
+                    "The shared prompt has no public versions",
+                )
+        elif requested_version:
+            raise HTTPException(
+                status_code=501, detail="Prompt versioning is unavailable"
+            )
+
+        _validate_prompt(title, content)
+        import uuid as _uuid
+
+        now = utc_now()
+        copy = {
+            "id": str(_uuid.uuid4()),
+            "title": title,
+            "content": content,
+            "userId": user_id,
+            "isShared": False,
+            "createdAt": now,
+            "updatedAt": now,
+            "sourcePromptId": prompt_id,
+            "pinnedVersionId": pinned_version_id,
+            "pinnedContentHash": pinned_content_hash,
+            "pinnedAt": now,
+        }
+        if target:
+            copy["pinnedVersion"] = target["version"]
+        created = await _dl_prompt(data_layer.create_prompt(copy))  # type: ignore[arg-type]
+        return JSONResponse(content=created)
 
 
 @router.get("/project/prompts/updates")
@@ -2878,7 +3102,10 @@ async def prompt_diff(
         if versions:
             from_version_id = versions[0]["id"]
 
-    rows, truncated = build_diff(old_text, target["content"])
+    try:
+        rows, truncated = build_diff(old_text, target["content"])
+    except PromptDiffTooLarge as exc:
+        raise _prompt_error(413, "diff_too_large", str(exc)) from exc
     return JSONResponse(
         content={
             "promptId": prompt_id,
@@ -2911,77 +3138,84 @@ async def sync_prompt(
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
     user_id = await _get_user_id(current_user, data_layer)
-    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
-    if not prompt or prompt["userId"] != user_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-
-    source_id = prompt.get("sourcePromptId")
-    if not source_id:
-        raise _prompt_error(409, "not_pinned", "This prompt is not pinned to a source")
-    source = await _dl_prompt(data_layer.get_prompt(source_id))
-    if not source or not source.get("isShared"):
-        raise _prompt_error(
-            409, "source_unavailable", "The source prompt is no longer available"
-        )
-
-    versions = await _dl_prompt(data_layer.list_prompt_versions(source_id))
-    visible = public_versions(source, versions) if isinstance(versions, list) else []
-    if payload.versionId:
-        if payload.versionId not in {version["id"] for version in visible}:
-            raise _prompt_error(
-                409, "version_conflict", "That version does not belong to the source"
-            )
-        target = await _dl_prompt(
-            data_layer.get_prompt_version(source_id, payload.versionId)
-        )
-        if not target:
-            raise _prompt_error(
-                409, "version_conflict", "That version does not belong to the source"
-            )
-    else:
-        head = latest_head(visible)
-        if not head:
-            raise _prompt_error(
-                409, "source_unavailable", "The source prompt has no versions"
-            )
-        target = await _dl_prompt(data_layer.get_prompt_version(source_id, head["id"]))
-        if not target:
-            raise _prompt_error(
-                409, "source_unavailable", "The source prompt has no versions"
-            )
-
-    if prompt.get("contentHash") == target["contentHash"]:
-        raise _prompt_error(409, "already_current", "This prompt is already current")
-    if (
-        payload.expectedLocalHash is not None
-        and payload.expectedLocalHash != prompt.get("contentHash")
+    async with _locked_pinned_source(data_layer, user_id, prompt_id, skill=False) as (
+        prompt,
+        source,
     ):
-        raise _prompt_error(
-            409,
-            "preview_stale",
-            "The prompt changed after the preview; review the diff again",
+        source_id = source["id"]
+        versions = await _dl_prompt(data_layer.list_prompt_versions(source_id))
+        visible = (
+            public_versions(source, versions) if isinstance(versions, list) else []
         )
-    pinned_hash = prompt.get("pinnedContentHash")
-    if pinned_hash and prompt.get("contentHash") != pinned_hash and not payload.confirm:
-        raise _prompt_error(
-            409,
-            "local_changes",
-            "This prompt has local edits; confirm to replace them",
-        )
+        if payload.versionId:
+            if payload.versionId not in {version["id"] for version in visible}:
+                raise _prompt_error(
+                    409,
+                    "version_conflict",
+                    "That version does not belong to the source",
+                )
+            target = await _dl_prompt(
+                data_layer.get_prompt_version(source_id, payload.versionId)
+            )
+            if not target:
+                raise _prompt_error(
+                    409,
+                    "version_conflict",
+                    "That version does not belong to the source",
+                )
+        else:
+            head = latest_head(visible)
+            if not head:
+                raise _prompt_error(
+                    409, "source_unavailable", "The source prompt has no versions"
+                )
+            target = await _dl_prompt(
+                data_layer.get_prompt_version(source_id, head["id"])
+            )
+            if not target:
+                raise _prompt_error(
+                    409, "source_unavailable", "The source prompt has no versions"
+                )
 
-    now = utc_now()
-    updated = dict(prompt)
-    updated["title"] = target["title"]
-    updated["content"] = target["content"]
-    if target.get("kind") == "skill":
-        updated["description"] = target.get("description") or ""
-    updated["pinnedVersionId"] = target["id"]
-    updated["pinnedVersion"] = target["version"]
-    updated["pinnedContentHash"] = target["contentHash"]
-    updated["pinnedAt"] = now
-    updated["updatedAt"] = now
-    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
-    return JSONResponse(content=result)
+        _validate_prompt(target["title"], target["content"])
+        if prompt.get("contentHash") == target["contentHash"]:
+            raise _prompt_error(
+                409, "already_current", "This prompt is already current"
+            )
+        if (
+            payload.expectedLocalHash is not None
+            and payload.expectedLocalHash != prompt.get("contentHash")
+        ):
+            raise _prompt_error(
+                409,
+                "preview_stale",
+                "The prompt changed after the preview; review the diff again",
+            )
+        pinned_hash = prompt.get("pinnedContentHash")
+        if (
+            pinned_hash
+            and prompt.get("contentHash") != pinned_hash
+            and not payload.confirm
+        ):
+            raise _prompt_error(
+                409,
+                "local_changes",
+                "This prompt has local edits; confirm to replace them",
+            )
+
+        now = utc_now()
+        updated = dict(prompt)
+        updated["title"] = target["title"]
+        updated["content"] = target["content"]
+        if target.get("kind") == "skill":
+            updated["description"] = target.get("description") or ""
+        updated["pinnedVersionId"] = target["id"]
+        updated["pinnedVersion"] = target["version"]
+        updated["pinnedContentHash"] = target["contentHash"]
+        updated["pinnedAt"] = now
+        updated["updatedAt"] = now
+        result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+        return JSONResponse(content=result)
 
 
 @router.post("/project/prompts/{prompt_id}/detach")
@@ -2995,20 +3229,23 @@ async def detach_prompt(
     data_layer = get_data_layer()
     if not data_layer:
         raise HTTPException(status_code=400, detail="Data persistence is not enabled")
-    user_id = await _get_user_id(current_user, data_layer)
-    prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
-    if not prompt or prompt["userId"] != user_id:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    if not prompt.get("sourcePromptId"):
-        raise _prompt_error(409, "not_pinned", "This prompt is not pinned to a source")
-    updated = dict(prompt)
-    updated["sourcePromptId"] = None
-    updated["pinnedVersionId"] = None
-    updated["pinnedContentHash"] = None
-    updated["pinnedAt"] = None
-    updated["updatedAt"] = utc_now()
-    result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
-    return JSONResponse(content=result)
+    async with _mutation_lock(f"prompt-mutation:{prompt_id}", "Prompt"):
+        user_id = await _get_user_id(current_user, data_layer)
+        prompt = await _dl_prompt(data_layer.get_prompt(prompt_id))
+        if not prompt or prompt["userId"] != user_id:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        if not prompt.get("sourcePromptId"):
+            raise _prompt_error(
+                409, "not_pinned", "This prompt is not pinned to a source"
+            )
+        updated = dict(prompt)
+        updated["sourcePromptId"] = None
+        updated["pinnedVersionId"] = None
+        updated["pinnedContentHash"] = None
+        updated["pinnedAt"] = None
+        updated["updatedAt"] = utc_now()
+        result = await _dl_prompt(data_layer.update_prompt(updated))  # type: ignore[arg-type]
+        return JSONResponse(content=result)
 
 
 # ---- Per-user skills endpoints (router registered only when the flag is on) ----
@@ -3048,6 +3285,21 @@ async def _dl_skill(coro: Any) -> Any:
             status_code=501,
             detail=str(exc) or "Skills are not supported by this data layer",
         ) from exc
+    except PromptValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    except PromptTitleTooLarge as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "title_too_large", "message": str(exc)},
+        ) from exc
+    except PromptDiffTooLarge as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "diff_too_large", "message": str(exc)},
+        ) from exc
     except PromptContentTooLarge as exc:
         raise HTTPException(
             status_code=413,
@@ -3058,6 +3310,11 @@ async def _dl_skill(coro: Any) -> Any:
             status_code=409,
             detail={"code": "version_limit_reached", "message": str(exc)},
         ) from exc
+    except SkillNameConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "name_taken", "message": str(exc)},
+        ) from exc
     except PromptVersionError as exc:
         raise HTTPException(
             status_code=409,
@@ -3066,6 +3323,18 @@ async def _dl_skill(coro: Any) -> Any:
 
 
 def _skill_markdown(name: str, description: str, content: str) -> str:
+    for value, field in (
+        (name, "skill name"),
+        (description, "skill description"),
+        (content, "content"),
+    ):
+        try:
+            validate_unicode_scalar(value, field)
+        except PromptValidationError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "validation_error", "message": str(exc)},
+            ) from exc
     if "\n" in description or "\r" in description:
         raise HTTPException(
             status_code=400, detail="Skill description must be a single line"
@@ -3194,28 +3463,29 @@ async def create_user_skill(
     data_layer = _skills_data_layer()
     user_id = await _get_user_id(current_user, data_layer)
     skill = _validate_skill(payload.name, payload.description, payload.content)
-    existing = await _dl_skill(data_layer.list_skills(user_id))
-    if len(existing) >= MAX_SKILLS:
-        raise HTTPException(
-            status_code=400, detail=f"At most {MAX_SKILLS} skills per user"
-        )
-    _check_skill_name(skill.name, existing)
+    async with _mutation_lock(f"skill-library:{user_id}", "Skill library"):
+        existing = await _dl_skill(data_layer.list_skills(user_id))
+        if len(existing) >= MAX_SKILLS:
+            raise HTTPException(
+                status_code=400, detail=f"At most {MAX_SKILLS} skills per user"
+            )
+        _check_skill_name(skill.name, existing)
 
-    import uuid as _uuid
+        import uuid as _uuid
 
-    created = await _dl_skill(
-        data_layer.create_skill(
-            _skill_row(
-                str(_uuid.uuid4()),
-                user_id,
-                skill.name,
-                skill.description,
-                skill.body,
-                payload.enabled,
+        created = await _dl_skill(
+            data_layer.create_skill(
+                _skill_row(
+                    str(_uuid.uuid4()),
+                    user_id,
+                    skill.name,
+                    skill.description,
+                    skill.body,
+                    payload.enabled,
+                )
             )
         )
-    )
-    return JSONResponse(status_code=201, content=created)
+        return JSONResponse(status_code=201, content=created)
 
 
 @skills_router.post("/project/skills/import")
@@ -3227,6 +3497,14 @@ async def import_user_skill(
     """Import exported Markdown as a disabled, provenance-tagged skill."""
     data_layer = _skills_data_layer()
     user_id = await _get_user_id(current_user, data_layer)
+    try:
+        validate_unicode_scalar(payload.markdown, "skill Markdown")
+        validate_unicode_scalar(payload.imported_from, "imported_from")
+    except PromptValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
     if "\n" in payload.imported_from or "\r" in payload.imported_from:
         raise HTTPException(
             status_code=400, detail="imported_from must be a single line"
@@ -3236,31 +3514,32 @@ async def import_user_skill(
     except SkillError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    existing = await _dl_skill(data_layer.list_skills(user_id))
-    if len(existing) >= MAX_SKILLS:
-        raise HTTPException(
-            status_code=400, detail=f"At most {MAX_SKILLS} skills per user"
-        )
-    _check_skill_name(skill.name, existing)
+    async with _mutation_lock(f"skill-library:{user_id}", "Skill library"):
+        existing = await _dl_skill(data_layer.list_skills(user_id))
+        if len(existing) >= MAX_SKILLS:
+            raise HTTPException(
+                status_code=400, detail=f"At most {MAX_SKILLS} skills per user"
+            )
+        _check_skill_name(skill.name, existing)
 
-    import uuid as _uuid
+        import uuid as _uuid
 
-    created = await _dl_skill(
-        data_layer.create_skill(
-            _skill_row(
-                str(_uuid.uuid4()),
-                user_id,
-                skill.name,
-                skill.description,
-                skill.body,
-                False,
-                imported_from=payload.imported_from,
-                imported_at=utc_now(),
-                content_hash=skill_content_hash(skill_to_markdown(skill)),
+        created = await _dl_skill(
+            data_layer.create_skill(
+                _skill_row(
+                    str(_uuid.uuid4()),
+                    user_id,
+                    skill.name,
+                    skill.description,
+                    skill.body,
+                    False,
+                    imported_from=payload.imported_from,
+                    imported_at=utc_now(),
+                    content_hash=skill_content_hash(skill_to_markdown(skill)),
+                )
             )
         )
-    )
-    return JSONResponse(status_code=201, content=created)
+        return JSONResponse(status_code=201, content=created)
 
 
 @skills_router.get("/project/skills/updates")
@@ -3330,58 +3609,59 @@ async def update_user_skill(
     Local, self-authored skills keep their enabled state across edits.
     """
     data_layer = _skills_data_layer()
-    user_id = await _get_user_id(current_user, data_layer)
-    existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
-    if not existing:
-        raise HTTPException(status_code=404, detail="Skill not found")
+    async with _mutation_lock(f"skill-mutation:{skill_id}", "Skill"):
+        user_id = await _get_user_id(current_user, data_layer)
+        existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+        if not existing:
+            raise HTTPException(status_code=404, detail="Skill not found")
 
-    updated = dict(existing)
-    if payload.name is not None:
-        updated["title"] = payload.name
-    if payload.description is not None:
-        updated["description"] = payload.description
-    if payload.content is not None:
-        updated["content"] = payload.content
-    skill = _validate_skill(
-        updated["title"], updated.get("description", ""), updated["content"]
-    )
-    if skill.name != existing["title"]:
-        all_skills = await _dl_skill(data_layer.list_skills(user_id))
-        _check_skill_name(skill.name, all_skills, skill_id)
-    updated["title"] = skill.name
-    updated["description"] = skill.description
-    updated["content"] = skill.body
-
-    content_changed = (
-        skill.name != existing["title"]
-        or skill.description != existing.get("description", "")
-        or skill.body != existing["content"]
-    )
-    imported_or_shared = bool(
-        existing.get("sourcePromptId") or existing.get("importedFrom")
-    )
-    if content_changed:
-        # A local, self-authored skill stays enabled across edits. Imported and
-        # linked skills must be reviewed again because their body is untrusted.
-        updated["enabled"] = (
-            False if imported_or_shared else existing.get("enabled", False)
+        updated = dict(existing)
+        if payload.name is not None:
+            updated["title"] = payload.name
+        if payload.description is not None:
+            updated["description"] = payload.description
+        if payload.content is not None:
+            updated["content"] = payload.content
+        skill = _validate_skill(
+            updated["title"], updated.get("description", ""), updated["content"]
         )
-    elif payload.enabled is True:
-        if imported_or_shared:
-            expected_hash = await _skill_review_hash(data_layer, existing)
-            if not expected_hash or payload.reviewedContentHash != expected_hash:
-                raise _prompt_error(
-                    409,
-                    "content_changed",
-                    "Review the current skill version before enabling it",
-                )
-        updated["enabled"] = True
-    elif payload.enabled is False:
-        updated["enabled"] = False
-    updated["updatedAt"] = utc_now()
+        if skill.name != existing["title"]:
+            all_skills = await _dl_skill(data_layer.list_skills(user_id))
+            _check_skill_name(skill.name, all_skills, skill_id)
+        updated["title"] = skill.name
+        updated["description"] = skill.description
+        updated["content"] = skill.body
 
-    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
-    return JSONResponse(content=result)
+        content_changed = (
+            skill.name != existing["title"]
+            or skill.description != existing.get("description", "")
+            or skill.body != existing["content"]
+        )
+        imported_or_shared = bool(
+            existing.get("sourcePromptId") or existing.get("importedFrom")
+        )
+        if content_changed:
+            # A local, self-authored skill stays enabled across edits. Imported and
+            # linked skills must be reviewed again because their body is untrusted.
+            updated["enabled"] = (
+                False if imported_or_shared else existing.get("enabled", False)
+            )
+        elif payload.enabled is True:
+            if imported_or_shared:
+                expected_hash = await _skill_review_hash(data_layer, existing)
+                if not expected_hash or payload.reviewedContentHash != expected_hash:
+                    raise _prompt_error(
+                        409,
+                        "content_changed",
+                        "Review the current skill version before enabling it",
+                    )
+            updated["enabled"] = True
+        elif payload.enabled is False:
+            updated["enabled"] = False
+        updated["updatedAt"] = utc_now()
+
+        result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+        return JSONResponse(content=result)
 
 
 @skills_router.delete("/project/skills/{skill_id}")
@@ -3392,14 +3672,12 @@ async def delete_user_skill(
 ):
     """Delete one of the current user's skills."""
     data_layer = _skills_data_layer()
-    user_id = await _get_user_id(current_user, data_layer)
-    deleted = await _dl_skill(data_layer.delete_skill(skill_id, user_id))
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Skill not found")
-    return JSONResponse(content={"success": True})
-
-
-_SHARED_SKILL_AUTHOR_LABEL = "Chainlit NG user"
+    async with _mutation_lock(f"skill-mutation:{skill_id}", "Skill"):
+        user_id = await _get_user_id(current_user, data_layer)
+        deleted = await _dl_skill(data_layer.delete_skill(skill_id, user_id))
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        return JSONResponse(content={"success": True})
 
 
 @skills_router.post("/project/skills/{skill_id}/share")
@@ -3413,19 +3691,31 @@ async def share_user_skill(
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
     _require_authenticated_sharing(current_user)
-    user_id = await _get_user_id(current_user, data_layer)
-    existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
-    if not existing:
-        raise HTTPException(status_code=404, detail="Skill not found")
+    async with _mutation_lock(f"skill-mutation:{skill_id}", "Skill"):
+        user_id = await _get_user_id(current_user, data_layer)
+        existing = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+        if not existing:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        if payload.isShared:
+            _validate_skill(
+                existing["title"],
+                existing.get("description", ""),
+                existing["content"],
+            )
 
-    updated = dict(existing)
-    updated["isShared"] = payload.isShared
-    if payload.isShared and not existing.get("isShared"):
-        updated["sharedAt"] = utc_now()
-        updated["sharedVersion"] = int(existing.get("version") or 1)
-    updated["updatedAt"] = utc_now()
-    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
-    return JSONResponse(content={"skill": result, "shareUrl": f"/skill/{skill_id}"})
+        updated = dict(existing)
+        updated["isShared"] = payload.isShared
+        updated["authorLabel"] = (
+            await resolve_shared_author_label(current_user)
+            if payload.isShared
+            else None
+        )
+        if payload.isShared and not existing.get("isShared"):
+            updated["sharedAt"] = utc_now()
+            updated["sharedVersion"] = int(existing.get("version") or 1)
+        updated["updatedAt"] = utc_now()
+        result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+        return JSONResponse(content={"skill": result, "shareUrl": f"/skill/{skill_id}"})
 
 
 @skills_router.get("/project/skill/share/{skill_id}")
@@ -3452,7 +3742,7 @@ async def get_shared_skill(
             "contentHash": head["contentHash"] if head else skill.get("contentHash"),
             "updatedAt": skill["updatedAt"],
             "sharedAt": skill.get("sharedAt"),
-            "authorLabel": _SHARED_SKILL_AUTHOR_LABEL,
+            "authorLabel": skill.get("authorLabel", "Chainlit NG user"),
         }
     )
 
@@ -3509,62 +3799,76 @@ async def add_shared_skill(
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
     _require_authenticated_sharing(current_user)
-    source = await _shared_skill_or_404(data_layer, skill_id)
     user_id = await _get_user_id(current_user, data_layer)
-
-    existing = await _dl_skill(data_layer.list_skills(user_id))
-    if any(item.get("sourcePromptId") == skill_id for item in existing):
-        raise _prompt_error(
-            409, "already_added", "This shared skill is already in your library"
-        )
-
-    versions = await _skill_versions(data_layer, skill_id)
-    visible = public_versions(source, versions)
-    target: Optional[Dict[str, Any]] = None
-    requested_version = payload.versionId if payload else None
-    if requested_version:
-        if requested_version not in {version["id"] for version in visible}:
-            raise HTTPException(status_code=404, detail="Skill version not found")
-        target = await _dl_skill(
-            data_layer.get_prompt_version(skill_id, requested_version)
-        )
-        if not target:
-            raise HTTPException(status_code=404, detail="Skill version not found")
-    else:
-        head = latest_head(visible)
-        if head:
-            target = await _dl_skill(
-                data_layer.get_prompt_version(skill_id, head["id"])
+    async with _mutation_locks(
+        [
+            f"skill-library:{user_id}",
+            f"skill-copy:{user_id}:{skill_id}",
+            f"skill-mutation:{skill_id}",
+        ],
+        "Skill",
+    ):
+        source = await _shared_skill_or_404(data_layer, skill_id)
+        existing = await _dl_skill(data_layer.list_skills(user_id))
+        if any(item.get("sourcePromptId") == skill_id for item in existing):
+            raise _prompt_error(
+                409, "already_added", "This shared skill is already in your library"
             )
-    if target is None:
-        raise _prompt_error(
-            409, "source_unavailable", "The shared skill has no versions"
+        if len(existing) >= MAX_SKILLS:
+            raise HTTPException(
+                status_code=400, detail=f"At most {MAX_SKILLS} skills per user"
+            )
+
+        versions = await _skill_versions(data_layer, skill_id)
+        visible = public_versions(source, versions)
+        target: Optional[Dict[str, Any]] = None
+        requested_version = payload.versionId if payload else None
+        if requested_version:
+            if requested_version not in {version["id"] for version in visible}:
+                raise HTTPException(status_code=404, detail="Skill version not found")
+            target = await _dl_skill(
+                data_layer.get_prompt_version(skill_id, requested_version)
+            )
+            if not target:
+                raise HTTPException(status_code=404, detail="Skill version not found")
+        else:
+            head = latest_head(visible)
+            if head:
+                target = await _dl_skill(
+                    data_layer.get_prompt_version(skill_id, head["id"])
+                )
+        if target is None:
+            raise _prompt_error(
+                409, "source_unavailable", "The shared skill has no versions"
+            )
+
+        _validate_skill(
+            target["title"], target.get("description") or "", target["content"]
         )
+        _check_skill_name(target["title"], existing, code="name_taken")
 
-    _check_skill_name(target["title"], existing, code="name_taken")
+        import uuid as _uuid
 
-    import uuid as _uuid
-
-    now = utc_now()
-    copy = _skill_row(
-        str(_uuid.uuid4()),
-        user_id,
-        target["title"],
-        target.get("description") or "",
-        target["content"],
-        False,
-        content_hash=target["contentHash"],
-        source_prompt_id=skill_id,
-        pinned_version_id=target["id"],
-        pinned_content_hash=target["contentHash"],
-        pinned_at=now,
-        update_seen_version_id=target["id"],
-    )
-    copy["pinnedVersion"] = target["version"]
-    copy["createdAt"] = now
-    copy["updatedAt"] = now
-    created = await _dl_skill(data_layer.create_skill(copy))
-    return JSONResponse(content=created)
+        now = utc_now()
+        copy = _skill_row(
+            str(_uuid.uuid4()),
+            user_id,
+            target["title"],
+            target.get("description") or "",
+            target["content"],
+            False,
+            content_hash=target["contentHash"],
+            source_prompt_id=skill_id,
+            pinned_version_id=target["id"],
+            pinned_content_hash=target["contentHash"],
+            pinned_at=now,
+            update_seen_version_id=target["id"],
+        )
+        copy["pinnedVersion"] = target["version"]
+        copy["createdAt"] = now
+        copy["updatedAt"] = now
+        created = await _dl_skill(data_layer.create_skill(copy))
+        return JSONResponse(content=created)
 
 
 @skills_router.post("/project/skills/{skill_id}/updates/seen")
@@ -3577,29 +3881,32 @@ async def mark_skill_update_seen(
     """Acknowledge a source version; the stored notice never moves down."""
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
-    user_id = await _get_user_id(current_user, data_layer)
-    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
-    if not skill.get("sourcePromptId"):
-        raise _prompt_error(409, "not_pinned", "This skill is not pinned to a source")
-    source = await _dl_skill(data_layer.get_shared_skill(skill["sourcePromptId"]))
-    if not source:
-        raise _prompt_error(
-            409, "source_unavailable", "The source skill is no longer available"
-        )
+    async with _mutation_lock(f"skill-mutation:{skill_id}", "Skill"):
+        user_id = await _get_user_id(current_user, data_layer)
+        skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        if not skill.get("sourcePromptId"):
+            raise _prompt_error(
+                409, "not_pinned", "This skill is not pinned to a source"
+            )
+        source = await _dl_skill(data_layer.get_shared_skill(skill["sourcePromptId"]))
+        if not source:
+            raise _prompt_error(
+                409, "source_unavailable", "The source skill is no longer available"
+            )
 
-    clamped = await _dl_skill(
-        data_layer.ack_skill_update(user_id, skill_id, payload.version)
-    )
-    updated = await _dl_skill(data_layer.get_skill(skill_id, user_id))
-    return JSONResponse(
-        content={
-            "skillId": skill_id,
-            "version": clamped,
-            "updateSeenVersionId": (updated or {}).get("updateSeenVersionId"),
-        }
-    )
+        clamped = await _dl_skill(
+            data_layer.ack_skill_update(user_id, skill_id, payload.version)
+        )
+        updated = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+        return JSONResponse(
+            content={
+                "skillId": skill_id,
+                "version": clamped,
+                "updateSeenVersionId": (updated or {}).get("updateSeenVersionId"),
+            }
+        )
 
 
 @skills_router.post("/project/skills/{skill_id}/update-from-source")
@@ -3613,85 +3920,85 @@ async def update_skill_from_source(
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
     user_id = await _get_user_id(current_user, data_layer)
-    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    source_id = skill.get("sourcePromptId")
-    if not source_id:
-        raise _prompt_error(409, "not_pinned", "This skill is not pinned to a source")
-    source = await _dl_skill(data_layer.get_shared_skill(source_id))
-    if not source:
-        raise _prompt_error(
-            409, "source_unavailable", "The source skill is no longer available"
-        )
-    source_versions = await _skill_versions(data_layer, source_id)
-    visible = public_versions(source, source_versions)
-    if not visible:
-        raise _prompt_error(
-            409, "source_unavailable", "The source skill has no versions"
-        )
-
-    target: Optional[Dict[str, Any]] = None
-    if payload.versionId:
-        if payload.versionId not in {version["id"] for version in visible}:
-            raise _prompt_error(
-                409, "version_conflict", "That version does not belong to the source"
-            )
-        target = await _dl_skill(
-            data_layer.get_prompt_version(source_id, payload.versionId)
-        )
-        if not target or target.get("kind") != "skill":
-            raise _prompt_error(
-                409, "version_conflict", "That version does not belong to the source"
-            )
-    else:
-        head = latest_head(visible)
-        if head:
-            target = await _dl_skill(
-                data_layer.get_prompt_version(source_id, head["id"])
-            )
-    if target is None:
-        raise _prompt_error(
-            409, "source_unavailable", "The source skill has no versions"
-        )
-
-    local_versions = await _skill_versions(data_layer, skill_id)
-    local_head = latest_head(local_versions)
-    local_hash = local_head["contentHash"] if local_head else None
-
-    if (
-        payload.expectedLocalHash is not None
-        and payload.expectedLocalHash != local_hash
+    async with _locked_pinned_source(data_layer, user_id, skill_id, skill=True) as (
+        skill,
+        source,
     ):
-        raise _prompt_error(
-            409,
-            "preview_stale",
-            "The skill changed after the preview; review the update again",
-        )
-    pinned_hash = skill.get("pinnedContentHash")
-    if pinned_hash and local_hash != pinned_hash and not payload.confirm:
-        raise _prompt_error(
-            409,
-            "local_changes",
-            "This skill has local edits; confirm to replace them",
-        )
+        source_id = source["id"]
+        source_versions = await _skill_versions(data_layer, source_id)
+        visible = public_versions(source, source_versions)
+        if not visible:
+            raise _prompt_error(
+                409, "source_unavailable", "The source skill has no versions"
+            )
 
-    now = utc_now()
-    updated = dict(skill)
-    updated["title"] = target["title"]
-    updated["description"] = target.get("description") or ""
-    updated["content"] = target["content"]
-    updated["enabled"] = False
-    updated["isShared"] = False
-    updated["pinnedVersionId"] = target["id"]
-    updated["pinnedVersion"] = target["version"]
-    updated["pinnedContentHash"] = target["contentHash"]
-    updated["pinnedAt"] = now
-    updated["updateSeenVersionId"] = target["id"]
-    updated["updatedAt"] = now
-    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
-    return JSONResponse(content=result)
+        target: Optional[Dict[str, Any]] = None
+        if payload.versionId:
+            if payload.versionId not in {version["id"] for version in visible}:
+                raise _prompt_error(
+                    409,
+                    "version_conflict",
+                    "That version does not belong to the source",
+                )
+            target = await _dl_skill(
+                data_layer.get_prompt_version(source_id, payload.versionId)
+            )
+            if not target or target.get("kind") != "skill":
+                raise _prompt_error(
+                    409,
+                    "version_conflict",
+                    "That version does not belong to the source",
+                )
+        else:
+            head = latest_head(visible)
+            if head:
+                target = await _dl_skill(
+                    data_layer.get_prompt_version(source_id, head["id"])
+                )
+        if target is None:
+            raise _prompt_error(
+                409, "source_unavailable", "The source skill has no versions"
+            )
+
+        _validate_skill(
+            target["title"], target.get("description") or "", target["content"]
+        )
+        local_versions = await _skill_versions(data_layer, skill_id)
+        local_head = latest_head(local_versions)
+        local_hash = local_head["contentHash"] if local_head else None
+
+        if (
+            payload.expectedLocalHash is not None
+            and payload.expectedLocalHash != local_hash
+        ):
+            raise _prompt_error(
+                409,
+                "preview_stale",
+                "The skill changed after the preview; review the update again",
+            )
+        pinned_hash = skill.get("pinnedContentHash")
+        if pinned_hash and local_hash != pinned_hash and not payload.confirm:
+            raise _prompt_error(
+                409,
+                "local_changes",
+                "This skill has local edits; confirm to replace them",
+            )
+
+        now = utc_now()
+        updated = dict(skill)
+        updated["title"] = target["title"]
+        updated["description"] = target.get("description") or ""
+        updated["content"] = target["content"]
+        updated["enabled"] = False
+        updated["isShared"] = False
+        updated["pinnedVersionId"] = target["id"]
+        updated["pinnedVersion"] = target["version"]
+        updated["pinnedContentHash"] = target["contentHash"]
+        updated["pinnedAt"] = now
+        updated["updateSeenVersionId"] = target["id"]
+        updated["updatedAt"] = now
+        result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+        return JSONResponse(content=result)
 
 
 @skills_router.post("/project/skills/{skill_id}/detach")
@@ -3703,28 +4010,31 @@ async def detach_skill(
     """Remove a skill's source pin while keeping the skill and its history."""
     data_layer = _skills_data_layer()
     _require_skill_sharing(data_layer)
-    user_id = await _get_user_id(current_user, data_layer)
-    skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
-    if not skill.get("sourcePromptId"):
-        raise _prompt_error(409, "not_pinned", "This skill is not pinned to a source")
-    if not skill.get("enabled"):
-        raise _prompt_error(
-            409,
-            "review_required",
-            "Review and enable this skill before detaching it",
-        )
+    async with _mutation_lock(f"skill-mutation:{skill_id}", "Skill"):
+        user_id = await _get_user_id(current_user, data_layer)
+        skill = await _dl_skill(data_layer.get_skill(skill_id, user_id))
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        if not skill.get("sourcePromptId"):
+            raise _prompt_error(
+                409, "not_pinned", "This skill is not pinned to a source"
+            )
+        if not skill.get("enabled"):
+            raise _prompt_error(
+                409,
+                "review_required",
+                "Review and enable this skill before detaching it",
+            )
 
-    updated = dict(skill)
-    updated["sourcePromptId"] = None
-    updated["pinnedVersionId"] = None
-    updated["pinnedContentHash"] = None
-    updated["pinnedAt"] = None
-    updated["updateSeenVersionId"] = None
-    updated["updatedAt"] = utc_now()
-    result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
-    return JSONResponse(content=result)
+        updated = dict(skill)
+        updated["sourcePromptId"] = None
+        updated["pinnedVersionId"] = None
+        updated["pinnedContentHash"] = None
+        updated["pinnedAt"] = None
+        updated["updateSeenVersionId"] = None
+        updated["updatedAt"] = utc_now()
+        result = await _dl_skill(data_layer.update_skill(updated))  # type: ignore[arg-type]
+        return JSONResponse(content=result)
 
 
 @skills_router.get("/project/skills/{skill_id}/versions")
@@ -3835,15 +4145,11 @@ async def update_thread_element(
     except (KeyError, TypeError, ValidationError) as exc:
         raise HTTPException(status_code=422, detail="Invalid element payload") from exc
 
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="You are not authorized to update elements for this session",
-            )
+    _require_session_principal(
+        session,
+        current_user,
+        detail="You are not authorized to update elements for this session",
+    )
 
     # The session thread is server-side state; the body's threadId is not
     # trusted for authorization.
@@ -3878,15 +4184,11 @@ async def delete_thread_element(
     except (KeyError, TypeError, ValidationError) as exc:
         raise HTTPException(status_code=422, detail="Invalid element payload") from exc
 
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="You are not authorized to remove elements for this session",
-            )
+    _require_session_principal(
+        session,
+        current_user,
+        detail="You are not authorized to remove elements for this session",
+    )
 
     # The session thread is server-side state; the body's threadId is not
     # trusted for authorization.
@@ -4058,6 +4360,20 @@ async def list_thread_grants(
     return _no_store(JSONResponse(content=[asdict(grant) for grant in grants]))
 
 
+@asynccontextmanager
+async def _thread_grant_mutation_lock(thread_id: str, data_layer: BaseDataLayer):
+    """Order grant changes against each other and clear-all-threads deletion."""
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(
+            _mutation_lock(f"thread-grants:{thread_id}", "Thread grants")
+        )
+        if _supports_delete_all_threads(data_layer):
+            await stack.enter_async_context(
+                _mutation_lock("thread-grants:bulk-delete", "Thread grants")
+            )
+        yield
+
+
 @router.post("/project/thread/{thread_id}/grants")
 async def create_thread_grant(
     request: Request,
@@ -4072,42 +4388,44 @@ async def create_thread_grant(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     _require_same_origin(request)
-    await _require_owner_or_404(thread_id, current_user)
 
-    if payload.grantee == current_user.identifier:
-        raise HTTPException(
-            status_code=400, detail="Cannot grant a thread to its owner"
+    async with _thread_grant_mutation_lock(thread_id, data_layer):
+        await _require_owner_or_404(thread_id, current_user)
+
+        if payload.grantee == current_user.identifier:
+            raise HTTPException(
+                status_code=400, detail="Cannot grant a thread to its owner"
+            )
+
+        # Quiet lookup: the grant path must not log the grantee identifier.
+        grantee = await data_layer.get_user_for_acl(payload.grantee)
+        if not grantee or not getattr(grantee, "createdAt", None):
+            # Same body as a created grant: no one-request existence oracle.
+            return _no_store(JSONResponse(content={"success": True}))
+
+        current_user_id = getattr(current_user, "id", None)
+        if current_user_id is not None and grantee.id == current_user_id:
+            raise HTTPException(
+                status_code=400, detail="Cannot grant a thread to its owner"
+            )
+
+        grants = await data_layer.list_thread_grants(thread_id)
+        if any(grant.grantee_user_id == grantee.id for grant in grants):
+            return _no_store(JSONResponse(content={"success": True}))
+        if len(grants) >= MAX_THREAD_GRANTS_PER_THREAD:
+            raise HTTPException(status_code=409, detail="Thread grant limit reached")
+
+        await data_layer.create_thread_grant(
+            ThreadGrant(
+                thread_id=thread_id,
+                grantee_user_id=grantee.id,
+                grantee_user_created_at=grantee.createdAt,
+                grantee_identifier=grantee.identifier,
+                granted_by_user_id=current_user_id or current_user.identifier,
+                granted_at=utc_now(),
+            )
         )
-
-    # Quiet lookup: the grant path must not log the grantee identifier.
-    grantee = await data_layer.get_user_for_acl(payload.grantee)
-    if not grantee or not getattr(grantee, "createdAt", None):
-        # Same body as a created grant: no one-request existence oracle.
         return _no_store(JSONResponse(content={"success": True}))
-
-    current_user_id = getattr(current_user, "id", None)
-    if current_user_id is not None and grantee.id == current_user_id:
-        raise HTTPException(
-            status_code=400, detail="Cannot grant a thread to its owner"
-        )
-
-    grants = await data_layer.list_thread_grants(thread_id)
-    if any(grant.grantee_user_id == grantee.id for grant in grants):
-        return _no_store(JSONResponse(content={"success": True}))
-    if len(grants) >= MAX_THREAD_GRANTS_PER_THREAD:
-        raise HTTPException(status_code=409, detail="Thread grant limit reached")
-
-    await data_layer.create_thread_grant(
-        ThreadGrant(
-            thread_id=thread_id,
-            grantee_user_id=grantee.id,
-            grantee_user_created_at=grantee.createdAt,
-            grantee_identifier=grantee.identifier,
-            granted_by_user_id=current_user_id or current_user.identifier,
-            granted_at=utc_now(),
-        )
-    )
-    return _no_store(JSONResponse(content={"success": True}))
 
 
 @router.delete("/project/thread/{thread_id}/grants/{grantee_user_id}")
@@ -4124,10 +4442,10 @@ async def delete_thread_grant(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     _require_same_origin(request)
-    await _require_owner_or_404(thread_id, current_user)
-
-    await data_layer.delete_thread_grant(thread_id, grantee_user_id)
-    return _no_store(JSONResponse(content={"success": True}))
+    async with _thread_grant_mutation_lock(thread_id, data_layer):
+        await _require_owner_or_404(thread_id, current_user)
+        await data_layer.delete_thread_grant(thread_id, grantee_user_id)
+        return _no_store(JSONResponse(content={"success": True}))
 
 
 @router.delete("/project/threads")
@@ -4146,32 +4464,33 @@ async def delete_user_threads(current_user: UserParam):
     user_id = await _get_user_id(current_user, data_layer)
     start = time.perf_counter()
 
-    pending_thread_ids = managed_thread_ids_for(
-        identifier
-    ) | await shared_managed_thread_ids(identifier)
-    for thread_id in pending_thread_ids:
-        await supersede_thread_approvals(thread_id)
-        mark_thread_deleted(thread_id)
-    try:
-        deleted = await data_layer.delete_all_threads(user_id)
-    except NotImplementedError as exc:
+    async with _mutation_lock("thread-grants:bulk-delete", "Thread grants"):
+        pending_thread_ids = managed_thread_ids_for(
+            identifier
+        ) | await shared_managed_thread_ids(identifier)
         for thread_id in pending_thread_ids:
-            clear_thread_deleted(thread_id)
-        raise HTTPException(
-            status_code=501,
-            detail=str(exc)
-            or "Bulk thread deletion is not supported by this data layer",
-        ) from exc
-    except Exception:
-        for thread_id in pending_thread_ids:
-            clear_thread_deleted(thread_id)
-        raise
+            await supersede_thread_approvals(thread_id)
+            mark_thread_deleted(thread_id)
+        try:
+            deleted = await data_layer.delete_all_threads(user_id)
+        except NotImplementedError as exc:
+            for thread_id in pending_thread_ids:
+                clear_thread_deleted(thread_id)
+            raise HTTPException(
+                status_code=501,
+                detail=str(exc)
+                or "Bulk thread deletion is not supported by this data layer",
+            ) from exc
+        except Exception:
+            for thread_id in pending_thread_ids:
+                clear_thread_deleted(thread_id)
+            raise
 
-    duration_ms = round((time.perf_counter() - start) * 1000, 2)
-    logger.info(
-        "Deleted %s threads for user %s in %sms", deleted, identifier, duration_ms
-    )
-    return JSONResponse(content={"success": True, "deleted": deleted})
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        logger.info(
+            "Deleted %s threads for user %s in %sms", deleted, identifier, duration_ms
+        )
+        return JSONResponse(content={"success": True, "deleted": deleted})
 
 
 def _is_json_same_origin(request: Request) -> bool:
@@ -4225,8 +4544,12 @@ async def decide_approval(
     session = WebsocketSession.get_by_id(payload.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if not session.user or session.user.identifier != current_user.identifier:
-        raise HTTPException(status_code=403, detail="Approval author required")
+    _require_session_principal(
+        session,
+        current_user,
+        status_code=403,
+        detail="Approval author required",
+    )
     if session.unavailable_chat_profile:
         raise HTTPException(
             status_code=409,
@@ -4305,8 +4628,12 @@ async def answer_question(
     session = WebsocketSession.get_by_id(payload.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if not session.user or session.user.identifier != current_user.identifier:
-        raise HTTPException(status_code=403, detail="Question author required")
+    _require_session_principal(
+        session,
+        current_user,
+        status_code=403,
+        detail="Question author required",
+    )
     if session.unavailable_chat_profile:
         raise HTTPException(
             status_code=409,
@@ -4360,15 +4687,11 @@ async def call_action(
     context = init_ws_context(session)
     config: ChainlitConfig = session.get_config()
 
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="You are not authorized to upload files for this session",
-            )
+    _require_session_principal(
+        session,
+        current_user,
+        detail="You are not authorized to upload files for this session",
+    )
 
     if session.unavailable_chat_profile:
         raise HTTPException(
@@ -4456,6 +4779,41 @@ async def connect_mcp(
     payload: ConnectMCPRequest,
     current_user: UserParam,
 ):
+    session = WebsocketSession.get_by_id(payload.sessionId)
+    session_config = session.get_config()
+    _require_session_principal(session, current_user, detail="Unauthorized")
+    if not session_config.features.mcp.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="This app does not support MCP.",
+        )
+    if _mcp_capacity_reached(session, payload.name):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many MCP connections for this session",
+        )
+
+    reservations = session.mcp_reservations
+    reservations[payload.name] = reservations.get(payload.name, 0) + 1
+    try:
+        return await _connect_mcp(
+            request, payload, current_user, session, session_config
+        )
+    finally:
+        remaining = reservations.get(payload.name, 0) - 1
+        if remaining > 0:
+            reservations[payload.name] = remaining
+        else:
+            reservations.pop(payload.name, None)
+
+
+async def _connect_mcp(
+    request: Request,
+    payload: ConnectMCPRequest,
+    current_user: UserParam,
+    session: WebsocketSession,
+    config: ChainlitConfig,
+):
     import asyncio
     import shlex
 
@@ -4486,34 +4844,9 @@ async def connect_mcp(
         validate_mcp_headers,
         validate_mcp_url,
     )
-    from chainlit.session import McpSession, WebsocketSession, stop_mcp_task
+    from chainlit.session import McpSession, stop_mcp_task
 
-    session = WebsocketSession.get_by_id(payload.sessionId)
-    context = init_ws_context(session)
-    config: ChainlitConfig = session.get_config()
-
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(
-                status_code=401,
-            )
-
-    mcp_enabled = config.features.mcp.enabled
-    if not mcp_enabled:
-        raise HTTPException(
-            status_code=400,
-            detail="This app does not support MCP.",
-        )
-
-    if _mcp_capacity_reached(session, payload.name):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many MCP connections for this session",
-        )
-
+    init_ws_context(session)
     # Reject user-provided connections that try to claim a configured server's
     # name — must run BEFORE any eviction, otherwise a rejected attempt would
     # still have killed the legitimate session. Compared case-insensitively
@@ -4729,7 +5062,7 @@ async def connect_mcp(
 
         async def _emit_oauth_event(event: str, data: dict) -> None:
             try:
-                await session.emit(event, data)
+                await session.emit(event, data)  # type: ignore[misc]
             except BaseException:
                 logger.debug(
                     "Error emitting %s for MCP OAuth connection %r",
@@ -5321,6 +5654,10 @@ async def connect_mcp(
         await asyncio.wait_for(ready_event.wait(), timeout=connect_timeout)
     except asyncio.TimeoutError:
         pass
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
     if "error" not in result_holder and "client" not in result_holder:
         result_holder["error"] = asyncio.TimeoutError(
             f"Timed out after {connect_timeout:.0f}s waiting for the MCP "
@@ -5359,6 +5696,10 @@ async def connect_mcp(
     if config.code.on_mcp_connect:
         try:
             await config.code.on_mcp_connect(mcp_connection, mcp_client_session)
+        except asyncio.CancelledError:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
         except Exception as e:
             # Callback failed — tear down the connection.
             await stop_mcp_task(task, stop_event, payload.name)
@@ -5385,11 +5726,11 @@ async def connect_mcp(
         task=task,
         stop_event=stop_event,
     )
-    old_mcp = session.swap_mcp_session(mcp_connection.name, mcp_session_obj)
-    if old_mcp is not None:
+    displaced_mcp = session.swap_mcp_session(mcp_connection.name, mcp_session_obj)
+    if displaced_mcp is not None:
         if on_mcp_disconnect := config.code.on_mcp_disconnect:
             try:
-                await on_mcp_disconnect(payload.name, old_mcp.client)
+                await on_mcp_disconnect(payload.name, displaced_mcp.client)
             except Exception:
                 logger.debug(
                     "Error in on_mcp_disconnect callback for %s",
@@ -5397,7 +5738,7 @@ async def connect_mcp(
                     exc_info=True,
                 )
         try:
-            await old_mcp.close()
+            await displaced_mcp.close()
         except Exception:
             logger.debug(
                 "Error closing old MCP session %s", payload.name, exc_info=True
@@ -5440,16 +5781,9 @@ async def disconnect_mcp(
     from chainlit.session import WebsocketSession
 
     session = WebsocketSession.get_by_id(payload.sessionId)
-    context = init_ws_context(session)
+    init_ws_context(session)
 
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(
-                status_code=401,
-            )
+    _require_session_principal(session, current_user, detail="Unauthorized")
 
     # While a flow is still signing in there is no McpSession yet; the pending
     # entry carries the key that was used for the store.
@@ -5517,14 +5851,9 @@ async def invoke_mcp_prompt(
     )
 
     session = _get_ws_session(payload.sessionId)
-    context = init_ws_context(session)
+    init_ws_context(session)
 
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(status_code=401)
+    _require_session_principal(session, current_user, detail="Unauthorized")
 
     attached = session.mcp_sessions.get(payload.name)
     if attached is None:
@@ -5567,14 +5896,9 @@ async def read_mcp_resource(
     from chainlit.message import Message
 
     session = _get_ws_session(payload.sessionId)
-    context = init_ws_context(session)
+    init_ws_context(session)
 
-    if current_user:
-        if (
-            not context.session.user
-            or context.session.user.identifier != current_user.identifier
-        ):
-            raise HTTPException(status_code=401)
+    _require_session_principal(session, current_user, detail="Unauthorized")
 
     attached = session.mcp_sessions.get(payload.name)
     if attached is None:
@@ -5636,12 +5960,11 @@ async def upload_file(
             detail="Session not found",
         )
 
-    if current_user:
-        if not session.user or session.user.identifier != current_user.identifier:
-            raise HTTPException(
-                status_code=401,
-                detail="You are not authorized to upload files for this session",
-            )
+    _require_session_principal(
+        session,
+        current_user,
+        detail="You are not authorized to upload files for this session",
+    )
 
     session.files_dir.mkdir(exist_ok=True)
 
@@ -5716,6 +6039,8 @@ async def upload_file(
 # Bodies above this size are streamed to disk instead of being read into one
 # bytes object. Small uploads keep the existing in-memory path.
 _UPLOAD_STREAM_THRESHOLD = 8 * 1024 * 1024
+_DEFAULT_MAX_UPLOAD_FILES = 20
+_DEFAULT_MAX_UPLOAD_SIZE_MB = 500
 
 
 def get_max_upload_files(spec: Optional[AskFileSpec]) -> Optional[int]:
@@ -5724,22 +6049,22 @@ def get_max_upload_files(spec: Optional[AskFileSpec]) -> Optional[int]:
         return spec.max_files
 
     spontaneous = config.features.spontaneous_file_upload
-    return spontaneous.max_files if spontaneous else None
+    if spontaneous is None:
+        return _DEFAULT_MAX_UPLOAD_FILES
+    return spontaneous.max_files
 
 
 def get_max_upload_size_bytes(spec: Optional[AskFileSpec]) -> Optional[int]:
-    """Return the configured byte cap, or None when unlimited."""
-    if not spec and (
-        config.features.spontaneous_file_upload is None
-        or config.features.spontaneous_file_upload.max_size_mb is None
-    ):
-        return None
-
-    max_size_mb = (
-        config.features.spontaneous_file_upload.max_size_mb
-        if not spec
-        else spec.max_size_mb
-    )
+    """Return the configured byte cap, the safety default, or None."""
+    if spec is not None:
+        max_size_mb = spec.max_size_mb
+    else:
+        spontaneous = config.features.spontaneous_file_upload
+        max_size_mb = (
+            _DEFAULT_MAX_UPLOAD_SIZE_MB
+            if spontaneous is None
+            else spontaneous.max_size_mb
+        )
     if max_size_mb is None:
         return None
     return int(max_size_mb * 1024 * 1024)
@@ -5755,11 +6080,8 @@ def validate_file_upload(file: UploadFile, spec: Optional[AskFileSpec] = None):
     Raises:
         ValueError: If the file is not allowed.
     """
-    if not spec and config.features.spontaneous_file_upload is None:
-        """Default for a missing config is to allow the fileupload without any restrictions"""
-        return
-
-    if not spec and not config.features.spontaneous_file_upload.enabled:
+    spontaneous = config.features.spontaneous_file_upload
+    if not spec and spontaneous is not None and not spontaneous.enabled:
         raise ValueError("File upload is not enabled")
 
     validate_file_mime_type(file, spec)
@@ -5811,11 +6133,10 @@ def validate_file_size(file: UploadFile, spec: Optional[AskFileSpec]):
     Raises:
         ValueError: If the file size is too large.
     """
-    if not spec and (
-        config.features.spontaneous_file_upload is None
-        or config.features.spontaneous_file_upload.max_size_mb is None
-    ):
-        return
+    if not spec:
+        spontaneous = config.features.spontaneous_file_upload
+        if spontaneous is not None and spontaneous.max_size_mb is None:
+            return
 
     max_bytes = get_max_upload_size_bytes(spec)
     if max_bytes is not None and file.size is not None and file.size > max_bytes:
@@ -5839,12 +6160,11 @@ async def get_file(
             detail="Unauthorized",
         )
 
-    if current_user:
-        if not session.user or session.user.identifier != current_user.identifier:
-            raise HTTPException(
-                status_code=401,
-                detail="You are not authorized to download files from this session",
-            )
+    _require_session_principal(
+        session,
+        current_user,
+        detail="You are not authorized to download files from this session",
+    )
 
     if file_id in session.files:
         from chainlit.element import Element
@@ -5872,17 +6192,20 @@ async def get_file(
 @router.get("/favicon")
 async def get_favicon():
     """Get the favicon for the UI."""
-    custom_favicon_path = os.path.join(APP_ROOT, "public", "favicon.*")
-    files = glob.glob(custom_favicon_path)
+    public_root = Path(APP_ROOT) / "public"
+    files = glob.glob(str(public_root / "favicon.*"))
 
     if files:
         favicon_path = files[0]
+        favicon_root = public_root
     else:
-        favicon_path = os.path.join(build_dir, "favicon.svg")
+        favicon_root = Path(build_dir)
+        favicon_path = str(favicon_root / "favicon.svg")
 
     media_type, _ = mimetypes.guess_type(favicon_path)
+    resolved_path = _resolve_selected_static_file(favicon_path, favicon_root)
 
-    return FileResponse(favicon_path, media_type=media_type)
+    return FileResponse(resolved_path, media_type=media_type)
 
 
 @router.get("/logo")
@@ -5890,29 +6213,28 @@ async def get_logo(theme: Optional[Theme] = Query(Theme.light)):
     """Get the default logo for the UI."""
     theme_value = theme.value if theme else Theme.light.value
     logo_path = None
+    logo_root: Optional[Path] = None
 
-    for path in [
-        os.path.join(APP_ROOT, "public", f"logo_{theme_value}.*"),
-        os.path.join(build_dir, "assets", f"logo_{theme_value}*.*"),
-    ]:
-        files = glob.glob(path)
-
+    for root_path, pattern in (
+        (Path(APP_ROOT) / "public", f"logo_{theme_value}.*"),
+        (Path(build_dir), os.path.join("assets", f"logo_{theme_value}*.*")),
+    ):
+        files = glob.glob(str(root_path / pattern))
         if files:
             logo_path = files[0]
+            logo_root = root_path
             break
 
     if not logo_path:
-        logo_path = os.path.join(
-            os.path.dirname(__file__),
-            "frontend",
-            "dist",
-            f"logo_{theme_value}.svg",
-        )
+        logo_root = Path(__file__).parent / "frontend" / "dist"
+        logo_path = str(logo_root / f"logo_{theme_value}.svg")
         logger.info("Missing custom logo. Falling back to default logo.")
 
+    assert logo_root is not None
     media_type, _ = mimetypes.guess_type(logo_path)
+    resolved_path = _resolve_selected_static_file(logo_path, logo_root)
 
-    return FileResponse(logo_path, media_type=media_type)
+    return FileResponse(resolved_path, media_type=media_type)
 
 
 @router.get("/avatars/{avatar_id:str}")

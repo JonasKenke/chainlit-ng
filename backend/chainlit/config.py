@@ -633,6 +633,9 @@ class CodeSettings(BaseModel):
     on_shared_thread_view: Optional[
         Callable[["ThreadDict", Optional["User"]], Awaitable[bool]]
     ] = None
+    shared_author_label: Optional[
+        Callable[[Optional["User"]], Union[str, Awaitable[Optional[str]], None]]
+    ] = None
     # Auth callbacks
     password_auth_callback: Optional[
         Callable[[str, str], Awaitable[Optional["User"]]]

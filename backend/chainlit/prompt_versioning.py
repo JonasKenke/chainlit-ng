@@ -13,11 +13,13 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 # A prompt body is capped so one row cannot exhaust a data layer.
 MAX_PROMPT_CONTENT_BYTES = 64 * 1024
+MAX_PROMPT_TITLE_BYTES = 1024
 # Explicit history is bounded; an append at the cap fails instead of evicting.
 MAX_PROMPT_VERSIONS = 200
 # Diff responses are bounded independently of the content caps.
 MAX_DIFF_ROWS = 2000
 MAX_DIFF_BYTES = 256 * 1024
+MAX_DIFF_WORK_CELLS = 4_000_000
 
 FINGERPRINT_PREFIX = "sha256:"
 
@@ -32,6 +34,30 @@ class PromptVersionConflict(PromptVersionError):
     """The requested version cannot be written: it is stale or duplicated."""
 
     code = "version_conflict"
+
+
+class PromptValidationError(PromptVersionError, ValueError):
+    """A user-controlled string is not valid Unicode or has an invalid shape."""
+
+    code = "validation_error"
+
+
+class PromptTitleTooLarge(PromptVersionError, ValueError):
+    """The prompt title exceeds :data:`MAX_PROMPT_TITLE_BYTES`."""
+
+    code = "title_too_large"
+
+
+class PromptDiffTooLarge(PromptVersionError):
+    """The requested diff exceeds the pre-computation work budget."""
+
+    code = "diff_too_large"
+
+
+class SkillNameConflict(PromptVersionConflict):
+    """A skill name is already used by the same user."""
+
+    code = "name_taken"
 
 
 class PromptVersionLimitReached(PromptVersionError):
@@ -79,8 +105,30 @@ def fingerprint_from_values(
     )
 
 
+def validate_unicode_scalar(value: str, field: str) -> None:
+    """Reject lone surrogates before UTF-8 encoding or persistence."""
+    if not isinstance(value, str):
+        raise PromptValidationError(f"{field} must be a string")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise PromptValidationError(
+            f"{field} must contain valid Unicode scalar values"
+        ) from exc
+
+
+def enforce_title_limit(title: str) -> None:
+    """Raise before writing a title larger than the UTF-8 byte cap."""
+    validate_unicode_scalar(title, "title")
+    if len(title.encode("utf-8")) > MAX_PROMPT_TITLE_BYTES:
+        raise PromptTitleTooLarge(
+            f"Prompt title must be at most {MAX_PROMPT_TITLE_BYTES} bytes"
+        )
+
+
 def enforce_content_limit(content: str) -> None:
     """Raise :class:`PromptContentTooLarge` before any write happens."""
+    validate_unicode_scalar(content, "content")
     if len(content.encode("utf-8")) > MAX_PROMPT_CONTENT_BYTES:
         raise PromptContentTooLarge(
             f"Prompt content must be at most {MAX_PROMPT_CONTENT_BYTES} bytes"
@@ -108,6 +156,7 @@ def build_diff(
     new_text: str,
     max_rows: int = MAX_DIFF_ROWS,
     max_bytes: int = MAX_DIFF_BYTES,
+    max_work_cells: int = MAX_DIFF_WORK_CELLS,
 ) -> Tuple[List[Dict[str, Any]], bool]:
     """Return ``(rows, truncated)`` for a line diff, bounded by rows and bytes.
 
@@ -115,8 +164,15 @@ def build_diff(
     to render them. Line numbers are 1-based and ``None`` when a side has no
     corresponding line.
     """
+    validate_unicode_scalar(old_text, "old content")
+    validate_unicode_scalar(new_text, "new content")
     old_lines = old_text.splitlines()
     new_lines = new_text.splitlines()
+    work_cells = len(old_lines) * len(new_lines)
+    if work_cells > max_work_cells:
+        raise PromptDiffTooLarge(
+            f"Prompt diff exceeds the {max_work_cells} cell work budget"
+        )
     rows: List[Dict[str, Any]] = []
     used_bytes = 0
     truncated = False

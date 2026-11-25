@@ -6,7 +6,8 @@ import svgr from 'vite-plugin-svgr';
 // https://vitejs.dev/config/
 export default defineConfig({
   build: {
-    sourcemap: true
+    // Opt in only for local debugging; release builds must not expose sources.
+    sourcemap: process.env.CHAINLIT_SOURCEMAP === '1'
   },
   experimental: {
     // Resolve JS asset URLs (lazy chunk preloads, their CSS, ?url imports)

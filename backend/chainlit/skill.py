@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import chainlit.config as chainlit_config
 
 from ._utils import is_path_inside
+from .prompt_versioning import PromptValidationError, validate_unicode_scalar
 from .step import Step
 
 SKILLS_DIRNAME = "skills"
@@ -185,6 +186,10 @@ def _build_skill(
     content_hash: Optional[str] = None,
 ) -> Skill:
     """Validate one Markdown payload; the single parser for app and user skills."""
+    try:
+        validate_unicode_scalar(text, "skill Markdown")
+    except PromptValidationError as exc:
+        raise SkillError(f"{path}: {exc}") from exc
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     markdown_size = len(text.encode("utf-8"))
     if markdown_size > MAX_MARKDOWN_BYTES:

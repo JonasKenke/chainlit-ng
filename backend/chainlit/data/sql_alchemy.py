@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union, cast
 
 import aiofiles
-import aiohttp
 from sqlalchemy import bindparam, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -20,12 +19,16 @@ from chainlit.element import ElementDict
 from chainlit.logger import logger
 from chainlit.prompt_versioning import (
     MAX_PROMPT_VERSIONS,
+    PromptValidationError,
     PromptVersionConflict,
     PromptVersionLimitReached,
+    SkillNameConflict,
     enforce_content_limit,
+    enforce_title_limit,
     fingerprint,
     fingerprint_from_values,
     prompt_kind,
+    validate_unicode_scalar,
 )
 from chainlit.step import StepDict
 from chainlit.types import (
@@ -47,6 +50,7 @@ from chainlit.types import (
     ThreadGrant,
     ThreadOwner,
 )
+from chainlit.url_fetch import fetch_url_bytes
 from chainlit.user import PersistedUser, User
 
 if TYPE_CHECKING:
@@ -1057,12 +1061,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             async with aiofiles.open(element.path, "rb") as f:
                 content = await f.read()
         elif element.url:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(element.url) as response:
-                    if response.status == 200:
-                        content = await response.read()
-                    else:
-                        content = None
+            content = await fetch_url_bytes(element.url)
         elif element.content:
             content = element.content
         else:
@@ -1528,9 +1527,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         await self._ensure_prompts_table()
         existing = await self._get_prompts_columns()
 
-        # Only prompt versioning columns here. Skill columns stay opt-in so a
-        # prompt-only app keeps its old prompts schema untouched.
+        # Versioning and public author-label columns here. Skill-only columns
+        # stay opt-in so a prompt-only app keeps its old prompts schema untouched.
         for name, ddl in (
+            ("authorLabel", "TEXT"),
             ("contentHash", "TEXT"),
             ("version", "INTEGER NOT NULL DEFAULT 1"),
             ("sourcePromptId", "TEXT"),
@@ -1703,6 +1703,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             isShared=bool(row["isShared"]),
             createdAt=row["createdAt"],
             updatedAt=row["updatedAt"],
+            authorLabel=row.get("authorLabel"),
             kind=row.get("kind") or "prompt",
             description=row.get("description") or "",
             enabled=bool(row.get("enabled") or False),
@@ -1722,8 +1723,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
     async def create_prompt(self, prompt: PromptDict) -> PromptDict:
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_prompt, id={prompt['id']}")
-        await self._ensure_prompt_versioning()
+        enforce_title_limit(prompt["title"])
         enforce_content_limit(prompt["content"])
+        await self._ensure_prompt_versioning()
         digest = fingerprint(prompt)
         version_id = str(uuid.uuid4())
         version_values = {
@@ -1746,11 +1748,11 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         """
                         INSERT INTO prompts
                         ("id", "userId", "title", "content", "isShared", "createdAt",
-                         "updatedAt", "contentHash", "version", "sourcePromptId",
+                         "updatedAt", "authorLabel", "contentHash", "version", "sourcePromptId",
                          "pinnedVersionId", "pinnedContentHash", "pinnedAt", "sharedAt",
                          "sharedVersion")
                         VALUES (:id, :userId, :title, :content, :isShared, :createdAt,
-                                :updatedAt, :contentHash, 1, :sourcePromptId,
+                                :updatedAt, :authorLabel, :contentHash, 1, :sourcePromptId,
                                 :pinnedVersionId, :pinnedContentHash, :pinnedAt, :sharedAt,
                                 :sharedVersion)
                         """,
@@ -1762,6 +1764,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "isShared": prompt["isShared"],
                             "createdAt": prompt["createdAt"],
                             "updatedAt": prompt["updatedAt"],
+                            "authorLabel": prompt.get("authorLabel"),
                             "contentHash": digest,
                             "sourcePromptId": prompt.get("sourcePromptId"),
                             "pinnedVersionId": prompt.get("pinnedVersionId"),
@@ -1864,8 +1867,9 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         """
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_prompt, id={prompt['id']}")
-        await self._ensure_prompt_versioning()
+        enforce_title_limit(prompt["title"])
         enforce_content_limit(prompt["content"])
+        await self._ensure_prompt_versioning()
         digest = fingerprint(prompt)
         new_version: Optional[int] = None
 
@@ -1943,6 +1947,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         UPDATE prompts
                         SET "title" = :title, "content" = :content,
                             "isShared" = :isShared, "contentHash" = :contentHash,
+                            "authorLabel" = :authorLabel,
                             "version" = :version, "updatedAt" = :updatedAt,
                             "sourcePromptId" = :sourcePromptId,
                             "pinnedVersionId" = :pinnedVersionId,
@@ -1962,6 +1967,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         "contentHash": digest,
                         "version": new_version,
                         "updatedAt": prompt["updatedAt"],
+                        "authorLabel": prompt.get("authorLabel"),
                         "sourcePromptId": prompt.get("sourcePromptId"),
                         "pinnedVersionId": prompt.get("pinnedVersionId"),
                         "pinnedContentHash": prompt.get("pinnedContentHash"),
@@ -2324,6 +2330,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             existing = {row.get("column_name") for row in columns}
 
         for name, ddl in (
+            ("authorLabel", "TEXT"),
             ("kind", "TEXT NOT NULL DEFAULT 'prompt'"),
             ("description", "TEXT NOT NULL DEFAULT ''"),
             ("enabled", "BOOLEAN NOT NULL DEFAULT FALSE"),
@@ -2364,6 +2371,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             kind="skill",
             description=row.get("description") or "",
             enabled=bool(row.get("enabled", False)),
+            authorLabel=row.get("authorLabel"),
             importedFrom=row.get("importedFrom"),
             importedAt=row.get("importedAt"),
             contentHash=row.get("contentHash"),
@@ -2377,11 +2385,31 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             updateSeenVersionId=row.get("updateSeenVersionId"),
         )
 
+    @staticmethod
+    def _is_skill_name_conflict(exc: IntegrityError) -> bool:
+        original = exc.orig
+        constraint = getattr(getattr(original, "diag", None), "constraint_name", None)
+        if constraint == "prompts_skill_name":
+            return True
+        message = str(original).lower()
+        return "unique constraint" in message and (
+            "prompts_skill_name" in message
+            or "prompts.userid, prompts.title" in message
+        )
+
     async def create_skill(self, skill: PromptDict) -> PromptDict:
         if self.show_logger:
             logger.info(f"SQLAlchemy: create_skill, id={skill['id']}")
-        await self._ensure_skills_columns()
+        validate_unicode_scalar(skill["title"], "skill name")
+        validate_unicode_scalar(skill.get("description") or "", "skill description")
+        for field in ("importedFrom", "authorLabel"):
+            value = skill.get(field)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise PromptValidationError(f"{field} must be a string")
+                validate_unicode_scalar(value, field)
         enforce_content_limit(skill["content"])
+        await self._ensure_skills_columns()
         digest = fingerprint(skill)
         version_id = str(uuid.uuid4())
         # Imported Markdown hashes are provenance, so keep a supplied hash.
@@ -2394,12 +2422,12 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         INSERT INTO prompts
                         ("id", "userId", "title", "content", "isShared", "kind",
                          "description", "enabled", "importedFrom", "importedAt",
-                         "contentHash", "createdAt", "updatedAt", "version",
+                         "contentHash", "createdAt", "updatedAt", "authorLabel", "version",
                          "sourcePromptId", "pinnedVersionId", "pinnedContentHash",
                          "pinnedAt", "sharedAt", "sharedVersion", "updateSeenVersionId")
                         VALUES (:id, :userId, :title, :content, :isShared, 'skill',
                                 :description, :enabled, :importedFrom, :importedAt,
-                                :contentHash, :createdAt, :updatedAt, 1,
+                                :contentHash, :createdAt, :updatedAt, :authorLabel, 1,
                                 :sourcePromptId, :pinnedVersionId, :pinnedContentHash,
                                 :pinnedAt, :sharedAt, :sharedVersion, :updateSeenVersionId)
                         """,
@@ -2415,6 +2443,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "importedAt": skill.get("importedAt"),
                             "contentHash": content_hash,
                             "createdAt": skill["createdAt"],
+                            "authorLabel": skill.get("authorLabel"),
                             "updatedAt": skill["updatedAt"],
                             "sourcePromptId": skill.get("sourcePromptId"),
                             "pinnedVersionId": skill.get("pinnedVersionId"),
@@ -2447,6 +2476,10 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                 ]
             )
         except IntegrityError as exc:
+            if self._is_skill_name_conflict(exc):
+                raise SkillNameConflict(
+                    f"Skill name {skill['title']!r} already exists"
+                ) from exc
             raise RuntimeError("Could not store the skill") from exc
 
         result = dict(skill)
@@ -2518,8 +2551,16 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         """
         if self.show_logger:
             logger.info(f"SQLAlchemy: update_skill, id={skill['id']}")
-        await self._ensure_skills_columns()
+        validate_unicode_scalar(skill["title"], "skill name")
+        validate_unicode_scalar(skill.get("description") or "", "skill description")
+        for field in ("importedFrom", "authorLabel"):
+            value = skill.get(field)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise PromptValidationError(f"{field} must be a string")
+                validate_unicode_scalar(value, field)
         enforce_content_limit(skill["content"])
+        await self._ensure_skills_columns()
         digest = fingerprint(skill)
         new_version: Optional[int] = None
         enabled = bool(skill.get("enabled", False))
@@ -2617,6 +2658,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                             "content" = :content, "enabled" = :enabled,
                             "isShared" = :isShared, "updatedAt" = :updatedAt,
                             "version" = :version,
+                            "authorLabel" = :authorLabel,
                             "contentHash" = COALESCE(:contentHash, "contentHash"),
                             "sourcePromptId" = :sourcePromptId,
                             "pinnedVersionId" = :pinnedVersionId,
@@ -2640,6 +2682,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
                         "updatedAt": skill["updatedAt"],
                         "version": new_version,
                         "contentHash": head_hash,
+                        "authorLabel": skill.get("authorLabel"),
                         "sourcePromptId": skill.get("sourcePromptId"),
                         "pinnedVersionId": skill.get("pinnedVersionId"),
                         "pinnedContentHash": skill.get("pinnedContentHash"),

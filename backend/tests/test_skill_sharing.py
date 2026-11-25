@@ -272,7 +272,7 @@ async def test_public_skill_payload_is_sanitized(
     assert body["contentHash"] == head["contentHash"]
     assert body["updatedAt"] == updated["updatedAt"]
     assert body["sharedAt"]
-    assert body["authorLabel"] == "Chainlit NG user"
+    assert body["authorLabel"] == OWNER.identifier
     for forbidden in ("userId", "createdBy", "enabled", "importedFrom"):
         assert forbidden not in body
 

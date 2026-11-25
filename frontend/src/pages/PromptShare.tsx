@@ -113,6 +113,7 @@ export default function PromptSharePage() {
     selected === LATEST
       ? null
       : (versions.find((version) => version.id === selected) ?? null);
+  const authorLabel = prompt?.authorLabel?.trim();
 
   const handleAdd = async () => {
     if (!id) return;
@@ -174,6 +175,14 @@ export default function PromptSharePage() {
         ) : prompt ? (
           <div className="w-full flex flex-col gap-4">
             <h1 className="text-xl font-semibold">{prompt.title}</h1>
+            {authorLabel ? (
+              <p className="text-sm text-muted-foreground">
+                {t('chat.promptGallery.share.by', {
+                  author: authorLabel,
+                  defaultValue: 'By {{author}}'
+                })}
+              </p>
+            ) : null}
             {versioningEnabled &&
             versions.some(
               (version) => version.id !== prompt.currentVersionId
