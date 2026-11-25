@@ -14,6 +14,7 @@ export * from './constants';
 export * from './state';
 export * from './threadHistoryRequests';
 export { sanitizeMcpUrl } from './mcpStorage';
+export { getParentWindowOrigin, isTrustedMessageOrigin } from './windowMessage';
 export {
   mergePromptUpdates,
   promptErrorCode,

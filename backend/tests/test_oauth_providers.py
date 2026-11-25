@@ -5,6 +5,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
+import chainlit.oauth_providers as oauth_module
 from chainlit.oauth_providers import (
     ACCESS_TOKEN_MISSING,
     Auth0OAuthProvider,
@@ -434,7 +435,9 @@ class TestAzureADOAuthProvider:
                 )
 
                 assert token == "azure_access_token"
-                assert provider._refresh_token == "azure_refresh_token"
+                assert (
+                    oauth_module._refresh_token_context.get() == "azure_refresh_token"
+                )
 
     @pytest.mark.asyncio
     async def test_azure_ad_get_user_info_with_photo(self):
@@ -448,7 +451,7 @@ class TestAzureADOAuthProvider:
             },
         ):
             provider = AzureADOAuthProvider()
-            provider._refresh_token = "refresh_token_123"
+            oauth_module._refresh_token_context.set("refresh_token_123")
 
             mock_user_response = Mock()
             mock_user_response.json.return_value = {
@@ -474,7 +477,8 @@ class TestAzureADOAuthProvider:
                 assert isinstance(user, User)
                 assert user.identifier == "user@company.com"
                 assert user.metadata["provider"] == "azure-ad"
-                assert user.metadata["refresh_token"] == "refresh_token_123"
+                assert "refresh_token" not in user.metadata
+                assert azure_user["refresh_token"] == "refresh_token_123"
 
 
 class TestOktaOAuthProvider:
@@ -708,7 +712,9 @@ class TestAzureADHybridOAuthProvider:
                 )
 
                 assert token == "hybrid_access_token"
-                assert provider._refresh_token == "hybrid_refresh_token"
+                assert (
+                    oauth_module._refresh_token_context.get() == "hybrid_refresh_token"
+                )
 
     @pytest.mark.asyncio
     async def test_azure_ad_hybrid_get_user_info_success(self):
@@ -722,7 +728,7 @@ class TestAzureADHybridOAuthProvider:
             },
         ):
             provider = AzureADHybridOAuthProvider()
-            provider._refresh_token = "refresh_token_hybrid"
+            oauth_module._refresh_token_context.set("refresh_token_hybrid")
 
             mock_user_response = Mock()
             mock_user_response.json.return_value = {
@@ -747,7 +753,8 @@ class TestAzureADHybridOAuthProvider:
                 assert isinstance(user, User)
                 assert user.identifier == "hybrid@company.com"
                 assert user.metadata["provider"] == "azure-ad"
-                assert user.metadata["refresh_token"] == "refresh_token_hybrid"
+                assert "refresh_token" not in user.metadata
+                assert azure_user["refresh_token"] == "refresh_token_hybrid"
 
 
 class TestDescopeOAuthProvider:
@@ -1297,3 +1304,22 @@ async def test_azure_ad_hybrid_get_token_reports_a_missing_access_token():
 
             assert exc_info.value.status_code == 400
             assert ACCESS_TOKEN_MISSING in str(exc_info.value.detail)
+
+
+def test_refresh_token_context_is_task_local():
+    import asyncio
+
+    async def flow(value):
+        oauth_module._refresh_token_context.set(value)
+        await asyncio.sleep(0)
+        return oauth_module._refresh_token_context.get()
+
+    async def run():
+        return await asyncio.gather(flow("alice-rt"), flow("bob-rt"))
+
+    assert asyncio.run(run()) == ["alice-rt", "bob-rt"]
+
+
+def test_azure_provider_has_no_shared_refresh_token_attribute():
+    provider = AzureADOAuthProvider()
+    assert not hasattr(provider, "_refresh_token")
