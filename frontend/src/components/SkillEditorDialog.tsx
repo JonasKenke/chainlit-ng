@@ -160,10 +160,11 @@ export function SkillEditorDialog({ open, skill, onSave, onClose }: Props) {
               </Label>
               <Textarea
                 id="skill-content"
+                data-testid="skill-content-editor"
                 value={content}
                 onChange={(event) => setContent(event.target.value)}
                 rows={12}
-                className={`resize-none font-mono text-xs ${fieldFocus}`}
+                className={`h-[280px] resize-none font-mono text-xs ${fieldFocus}`}
                 aria-invalid={!!errors.content}
                 aria-describedby={
                   errors.content ? 'skill-content-error' : undefined
@@ -180,7 +181,10 @@ export function SkillEditorDialog({ open, skill, onSave, onClose }: Props) {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>{t('chat.skills.editor.preview')}</Label>
-              <div className="h-[242px] overflow-y-auto rounded-md border p-3">
+              <div
+                data-testid="skill-content-preview"
+                className="h-[280px] overflow-y-auto rounded-md border p-3"
+              >
                 {content ? (
                   <Markdown
                     allowHtml={false}

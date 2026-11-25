@@ -52,9 +52,10 @@ const displayToolName = (tool: string): string =>
 
 interface Props {
   approval: IApproval;
+  grouped?: boolean;
 }
 
-export const ApprovalCard = ({ approval }: Props) => {
+export const ApprovalCard = ({ approval, grouped = false }: Props) => {
   const apiClient = useContext(ChainlitContext);
   const { t } = useTranslation();
   const { allowHtml, latex } = useContext(MessageContext);
@@ -433,7 +434,10 @@ export const ApprovalCard = ({ approval }: Props) => {
         defaultValue: 'Approval for {{tool}}',
         tool: approval.tool
       })}
-      className="scroll-mt-4 rounded-lg border border-border bg-card p-4 text-card-foreground"
+      className={cn(
+        'scroll-mt-4 rounded-lg border border-border bg-card p-4 text-card-foreground',
+        grouped && 'border-0 bg-transparent p-0'
+      )}
     >
       <div>
         <div data-testid="approval-tool" className="text-sm font-semibold">

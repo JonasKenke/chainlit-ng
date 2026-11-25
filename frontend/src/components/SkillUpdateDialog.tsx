@@ -162,7 +162,6 @@ export function SkillUpdateDialog({
       return;
     }
     let cancelled = false;
-    setTarget(null);
     setLoadingTarget(true);
     setConfirmLocal(false);
     setStale(false);
@@ -466,22 +465,31 @@ export function SkillUpdateDialog({
             ) : null}
 
             {!alreadyCurrent ? (
-              <div className="flex-1 overflow-auto rounded-md border custom-scrollbar">
+              <div
+                className="relative flex-1 overflow-auto rounded-md border custom-scrollbar"
+                aria-busy={loadingTarget}
+              >
+                {target ? (
+                  diff.rows.length === 0 ? (
+                    <p className="p-3 text-sm text-muted-foreground">
+                      {t('chat.skills.update.noChanges')}
+                    </p>
+                  ) : (
+                    <VersionDiffRows
+                      rows={diff.rows}
+                      viewMode={viewMode}
+                      testId="skill-update-row"
+                    />
+                  )
+                ) : null}
                 {loadingTarget ? (
-                  <p className="p-3 text-sm text-muted-foreground">
+                  <div
+                    data-testid="skill-update-loading"
+                    className="absolute inset-0 flex items-center justify-center bg-background/70 p-3 text-sm text-muted-foreground backdrop-blur-[1px]"
+                  >
                     {t('common.status.loading')}
-                  </p>
-                ) : diff.rows.length === 0 && target ? (
-                  <p className="p-3 text-sm text-muted-foreground">
-                    {t('chat.skills.update.noChanges')}
-                  </p>
-                ) : (
-                  <VersionDiffRows
-                    rows={diff.rows}
-                    viewMode={viewMode}
-                    testId="skill-update-row"
-                  />
-                )}
+                  </div>
+                ) : null}
               </div>
             ) : null}
 

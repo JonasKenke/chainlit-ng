@@ -130,6 +130,7 @@ export function SkillsPanel() {
         enabled: true,
         reviewedContentHash
       });
+      rememberReviewedSkill(reviewing, reviewedContentHash);
       toast.success(t('chat.skills.review.enabled'));
       setReviewing(null);
     } catch (reason) {

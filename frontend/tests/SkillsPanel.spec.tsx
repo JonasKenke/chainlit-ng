@@ -166,6 +166,7 @@ describe('SkillsPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     state.skills = [];
     state.skillUpdates = [];
     state.config = { features: { latex: false } };
@@ -286,6 +287,62 @@ describe('SkillsPanel', () => {
         reviewedContentHash: `sha256:${'a'.repeat(64)}`
       })
     );
+  });
+
+  it('skips the warning when the same reviewed content is re-enabled', async () => {
+    state.skills = [imported];
+    render(<SkillsPanel />);
+
+    const toggle = await screen.findByRole('switch', {
+      name: 'chat.skills.enable imported-skill'
+    });
+    fireEvent.click(toggle);
+    const enable = await screen.findByRole('button', {
+      name: 'chat.skills.review.enable'
+    });
+    await waitFor(() => expect(enable).toBeEnabled());
+    fireEvent.click(enable);
+    await waitFor(() => expect(updateSkill).toHaveBeenCalled());
+
+    updateSkill.mockClear();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(updateSkill).toHaveBeenCalledWith('s1', {
+        enabled: true,
+        reviewedContentHash: `sha256:${'a'.repeat(64)}`
+      })
+    );
+    expect(screen.queryByTestId('skill-review-dialog')).toBeNull();
+  });
+
+  it('reopens the warning when the reviewed content changes', async () => {
+    state.skills = [imported];
+    const { rerender } = render(<SkillsPanel />);
+
+    fireEvent.click(
+      await screen.findByRole('switch', {
+        name: 'chat.skills.enable imported-skill'
+      })
+    );
+    const enable = await screen.findByRole('button', {
+      name: 'chat.skills.review.enable'
+    });
+    await waitFor(() => expect(enable).toBeEnabled());
+    fireEvent.click(enable);
+    await waitFor(() => expect(updateSkill).toHaveBeenCalled());
+
+    state.skills = [{ ...imported, contentHash: `sha256:${'b'.repeat(64)}` }];
+    rerender(<SkillsPanel />);
+    fireEvent.click(
+      screen.getByRole('switch', {
+        name: 'chat.skills.enable imported-skill'
+      })
+    );
+
+    expect(
+      await screen.findByTestId('skill-review-dialog')
+    ).toBeInTheDocument();
   });
 
   it('reloads and keeps the gate when the server reports a changed hash', async () => {

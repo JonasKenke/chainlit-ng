@@ -198,6 +198,22 @@ describe('SkillUpdateDialog', () => {
     expect(screen.getByText('common.status.loading')).toBeInTheDocument();
   });
 
+  it('keeps the visible diff while another version loads', async () => {
+    renderDialog();
+    expect(await screen.findByText('new line')).toBeInTheDocument();
+
+    fetchSkillVersionMock.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.pointerDown(screen.getByTestId('skill-update-version'));
+    fireEvent.click(
+      await screen.findByTestId('skill-update-version-option-sv1')
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('skill-update-loading')).toBeInTheDocument()
+    );
+    expect(screen.getByText('new line')).toBeInTheDocument();
+  });
+
   it('supports side-by-side rows and switching versions', async () => {
     renderDialog();
 

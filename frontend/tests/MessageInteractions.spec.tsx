@@ -4,6 +4,7 @@ import { MessageContext, defaultMessageContext } from 'contexts/MessageContext';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Message } from '@/components/chat/Messages/Message';
+import { StepInteractions } from '@/components/chat/Messages/StepInteractions';
 
 const state = vi.hoisted(() => ({
   approvals: [] as IApproval[],
@@ -163,6 +164,37 @@ describe('inline interaction cards', () => {
     ).toBeTruthy();
     expect(children).toBeDefined();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+  });
+
+  it('groups concurrent pending approvals into one queue card', () => {
+    state.approvals = [
+      { ...pendingApproval, id: 'approval-1', tool: 'send_email' },
+      { ...pendingApproval, id: 'approval-2', tool: 'delete_file' }
+    ];
+
+    renderStep();
+
+    expect(screen.getByTestId('approval-queue-card')).toBeInTheDocument();
+    expect(screen.getAllByTestId('approval-card')).toHaveLength(2);
+  });
+
+  it('renders one queue across concurrent tool steps', () => {
+    state.approvals = [
+      { ...pendingApproval, id: 'approval-1', stepId: 'tool-1' },
+      { ...pendingApproval, id: 'approval-2', stepId: 'tool-2' }
+    ];
+
+    render(
+      <MessageContext.Provider
+        value={{ ...defaultMessageContext, cot: 'full' }}
+      >
+        <StepInteractions stepId="tool-1" threadId="thread-1" />
+        <StepInteractions stepId="tool-2" threadId="thread-1" />
+      </MessageContext.Provider>
+    );
+
+    expect(screen.getAllByTestId('approval-queue-card')).toHaveLength(1);
+    expect(screen.getAllByTestId('approval-card')).toHaveLength(2);
   });
 
   it('renders a question card between the step and its child messages', () => {
