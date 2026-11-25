@@ -13,6 +13,7 @@ const FileElement = ({ element }: { element: IFileElement }) => {
       download={element.name}
       href={element.url}
       target="_blank"
+      rel="noopener noreferrer"
     >
       <Attachment name={element.name} mime={element.mime!} />
     </a>

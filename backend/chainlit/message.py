@@ -209,8 +209,13 @@ class MessageBase(ABC):
         data_layer = get_data_layer()
         if data_layer and not self.persisted:
             try:
-                create_persistence_task(data_layer.create_step(step_dict))
-                self.persisted = True
+                task = create_persistence_task(data_layer.create_step(step_dict))
+
+                def mark_persisted(completed: asyncio.Task) -> None:
+                    if not completed.cancelled() and completed.exception() is None:
+                        self.persisted = True
+
+                task.add_done_callback(mark_persisted)
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e

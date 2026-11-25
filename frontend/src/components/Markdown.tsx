@@ -1,3 +1,4 @@
+import { sanitizeRawHtml } from '@/lib/sanitizeHtml';
 import { cn } from '@/lib/utils';
 import {
   ChainlitContext,
@@ -165,10 +166,16 @@ const Markdown = ({
   const rehypePlugins = useMemo(() => {
     let rehypePlugins: NonNullable<Options['rehypePlugins']> = [];
     if (allowHtml) {
-      rehypePlugins = [rehypeRaw as any, ...rehypePlugins];
+      rehypePlugins = [
+        rehypeRaw,
+        sanitizeRawHtml,
+        ...rehypePlugins
+      ] as NonNullable<Options['rehypePlugins']>;
     }
     if (latex) {
-      rehypePlugins = [rehypeKatex as any, ...rehypePlugins];
+      rehypePlugins = [rehypeKatex, ...rehypePlugins] as NonNullable<
+        Options['rehypePlugins']
+      >;
     }
     return rehypePlugins;
   }, [allowHtml, latex]);

@@ -79,11 +79,11 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         if connect_args is None:
             connect_args = {}
         if ssl_require:
-            # Create an SSL context to require an SSL connection
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            connect_args["ssl"] = ssl_context
+            # Require a verified TLS connection. The previous CERT_NONE
+            # context allowed an active network attacker to impersonate the
+            # database. A caller that needs a private CA can pass its own
+            # context in connect_args["ssl"].
+            connect_args.setdefault("ssl", ssl.create_default_context())
         self.engine: AsyncEngine = create_async_engine(
             self._conninfo, connect_args=connect_args
         )
@@ -288,6 +288,29 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             return None
 
     async def update_thread(
+        self,
+        thread_id: str,
+        name: Optional[str] = None,
+        user_id: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+        tags: Optional[List[str]] = None,
+    ):
+        # Metadata is read-merged-written below. Serialize those three steps
+        # across workers (Redis) or coroutines (memory), otherwise a stale
+        # rename can restore is_shared=true after an owner unshared the thread.
+        from chainlit.state_store import get_state_store
+
+        lock = get_state_store().lock(f"thread-metadata:{thread_id}", ttl=10, wait=5)
+        async with lock:
+            return await self._update_thread_unlocked(
+                thread_id,
+                name=name,
+                user_id=user_id,
+                metadata=metadata,
+                tags=tags,
+            )
+
+    async def _update_thread_unlocked(
         self,
         thread_id: str,
         name: Optional[str] = None,
@@ -713,11 +736,18 @@ class SQLAlchemyDataLayer(BaseDataLayer):
         updates = ", ".join(
             f'"{key}" = :{key}' for key in parameters.keys() if key != "id"
         )
+        # A step id is a UUID, but UUIDs are visible in shared threads. Guard
+        # the upsert so a client cannot reuse another thread's step id to move
+        # or overwrite that row; the conflict becomes a no-op.
+        conflict_guard = ""
+        if step_dict.get("threadId"):
+            parameters["guard_thread_id"] = step_dict["threadId"]
+            conflict_guard = ' WHERE steps."threadId" = :guard_thread_id'
         query = f"""
             INSERT INTO steps ({columns})
             VALUES ({values})
             ON CONFLICT (id) DO UPDATE
-            SET {updates};
+            SET {updates}{conflict_guard};
         """
         await self.execute_sql(query=query, parameters=parameters)
 
@@ -1042,7 +1072,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
 
         user_id: str = await self._get_user_id_by_thread(element.thread_id) or "unknown"
         file_object_key = f"{user_id}/{element.id}" + (
-            f"/{element.name}" if element.name else ""
+            f"/{element.storage_filename(element.name)}" if element.name else ""
         )
 
         if not element.mime:
@@ -1053,7 +1083,7 @@ class SQLAlchemyDataLayer(BaseDataLayer):
             data=content,
             mime=element.mime,
             overwrite=True,
-            content_disposition=element.get_content_disposition(),
+            content_disposition=element.get_content_disposition(element.mime),
         )
         if not uploaded_file:
             raise ValueError(

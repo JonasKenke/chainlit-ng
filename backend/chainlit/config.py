@@ -87,6 +87,10 @@ mask_user_env = false
 
 # Authorized origins
 allow_origins = ["*"]
+# Whether cross-origin requests may send credentials. Leave unset to enable
+# credentials only when allow_origins lists explicit origins. A wildcard with
+# credentials reflects every caller's origin, so configure origins explicitly.
+# allow_credentials = true
 
 # Ephemeral coordination store. Use "redis" only when every worker shares
 # the same Redis instance.
@@ -660,6 +664,10 @@ class StateStoreSettings(BaseModel):
 
 class ProjectSettings(BaseModel):
     allow_origins: List[str] = Field(default_factory=lambda: ["*"])
+    # None means "credentials only for an explicit origin allowlist". A
+    # wildcard allowlist with credentials reflects any Origin and is unsafe;
+    # setting this to True keeps that legacy behavior for existing deploys.
+    allow_credentials: Optional[bool] = None
     # Socket.io client transports option
     transports: Optional[List[str]] = None
     # List of environment variables to be provided by each user to use the app. If empty, no environment variables will be asked to the user.

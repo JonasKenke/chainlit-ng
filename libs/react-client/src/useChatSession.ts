@@ -48,6 +48,7 @@ import {
   isLatestThreadHistoryRequest
 } from './threadHistoryRequests';
 import type { IToken } from './useChatData';
+import { getParentWindowOrigin, isTrustedMessageOrigin } from './windowMessage';
 
 function approvalFromStep(step: IStep): IApproval | null {
   const raw = (step.metadata as Record<string, any> | undefined)?.approval;
@@ -750,10 +751,23 @@ const useChatSession = () => {
         setTokenCount((old) => old + count);
       });
 
-      socket.on('window_message', (data: any) => {
-        if (window.parent) {
-          window.parent.postMessage(data, '*');
+      socket.on('window_message', (data: unknown) => {
+        // Echoing to '*' would hand backend window messages to any embedding
+        // page. Only a same-origin parent or an explicitly allowed parent
+        // origin may receive them; a top-level window does not echo at all.
+        if (window.parent === window) return;
+        const target = getParentWindowOrigin();
+        if (!target) return;
+        if (
+          !isTrustedMessageOrigin(
+            target,
+            window.location.origin,
+            config?.allowOrigins
+          )
+        ) {
+          return;
         }
+        window.parent.postMessage(data, target);
       });
 
       socket.on('toast', (data: { message: string; type: string }) => {

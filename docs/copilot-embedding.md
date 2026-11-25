@@ -76,8 +76,15 @@ the public API.
 - `CHAINLIT_AUTH_COOKIE_PATH` / `CHAINLIT_ROOT_PATH` — cookie path for a
   sub-path or proxied deployment.
 - `[project] allow_origins` in `.chainlit/config.toml` — the host origin must be
-  allowed for cross-origin requests. Keep the default `["*"]` only if you accept
-  that CORS posture.
+  listed explicitly for a cookie-authenticated cross-origin widget. A wildcard
+  (`["*"]`) no longer grants credentialed CORS: it serves `Access-Control-Allow-
+Origin: *` without credentials, and Engine.IO only accepts same-origin
+  WebSockets when login is enabled. `[project] allow_credentials = true` keeps
+  the legacy wildcard-credential behavior for existing deployments but reflects
+  any caller's Origin and is not recommended.
+- Window messages (`on_window_message` / `cl.send_window_message`) are accepted
+  only from the app origin or an explicit `allow_origins` entry; a wildcard is
+  never treated as a trusted parent.
 
 ## What is not supported
 

@@ -351,6 +351,7 @@ class Step:
         self._input = ""
         self._output = ""
         self._persistence_tasks: set[asyncio.Task] = set()
+        self._last_persistence_task: Optional[asyncio.Task] = None
         self._approval_managed = False
         self._approval_decorated = False
         self.requires_approval = requires_approval
@@ -426,7 +427,15 @@ class Step:
         return processed_content
 
     def _track_persistence(self, coro) -> asyncio.Task:
-        task = create_persistence_task(coro)
+        previous = self._last_persistence_task
+
+        async def chained():
+            if previous is not None:
+                await asyncio.gather(previous, return_exceptions=True)
+            return await coro
+
+        task = create_persistence_task(chained())
+        self._last_persistence_task = task
         self._persistence_tasks.add(task)
         task.add_done_callback(self._persistence_tasks.discard)
         return task
@@ -577,8 +586,15 @@ class Step:
                             await data_layer.create_step(step_dict.copy())
                             self.persisted = True
                 else:
-                    self._track_persistence(data_layer.create_step(step_dict.copy()))
-                    self.persisted = True
+                    task = self._track_persistence(
+                        data_layer.create_step(step_dict.copy())
+                    )
+
+                    def mark_persisted(completed: asyncio.Task) -> None:
+                        if not completed.cancelled() and completed.exception() is None:
+                            self.persisted = True
+
+                    task.add_done_callback(mark_persisted)
             except Exception as e:
                 if self.fail_on_persist_error:
                     raise e

@@ -44,8 +44,11 @@ class GatedWrite:
 
     def release(self):
         future = self.future_ref()
-        assert future is not None, "the paused write was garbage collected"
-        future.set_result(None)
+        if future is None:
+            assert self.completed, "the paused write was garbage collected"
+            return
+        if not future.done():
+            future.set_result(None)
 
 
 def _new_tasks(before: set[asyncio.Task]) -> set[asyncio.Task]:
@@ -73,11 +76,17 @@ async def _assert_survives_gc(trigger, gates):
     tasks_before = asyncio.all_tasks()
 
     await trigger()
-    for gate in gates:
+    # Step writes are serialized: wait for each gate, releasing all but the
+    # final one so the next chained write can start.
+    for index, gate in enumerate(gates):
         await asyncio.wait_for(gate.entered.wait(), 1)
+        if index < len(gates) - 1:
+            gate.release()
 
     spawned = _new_tasks(tasks_before)
-    assert len(spawned) == len(gates), f"expected {len(gates)} tasks, got {spawned}"
+    # Writes are serialized, so earlier tasks may already be complete; at
+    # least the currently paused write must still be registered.
+    assert spawned, "no persistence task is in flight"
 
     refs = [weakref.ref(task) for task in spawned]
     del spawned
@@ -227,6 +236,7 @@ async def test_process_message_tasks_survive_gc(mock_session):
             self.content = "hello"
             self.created_at = None
             self.elements = []
+            self.metadata = {}
 
         @classmethod
         def from_dict(cls, _dict):

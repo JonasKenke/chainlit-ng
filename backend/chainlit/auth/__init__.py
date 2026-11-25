@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
 
@@ -6,6 +7,7 @@ from chainlit.config import config
 from chainlit.data import get_data_layer
 from chainlit.logger import logger
 from chainlit.oauth_providers import get_configured_oauth_providers
+from chainlit.user import User
 
 from .cookie import (
     OAuth2PasswordBearerWithCookie,
@@ -56,7 +58,11 @@ def get_configuration():
 
 
 async def authenticate_user(token: str = Depends(reuseable_oauth)):
+    from .jwt import is_token_revoked
+
     try:
+        if await is_token_revoked(token):
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
         user = decode_jwt(token)
     except Exception as e:
         raise HTTPException(
@@ -90,6 +96,53 @@ async def get_current_user(token: str = Depends(reuseable_oauth)):
     return await authenticate_user(token)
 
 
+async def resolve_provider_identity(user: User, data_layer) -> User:
+    """Namespace an OAuth identity that collides with another provider.
+
+    Existing users keep their identifier; a new provider identity that would
+    otherwise merge into a different provider's account gets a provider-prefixed
+    identifier instead. The app callback can still pre-namespace identities.
+    """
+    metadata = user.metadata if isinstance(user.metadata, dict) else {}
+    provider = metadata.get("provider")
+    if not provider:
+        return user
+    try:
+        existing = await data_layer.get_user(user.identifier)
+    except Exception:
+        # Login availability wins; create_user below retains the legacy path.
+        logger.exception("Unable to check OAuth identity collision")
+        return user
+    if existing is None:
+        return user
+    existing_metadata = existing.metadata if isinstance(existing.metadata, dict) else {}
+    existing_provider = existing_metadata.get("provider")
+    if not existing_provider or existing_provider == provider:
+        return user
+    return User(
+        identifier=f"{provider}:{user.identifier}",
+        display_name=user.display_name,
+        metadata=dict(metadata),
+    )
+
+
+async def get_current_user_optional(
+    token: Optional[str] = Depends(reuseable_oauth),
+):
+    """Return the authenticated user, or None instead of raising 401.
+
+    Used only by routes that are public but may personalize the response
+    (shared-thread links). A missing or invalid token is an anonymous viewer,
+    never an authentication failure.
+    """
+    if not require_login() or not token:
+        return None
+    try:
+        return await authenticate_user(token)
+    except Exception:
+        return None
+
+
 async def resolve_current_user_optional(request: Request):
     """Return the user the request is authenticated as, or ``None``.
 
@@ -115,6 +168,7 @@ __all__ = [
     "create_jwt",
     "get_configuration",
     "get_current_user",
+    "get_current_user_optional",
     "get_token_from_cookies",
     "resolve_current_user_optional",
     "set_auth_cookie",

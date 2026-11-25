@@ -89,6 +89,15 @@ export function createAppStateStore(initial: Partial<AppStateData> = {}) {
   }));
 }
 
+/** Clear persisted user API keys without requiring an AppStateProvider. */
+export function clearPersistedUserEnv(): void {
+  try {
+    localStorage.removeItem('userEnv');
+  } catch {
+    // Storage may be unavailable (private mode); logout still proceeds.
+  }
+}
+
 export function AppStateProvider({
   children,
   store: providedStore

@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import uuid
 from typing import Any, Dict, Literal, Optional, Tuple, TypedDict, Union
 from urllib.parse import unquote
 
@@ -50,6 +52,12 @@ class WebSocketSessionAuth(TypedDict):
     clientType: ClientType
     chatProfile: str | None
     threadId: str | None
+
+
+# Bound per-session fan-out. The run lock serializes execution; these caps
+# bound the queue of work waiting behind it and the audio callback backlog.
+_MAX_PENDING_RUNS = int(os.environ.get("CHAINLIT_MAX_PENDING_RUNS", "8") or 0)
+_MAX_AUDIO_TASKS = int(os.environ.get("CHAINLIT_MAX_AUDIO_TASKS", "4") or 0)
 
 
 def _session_owner_matches_user(
@@ -169,9 +177,26 @@ async def resume_thread(session: WebsocketSession):
 
 
 def load_user_env(user_env):
+    """Parse the client-supplied environment map and enforce shape.
+
+    The value crosses the socket handshake unauthenticated (when login is
+    disabled), so anything other than a flat string-to-string object is
+    refused before it reaches app code or a session.
+    """
     user_env_dict = {}
     if user_env:
-        user_env_dict = json.loads(user_env)
+        try:
+            parsed = json.loads(user_env)
+        except (TypeError, ValueError) as exc:
+            raise ConnectionRefusedError("Invalid user environment variables") from exc
+        if parsed is None:
+            parsed = {}
+        if not isinstance(parsed, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in parsed.items()
+        ):
+            raise ConnectionRefusedError("Invalid user environment variables")
+        user_env_dict = parsed
     # Check user env
     if config.project.user_env:
         if not user_env_dict:
@@ -234,16 +259,23 @@ async def connect(sid: str, environ: WSGIEnvironment, auth: WebSocketSessionAuth
             logger.error("Authentication failed in websocket connect.")
             raise ConnectionRefusedError("authentication failed")
 
-        if thread_id:
-            if data_layer := get_data_layer():
-                thread = await data_layer.get_thread(thread_id)
-                if thread:
-                    access = await authorize_thread_read(
-                        thread_id, user, thread=thread, data_layer=data_layer
-                    )
-                    if access not in (ThreadAccess.OWNER, ThreadAccess.MISSING):
-                        logger.error("Authorization for the thread failed.")
-                        raise ConnectionRefusedError("authorization failed")
+    # Thread authorization also applies without login. Otherwise a client
+    # could supply a shared/known thread id and append steps to an owned
+    # thread when authentication is disabled. Ownerless threads remain
+    # resumable in no-auth mode because there is no principal to compare.
+    if thread_id:
+        if data_layer := get_data_layer():
+            thread = await data_layer.get_thread(thread_id)
+            if thread:
+                access = await authorize_thread_read(
+                    thread_id, user, thread=thread, data_layer=data_layer
+                )
+                allowed = {ThreadAccess.OWNER, ThreadAccess.MISSING}
+                if not require_login():
+                    allowed.add(ThreadAccess.OWNERLESS)
+                if access not in allowed:
+                    logger.error("Authorization for the thread failed.")
+                    raise ConnectionRefusedError("authorization failed")
 
     # Session scoped function to emit to the client
     def emit_fn(event, data):
@@ -479,22 +511,103 @@ async def stop(sid):
         await supersede_thread_approvals(session.thread_id, reason="stopped")
         await Message(content="Task manually stopped.").send()
 
-        if session.current_task:
-            session.current_task.cancel()
+        # Cancel every run/audio task owned by the session, not only the
+        # newest pointer. Tasks waiting on the run lock are cancelled too.
+        owned = {
+            *getattr(session, "run_tasks", ()),
+            *getattr(session, "audio_tasks", ()),
+        }
+        current = getattr(session, "current_task", None)
+        if current is not None:
+            owned.add(current)
+        for task in owned:
+            task.cancel()
 
         if config.code.on_stop:
             await config.code.on_stop()
 
 
-def _start_run(session: WebsocketSession, coro) -> asyncio.Task:
-    """Start a run and make it the task that ``stop`` cancels."""
-    task = asyncio.create_task(coro)
+def _mark_message_once(session: WebsocketSession, payload: MessagePayload) -> bool:
+    """Return False for a replayed v4 message id within this session."""
+    raw = payload.get("message", {}).get("id")
+    if not isinstance(raw, str) or len(raw) > 128:
+        return True
+    try:
+        parsed = uuid.UUID(raw)
+    except (ValueError, TypeError):
+        return True
+    if parsed.version != 4:
+        return True
+    seen = getattr(session, "processed_message_ids", None)
+    if seen is None:
+        seen = set()
+        session.processed_message_ids = seen
+    if raw in seen:
+        return False
+    if len(seen) >= 1000:
+        seen.clear()
+    seen.add(raw)
+    return True
+
+
+def _start_run(session: WebsocketSession, coro) -> Optional[asyncio.Task]:
+    """Queue one run behind the session lock and track every task."""
+    run_tasks = getattr(session, "run_tasks", None)
+    if run_tasks is None:
+        run_tasks = set()
+        session.run_tasks = run_tasks
+    if _MAX_PENDING_RUNS > 0 and len(run_tasks) >= _MAX_PENDING_RUNS:
+        coro.close()
+        return None
+
+    async def _run():
+        lock = getattr(session, "run_lock", None)
+        if lock is None:
+            return await coro
+        async with lock:
+            return await coro
+
+    task = asyncio.create_task(_run())
+    run_tasks.add(task)
+    session.current_task = task
 
     def clear(completed: asyncio.Task) -> None:
+        run_tasks.discard(completed)
         if session.current_task is completed:
             session.current_task = None
 
-    session.current_task = task
+    task.add_done_callback(clear)
+    return task
+
+
+def _start_audio_task(session: WebsocketSession, coro) -> Optional[asyncio.Task]:
+    """Track audio callbacks, serialized in arrival order and bounded."""
+    audio_tasks = getattr(session, "audio_tasks", None)
+    if audio_tasks is None:
+        audio_tasks = set()
+        session.audio_tasks = audio_tasks
+    if _MAX_AUDIO_TASKS > 0 and len(audio_tasks) >= _MAX_AUDIO_TASKS:
+        coro.close()
+        return None
+
+    async def _run():
+        lock = getattr(session, "audio_lock", None)
+        if lock is None:
+            return await coro
+        async with lock:
+            return await coro
+
+    task = asyncio.create_task(_run())
+    audio_tasks.add(task)
+
+    def clear(completed: asyncio.Task) -> None:
+        audio_tasks.discard(completed)
+        if completed.cancelled():
+            return
+        exc = completed.exception()
+        if exc is not None:
+            logger.error("Audio chunk callback failed: %s", exc)
+
     task.add_done_callback(clear)
     return task
 
@@ -559,7 +672,10 @@ async def process_edit_message(session: WebsocketSession, payload: MessagePayloa
             if orig_message:
                 await message.remove()
 
-            if message.id == payload["message"]["id"]:
+            if (
+                message.id == payload["message"]["id"]
+                and message.type == "user_message"
+            ):
                 message.content = payload["message"]["output"]
                 await message.update()
                 await message.remove_children()
@@ -662,8 +778,15 @@ async def message(sid, payload: MessagePayload):
     context = init_ws_context(session)
     if await _refuse_if_approval_pending(session, context):
         return
+    if not _mark_message_once(session, payload):
+        logger.warning("Ignoring replayed client message id")
+        return
 
-    _start_run(session, process_message(session, payload))
+    task = _start_run(session, process_message(session, payload))
+    if task is None:
+        await context.emitter.send_toast(
+            "Too many messages are queued; wait for the current run.", "error"
+        )
 
 
 @sio.on("window_message")  # pyright: ignore [reportOptionalCall]
@@ -715,7 +838,11 @@ async def audio_chunk(sid, payload: InputAudioChunkPayload):
         and config.features.audio.enabled
         and config.code.on_audio_chunk
     ):
-        asyncio.create_task(config.code.on_audio_chunk(InputAudioChunk(**payload)))
+        task = _start_audio_task(
+            session, config.code.on_audio_chunk(InputAudioChunk(**payload))
+        )
+        if task is None:
+            logger.warning("Dropping audio chunk: session audio queue is full")
 
 
 @sio.on("audio_end")
@@ -733,9 +860,13 @@ async def audio_end(sid):
     try:
         await context.emitter.task_start()
 
+        audio_tasks = getattr(session, "audio_tasks", ())
+        if audio_tasks:
+            await asyncio.gather(*list(audio_tasks), return_exceptions=True)
+
         if not session.has_first_interaction:
             session.has_first_interaction = True
-            asyncio.create_task(context.emitter.init_thread("audio"))
+            await context.emitter.init_thread("audio")
 
         config: ChainlitConfig = session.get_config()  # type: ignore
 

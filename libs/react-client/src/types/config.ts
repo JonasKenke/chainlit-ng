@@ -36,6 +36,8 @@ export interface IAuthConfig {
 
 export interface IChainlitConfig {
   markdown?: string;
+  /** Explicit cross-origin peers allowed to exchange window messages. */
+  allowOrigins?: string[];
   ui: {
     name: string;
     description?: string;

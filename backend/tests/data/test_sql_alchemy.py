@@ -1414,3 +1414,124 @@ async def test_execute_sql_raise_on_error_is_additive(data_layer: SQLAlchemyData
         await data_layer.execute_sql(
             "SELECT * FROM table_that_does_not_exist", {}, raise_on_error=True
         )
+
+
+async def test_create_step_cannot_move_a_step_between_threads(
+    mock_chainlit_context, data_layer: SQLAlchemyDataLayer
+):
+    """A shared step id must not let another thread overwrite or move it."""
+    step_id = str(uuid.uuid4())
+    original = {
+        "id": step_id,
+        "name": "original",
+        "type": "assistant_message",
+        "threadId": "thread-a",
+        "disableFeedback": False,
+        "streaming": False,
+        "output": "original output",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "metadata": {},
+        "generation": {},
+    }
+    forged = {
+        **original,
+        "threadId": "thread-b",
+        "output": "forged output",
+        "type": "user_message",
+    }
+
+    async with mock_chainlit_context:
+        await data_layer.create_step(original)
+        await data_layer.create_step(forged)
+
+    rows = await data_layer.execute_sql(
+        'SELECT "threadId", "output" FROM steps WHERE "id" = :id',
+        {"id": step_id},
+    )
+    assert rows == [{"threadId": "thread-a", "output": "original output"}]
+
+
+async def test_concurrent_unshare_and_rename_keep_the_thread_unshared(
+    mock_chainlit_context, data_layer: SQLAlchemyDataLayer
+):
+    """A stale metadata write must not reverse an unshare."""
+    thread_id = "thread-share-race"
+    async with mock_chainlit_context:
+        await data_layer.update_thread(
+            thread_id=thread_id,
+            metadata={"is_shared": True, "shared_at": "2026-01-01T00:00:00Z"},
+        )
+
+        import asyncio
+
+        await asyncio.gather(
+            data_layer.update_thread(
+                thread_id=thread_id, metadata={"is_shared": False}
+            ),
+            data_layer.update_thread(
+                thread_id=thread_id, metadata={"note": "concurrent"}
+            ),
+        )
+
+        stored = await data_layer.get_thread(thread_id)
+
+    assert stored is not None
+    raw_metadata = stored.get("metadata")
+    metadata = (
+        json.loads(raw_metadata) if isinstance(raw_metadata, str) else raw_metadata
+    )
+    assert isinstance(metadata, dict)
+    assert metadata["is_shared"] is False
+    assert metadata.get("note") == "concurrent"
+
+
+async def test_ssl_require_verifies_certificates_and_hostname(tmp_path):
+    import ssl
+    from unittest.mock import patch
+
+    captured = {}
+    original = create_async_engine
+
+    def capture_engine(*args, **kwargs):
+        captured.update(kwargs)
+        return original(*args, **kwargs)
+
+    with patch(
+        "chainlit.data.sql_alchemy.create_async_engine",
+        side_effect=capture_engine,
+    ):
+        layer = SQLAlchemyDataLayer(
+            f"sqlite+aiosqlite:///{tmp_path / 'ssl.sqlite'}", ssl_require=True
+        )
+
+    context = captured["connect_args"]["ssl"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    await layer.close()
+
+
+async def test_create_step_creates_the_thread_row(
+    mock_chainlit_context, data_layer: SQLAlchemyDataLayer
+):
+    """The built-in layer self-heals thread ordering for strict callers."""
+    step_id = str(uuid.uuid4())
+    async with mock_chainlit_context:
+        await data_layer.create_step(
+            {
+                "id": step_id,
+                "name": "user",
+                "type": "user_message",
+                "threadId": "round-trip-thread",
+                "disableFeedback": False,
+                "streaming": False,
+                "output": "hello",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "metadata": {},
+                "generation": {},
+            }
+        )
+        thread = await data_layer.get_thread("round-trip-thread")
+
+    assert thread is not None
+    assert thread["steps"][0]["id"] == step_id

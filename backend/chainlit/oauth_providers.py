@@ -1,6 +1,7 @@
 import base64
 import os
 import urllib.parse
+from contextvars import ContextVar
 from typing import Dict, List, Optional, Tuple
 
 import httpx
@@ -9,6 +10,13 @@ from fastapi import HTTPException
 from chainlit.user import User
 
 ACCESS_TOKEN_MISSING = "Access token missing in the response"
+
+# Azure token exchange and userinfo are two awaits in one request task. Keep
+# the refresh token request-local instead of on the process-wide provider
+# singleton, where concurrent logins could receive each other's token.
+_refresh_token_context: ContextVar[Optional[str]] = ContextVar(
+    "oauth_refresh_token", default=None
+)
 
 
 class OAuthProvider:
@@ -232,7 +240,7 @@ class AzureADOAuthProvider(OAuthProvider):
         refresh_token = json.get("refresh_token")
         if not token:
             raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
-        self._refresh_token = refresh_token
+        _refresh_token_context.set(refresh_token)
         return token
 
     async def get_user_info(self, token: str):
@@ -259,12 +267,16 @@ class AzureADOAuthProvider(OAuthProvider):
                 # Ignore errors getting the photo
                 pass
 
+            refresh_token = _refresh_token_context.get()
+            if refresh_token is not None:
+                # App callbacks receive raw_user_data; never put this in
+                # User.metadata, which is serialized into the JWT and /user.
+                azure_user["refresh_token"] = refresh_token
             user = User(
                 identifier=azure_user["userPrincipalName"],
                 metadata={
                     "image": azure_user.get("image"),
                     "provider": "azure-ad",
-                    "refresh_token": getattr(self, "_refresh_token", None),
                 },
             )
             return (azure_user, user)
@@ -331,7 +343,7 @@ class AzureADHybridOAuthProvider(OAuthProvider):
         refresh_token = json.get("refresh_token")
         if not token:
             raise HTTPException(status_code=400, detail=ACCESS_TOKEN_MISSING)
-        self._refresh_token = refresh_token
+        _refresh_token_context.set(refresh_token)
         return token
 
     async def get_user_info(self, token: str):
@@ -358,12 +370,16 @@ class AzureADHybridOAuthProvider(OAuthProvider):
                 # Ignore errors getting the photo
                 pass
 
+            refresh_token = _refresh_token_context.get()
+            if refresh_token is not None:
+                # App callbacks receive raw_user_data; never put this in
+                # User.metadata, which is serialized into the JWT and /user.
+                azure_user["refresh_token"] = refresh_token
             user = User(
                 identifier=azure_user["userPrincipalName"],
                 metadata={
                     "image": azure_user.get("image"),
                     "provider": "azure-ad",
-                    "refresh_token": getattr(self, "_refresh_token", None),
                 },
             )
             return (azure_user, user)

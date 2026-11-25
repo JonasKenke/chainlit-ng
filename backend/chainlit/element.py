@@ -227,13 +227,29 @@ class Element:
             return "file"
 
     @classmethod
-    def get_content_disposition(cls) -> Literal["inline"] | None:
+    def get_content_disposition(
+        cls, mime: Optional[str] = None
+    ) -> Literal["inline"] | None:
         """Return Content-Disposition for persisted blob content.
 
         This is independent of Element.display (UI placement). The frontend
-        renders media by element.type, so disposition follows type.
+        renders media by element.type, so disposition follows type. When the
+        caller passes the stored MIME type, inline is limited to the strict
+        browser-rendered allowlist; an SVG or an HTML body declared under an
+        image type must download instead of executing on the storage origin.
         """
-        return "inline" if cls.type in cls._BROWSER_RENDERED_TYPES else None
+        if cls.type not in cls._BROWSER_RENDERED_TYPES:
+            return None
+        if mime is not None and not cls.is_browser_rendered_mime(mime):
+            return None
+        return "inline"
+
+    @staticmethod
+    def storage_filename(name: str) -> str:
+        """Return one safe object-key component for a display filename."""
+        base = str(name or "").replace("\\", "/").rsplit("/", 1)[-1]
+        base = re.sub(r"[\x00-\x1f\x7f]", "_", base).strip()
+        return base[:200] or "file"
 
     @classmethod
     def normalize_mime(cls, mime_type: str) -> str | None:

@@ -59,6 +59,7 @@ from chainlit.auth import (
     decode_jwt,
     get_configuration,
     get_current_user,
+    get_current_user_optional,
     require_login,
     resolve_current_user_optional,
 )
@@ -66,6 +67,7 @@ from chainlit.auth.cookie import (
     clear_auth_cookie,
     clear_oauth_cookies,
     get_oauth_nonce_cookie,
+    get_token_from_cookies,
     set_auth_cookie,
     set_oauth_nonce_cookie,
     set_oauth_state_cookie,
@@ -176,7 +178,7 @@ from chainlit.types import (
     UpdateSkillRequest,
     UpdateThreadRequest,
 )
-from chainlit.user import PersistedUser, User
+from chainlit.user import PersistedUser, User, redact_sensitive_metadata
 from chainlit.utils import utc_now
 
 from ._utils import is_path_inside
@@ -392,11 +394,80 @@ async def request_validation_exception_handler(
     )
 
 
+def _cors_allow_credentials() -> bool:
+    """Resolve CORS credentials without reflecting every origin.
+
+    An unset value enables credentials only for an explicit origin allowlist.
+    A wildcard allowlist keeps the pre-3.1 behavior only when the deployment
+    opts in, because Starlette then reflects any caller's Origin together with
+    ``Access-Control-Allow-Credentials: true``.
+    """
+    configured = config.project.allow_credentials
+    if configured is not None:
+        return configured
+    return "*" not in config.project.allow_origins
+
+
+def _socket_origin_allowed(origin: Optional[str], environ: Dict[str, Any]) -> bool:
+    """Validate a browser Origin for Engine.IO (HTTP polling and WebSocket).
+
+    Same-origin and explicitly configured origins always pass. A wildcard
+    allowlist passes only when login is not required: without an identity
+    there are no credentials for a cross-site handshake to steal. With login
+    enabled a wildcard must not silently authorize cross-site WebSockets.
+    """
+    if not origin:
+        return True
+
+    try:
+        parsed = URL(origin)
+    except Exception:
+        return False
+
+    if not parsed.netloc:
+        return False
+
+    host = str(environ.get("HTTP_HOST") or "").lower()
+    if host and parsed.netloc.lower() == host:
+        return True
+
+    chainlit_url = os.environ.get("CHAINLIT_URL")
+    if chainlit_url:
+        try:
+            if parsed.netloc.lower() == URL(chainlit_url).netloc.lower():
+                return True
+        except Exception:
+            pass
+
+    normalized = origin.rstrip("/")
+    explicit = {
+        candidate.rstrip("/")
+        for candidate in config.project.allow_origins
+        if candidate != "*"
+    }
+    if normalized in explicit:
+        return True
+
+    if "*" in config.project.allow_origins:
+        return not require_login()
+
+    return False
+
+
+_cors_credentials = _cors_allow_credentials()
+if _cors_credentials and "*" in config.project.allow_origins:
+    logger.warning(
+        "CORS: allow_credentials=true with a wildcard allow_origins list reflects "
+        "every Origin. Configure allow_origins explicitly."
+    )
+
 # Engine.IO silently drops frames above this limit. The composer enforces the
 # same limit (isMessageTooLarge in frontend/src/lib/utils.ts) so an oversized
 # message is reported instead of being rendered and lost.
 sio = socketio.AsyncServer(
-    cors_allowed_origins=[], async_mode="asgi", max_http_buffer_size=1_000_000
+    cors_allowed_origins=_socket_origin_allowed,
+    async_mode="asgi",
+    max_http_buffer_size=1_000_000,
 )
 
 asgi_app = socketio.ASGIApp(socketio_server=sio, socketio_path="")
@@ -408,7 +479,7 @@ app.mount(SOCKET_IO_PATH, asgi_app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.project.allow_origins,
-    allow_credentials=True,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -433,22 +504,33 @@ app.add_middleware(RequestContextMiddleware)
 router = APIRouter(prefix=config.run.root_path)
 
 
+def _resolve_static_file(base_path: Path, filename: str) -> Path:
+    """Resolve one request path under base_path, rejecting NUL and escapes.
+
+    ``Path.resolve`` raises ValueError on an embedded NUL; the route used to
+    turn that into an unauthenticated 500.
+    """
+    if "\x00" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    try:
+        file_path = (base_path / filename).resolve()
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid filename") from None
+    if not is_path_inside(file_path, base_path):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return file_path
+
+
 @router.get("/public/{filename:path}")
 async def serve_public_file(
     filename: str,
 ):
     """Serve a file from public dir."""
 
-    base_path = Path(public_dir)
-    file_path = (base_path / filename).resolve()
-
-    if not is_path_inside(file_path, base_path):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
+    file_path = _resolve_static_file(Path(public_dir), filename)
     if file_path.is_file():
         return FileResponse(file_path)
-    else:
-        raise HTTPException(status_code=404, detail="File not found")
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 @router.get("/assets/{filename:path}")
@@ -457,16 +539,10 @@ async def serve_asset_file(
 ):
     """Serve a file from assets dir."""
 
-    base_path = Path(os.path.join(build_dir, "assets"))
-    file_path = (base_path / filename).resolve()
-
-    if not is_path_inside(file_path, base_path):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
+    file_path = _resolve_static_file(Path(os.path.join(build_dir, "assets")), filename)
     if file_path.is_file():
         return FileResponse(file_path)
-    else:
-        raise HTTPException(status_code=404, detail="File not found")
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 @router.get("/copilot/{filename:path}")
@@ -475,16 +551,10 @@ async def serve_copilot_file(
 ):
     """Serve a file from assets dir."""
 
-    base_path = Path(copilot_build_dir)
-    file_path = (base_path / filename).resolve()
-
-    if not is_path_inside(file_path, base_path):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
+    file_path = _resolve_static_file(Path(copilot_build_dir), filename)
     if file_path.is_file():
         return FileResponse(file_path)
-    else:
-        raise HTTPException(status_code=404, detail="File not found")
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 # -------------------------------------------------------------------------------
@@ -507,18 +577,52 @@ if (
 #                               TEAMS HANDLER
 # -------------------------------------------------------------------------------
 
-if os.environ.get("TEAMS_APP_ID") and os.environ.get("TEAMS_APP_PASSWORD"):
+
+async def _process_teams_activity(request: Request, adapter=None, bot=None):
+    """Validate and dispatch one Teams activity without leaking 500s.
+
+    Bot Framework authentication failures are 401s, malformed activities are
+    400s. Keeping this helper independent of the conditional route makes the
+    failure mapping testable without a Teams tenant.
+    """
     from botbuilder.schema import Activity
 
-    from chainlit.teams.app import adapter, bot
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if adapter is None or bot is None:
+        from chainlit.teams.app import adapter as teams_adapter, bot as teams_bot
+
+        adapter, bot = teams_adapter, teams_bot
+
+    try:
+        body = await request.json()
+        activity = Activity().deserialize(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid activity") from None
+
+    expected_tenant = os.environ.get("TEAMS_APP_TENANT_ID")
+    if expected_tenant:
+        conversation = getattr(activity, "conversation", None)
+        tenant_id = getattr(conversation, "tenant_id", None)
+        if str(tenant_id or "") != expected_tenant:
+            raise HTTPException(status_code=403, detail="Unexpected tenant")
+
+    try:
+        return await adapter.process_activity(activity, auth_header, bot.on_turn)
+    except PermissionError:
+        raise HTTPException(status_code=401, detail="Unauthorized") from None
+    except Exception:
+        logger.warning("Teams activity rejected", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid activity") from None
+
+
+if os.environ.get("TEAMS_APP_ID") and os.environ.get("TEAMS_APP_PASSWORD"):
 
     @router.post("/teams/events")
     async def teams_endpoint(req: Request):
-        body = await req.json()
-        activity = Activity().deserialize(body)
-        auth_header = req.headers.get("Authorization", "")
-        response = await adapter.process_activity(activity, auth_header, bot.on_turn)
-        return response
+        return await _process_teams_activity(req)
 
 
 # -------------------------------------------------------------------------------
@@ -703,6 +807,17 @@ MCP_PROMPT_TOO_LARGE_DETAIL = (
     "The prompt is larger than the size limit and was not loaded."
 )
 
+_MAX_MCP_SESSIONS = int(os.environ.get("CHAINLIT_MAX_MCP_SESSIONS", "16") or 0)
+
+
+def _mcp_capacity_reached(session, name: str) -> bool:
+    """Whether a new (non-replacement) MCP connection exceeds the cap."""
+    if _MAX_MCP_SESSIONS <= 0:
+        return False
+    if name in session.mcp_sessions or name in session.mcp_oauth_tasks:
+        return False
+    return len(session.mcp_sessions) + len(session.mcp_oauth_tasks) >= _MAX_MCP_SESSIONS
+
 
 def get_mcp_oauth_callback_url(request: Request) -> str:
     """Return the absolute URL the authorization server redirects back to.
@@ -763,8 +878,11 @@ def _get_oauth_redirect_error(
             "error": error,
         }
     )
+    # Root-relative: request.url_for() would turn an attacker-influenced Host
+    # header into an absolute open redirect.
+    root_path = config.run.root_path.rstrip("/")
     response = RedirectResponse(
-        url=str(request.url_for("login")) + "?" + params,
+        url=f"{root_path}/login?{params}",
         status_code=status_code,
     )
     clear_oauth_cookies(response)
@@ -784,6 +902,9 @@ async def _authenticate_user(
 
     # If a data layer is defined, attempt to persist user.
     if data_layer := get_data_layer():
+        from chainlit.auth import resolve_provider_identity
+
+        user = await resolve_provider_identity(user, data_layer)
         try:
             await data_layer.create_user(user)
         except Exception as e:
@@ -800,6 +921,48 @@ async def _authenticate_user(
     return response
 
 
+_LOGIN_MAX_ATTEMPTS = int(os.environ.get("CHAINLIT_LOGIN_MAX_ATTEMPTS", "20") or 0)
+_LOGIN_WINDOW_SECONDS = max(
+    1, int(os.environ.get("CHAINLIT_LOGIN_WINDOW_SECONDS", "60") or 60)
+)
+
+
+def _login_attempt_key(request: Request, username: str) -> str:
+    client = request.client.host if request.client else "unknown"
+    return f"login-attempt:{client}:{username.lower()[:200]}"
+
+
+async def _enforce_login_rate_limit(request: Request, username: str) -> None:
+    if _LOGIN_MAX_ATTEMPTS <= 0:
+        return
+    from chainlit.state_store import get_state_store
+
+    try:
+        count = await get_state_store().increment(
+            _login_attempt_key(request, username), ttl=_LOGIN_WINDOW_SECONDS
+        )
+    except Exception:
+        # Availability over throttling: never take password login down when
+        # the coordination store is unavailable.
+        logger.exception("Unable to update login rate limiter")
+        return
+    if count > _LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts",
+            headers={"Retry-After": str(_LOGIN_WINDOW_SECONDS)},
+        )
+
+
+async def _clear_login_rate_limit(request: Request, username: str) -> None:
+    from chainlit.state_store import get_state_store
+
+    try:
+        await get_state_store().delete(_login_attempt_key(request, username))
+    except Exception:
+        pass
+
+
 @router.post("/login")
 async def login(
     request: Request,
@@ -809,14 +972,20 @@ async def login(
     """
     Login a user using the password auth callback.
     """
+    _require_same_origin(request)
+
     if not config.code.password_auth_callback:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="No auth_callback defined"
         )
 
+    await _enforce_login_rate_limit(request, form_data.username)
+
     user = await config.code.password_auth_callback(
         form_data.username, form_data.password
     )
+    if user:
+        await _clear_login_rate_limit(request, form_data.username)
 
     return await _authenticate_user(request, user)
 
@@ -830,12 +999,32 @@ async def logout(request: Request, response: Response):
     the user's MCP credentials and in-flight authorizations are dropped before
     ``on_logout`` runs, so a failing callback cannot leave them behind.
     """
+    from chainlit.auth.jwt import revoke_token
     from chainlit.mcp_oauth import get_pending_authorizations, get_token_store
+
+    _require_same_origin(request)
+
+    token = get_token_from_cookies(request.cookies)
+    if not token:
+        authorization = request.headers.get("Authorization", "")
+        scheme, _, credentials = authorization.partition(" ")
+        if scheme.lower() == "bearer" and credentials:
+            token = credentials
+    if token:
+        await revoke_token(token)
 
     user = await resolve_current_user_optional(request)
     if user is not None:
+        from chainlit.session import WebsocketSession
+
         get_token_store().forget_user(user.identifier)
         get_pending_authorizations().cancel_user(user.identifier)
+        for session in WebsocketSession.sessions_for_user(user.identifier):
+            session.to_clear = True
+            try:
+                await sio.disconnect(session.socket_id)
+            except Exception:
+                logger.exception("Unable to disconnect a logged-out session")
 
     clear_auth_cookie(request, response)
 
@@ -854,6 +1043,8 @@ async def logout(request: Request, response: Response):
 async def jwt_auth(request: Request):
     """Login a user using a valid jwt."""
     from jwt import InvalidTokenError
+
+    _require_same_origin(request)
 
     auth_header: Optional[str] = request.headers.get("Authorization")
     if not auth_header:
@@ -882,6 +1073,8 @@ async def jwt_auth(request: Request):
 @router.post("/auth/header")
 async def header_auth(request: Request):
     """Login a user using the header_auth_callback."""
+    _require_same_origin(request)
+
     if not config.code.header_auth_callback:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1015,9 +1208,9 @@ async def oauth_login(provider_id: str, request: Request):
         url=f"{provider.authorize_url}?{params}",
     )
 
-    set_oauth_state_cookie(response, random)
+    set_oauth_state_cookie(response, random, request)
     if nonce is not None:
-        set_oauth_nonce_cookie(response, nonce)
+        set_oauth_nonce_cookie(response, nonce, request)
 
     return response
 
@@ -1189,6 +1382,7 @@ async def oauth_azure_hf_callback(
 
 GenericUser = Union[User, PersistedUser, None]
 UserParam = Annotated[GenericUser, Depends(get_current_user)]
+OptionalUserParam = Annotated[GenericUser, Depends(get_current_user_optional)]
 
 _SCHEDULED_TASK_METHODS = (
     "create_scheduled_task",
@@ -1322,7 +1516,7 @@ def _supports_delete_all_threads(data_layer: Optional[BaseDataLayer]) -> bool:
 
 @router.get("/user")
 async def get_user(current_user: UserParam) -> GenericUser:
-    return current_user
+    return redact_sensitive_metadata(current_user)
 
 
 _language_pattern = (
@@ -1332,8 +1526,15 @@ _language_pattern = (
 
 @router.post("/set-session-cookie")
 async def set_session_cookie(request: Request, response: Response):
+    from chainlit.session import is_valid_session_id
+
+    _require_same_origin(request)
+
     body = await request.json()
     session_id = body.get("session_id")
+
+    if not is_valid_session_id(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session id")
 
     is_local = request.client and request.client.host in ["127.0.0.1", "localhost"]
 
@@ -1387,16 +1588,69 @@ def _no_store(response: JSONResponse) -> JSONResponse:
 
 
 def _require_same_origin(request: Request) -> None:
-    """Reject a present cross-origin Origin header on state-changing routes."""
+    """Reject a present cross-origin Origin header on state-changing routes.
+
+    An absent Origin (CLI/API clients) is allowed. Explicit entries in
+    ``project.allow_origins`` are trusted for cross-origin frontends; a
+    wildcard is deliberately not, because it would make the check a no-op.
+    Scheme is part of the comparison: an HTTP page on the HTTPS host must not
+    be able to drive a credentialed login.
+    """
     origin = request.headers.get("origin")
     if not origin:
         return
-    allowed = {
-        request.headers.get("host"),
-        URL(get_user_facing_url(request.base_url)).netloc,
-    }
-    if URL(origin).netloc not in allowed:
+
+    try:
+        parsed = URL(origin)
+        origin_scheme = parsed.scheme
+        origin_netloc = parsed.netloc
+    except Exception:
+        origin_scheme = ""
+        origin_netloc = ""
+
+    if origin_scheme not in ("http", "https") or not origin_netloc:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
+    if request.url.scheme == "https" and origin_scheme != "https":
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+
+    chainlit_url = os.environ.get("CHAINLIT_URL")
+    chainlit_netloc = ""
+    if chainlit_url:
+        try:
+            chainlit_origin = URL(chainlit_url)
+            chainlit_netloc = chainlit_origin.netloc
+            if chainlit_origin.scheme == "https" and origin_scheme != "https":
+                raise HTTPException(
+                    status_code=403, detail="Cross-origin request rejected"
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            chainlit_netloc = ""
+
+    allowed = {
+        str(request.headers.get("host") or ""),
+        URL(get_user_facing_url(request.base_url)).netloc,
+        chainlit_netloc,
+    }
+    if origin_netloc in allowed:
+        return
+
+    for entry in config.project.allow_origins:
+        if entry == "*":
+            continue
+        try:
+            allowed_origin = URL(entry)
+        except Exception:
+            continue
+        if (
+            allowed_origin.scheme == origin_scheme
+            and allowed_origin.netloc == origin_netloc
+        ):
+            return
+
+    raise HTTPException(status_code=403, detail="Cross-origin request rejected")
 
 
 def _thread_grants_layer() -> BaseDataLayer:
@@ -1415,15 +1669,25 @@ def _thread_grants_layer() -> BaseDataLayer:
 
 
 def _feedback_gate_active(data_layer: BaseDataLayer) -> bool:
-    """Whether feedback mutations are owner-gated; 403 if the layer cannot."""
-    if not _thread_grants_active(data_layer):
-        return False
+    """Whether feedback mutations are owner-gated; 403 if the layer cannot.
+
+    With login enabled, a capable data layer always enforces ownership. The
+    thread-grants flag no longer decides this: otherwise every authenticated
+    caller could update or delete another user's feedback by id. Anonymous
+    (no-login) deployments keep the legacy behavior because they have no
+    principal to compare.
+    """
     if not getattr(data_layer, "feedback_authorization_supported", False):
-        raise HTTPException(
-            status_code=403,
-            detail="Feedback authorization is not supported by the data layer",
-        )
-    return True
+        if _thread_grants_active(data_layer):
+            raise HTTPException(
+                status_code=403,
+                detail="Feedback authorization is not supported by the data layer",
+            )
+        # Legacy/custom layers: still gate authenticated callers through the
+        # thread-author check. Existing feedback ids fail closed in
+        # _authorize_feedback_update because the row lookup is unsupported.
+        return require_login()
+    return require_login()
 
 
 def _same_principal(one: Optional[User], other: Optional[User]) -> bool:
@@ -1602,6 +1866,10 @@ async def project_settings(
     return JSONResponse(
         content={
             "ui": cfg.ui.model_dump(),
+            # Explicit origins are the only cross-origin window-message peers
+            # the UI will trust. A wildcard is served as-is but is not matched
+            # against event.origin by the client.
+            "allowOrigins": list(config.project.allow_origins),
             "features": features_dict,
             "userEnv": cfg.project.user_env,
             "maskUserEnv": cfg.project.mask_user_env,
@@ -1678,8 +1946,11 @@ async def update_feedback(
                     f"Error in user-provided on_feedback callback: {callback_error}"
                 )
                 # Optionally, you could continue without raising an exception to avoid disrupting the endpoint.
-    except Exception as e:
-        raise HTTPException(detail=str(e), status_code=500) from e
+    except Exception:
+        logger.exception("Failed to update feedback")
+        raise HTTPException(
+            status_code=500, detail="Failed to update feedback"
+        ) from None
 
     return JSONResponse(content={"success": True, "feedbackId": feedback_id})
 
@@ -1816,7 +2087,7 @@ async def get_thread(
 async def get_shared_thread(
     request: Request,
     thread_id: str,
-    current_user: UserParam,
+    current_user: OptionalUserParam,
 ):
     """Get a shared thread (read-only for everyone).
 
@@ -1846,14 +2117,18 @@ async def get_shared_thread(
     if access not in (ThreadAccess.OWNER, ThreadAccess.PUBLIC, ThreadAccess.SHARED):
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    # The owner identity is only stripped while the grants feature is active.
+    # Legacy share attribution: with thread grants off the owner identity is
+    # kept (an existing contract), and stripped only when grants are active.
     live_ids = await live_interaction_ids([thread])
     return _no_store(
         JSONResponse(
             content=public_thread(
                 thread,
-                include_owner=not _thread_grants_active(data_layer),
+                # Anonymous share links do not get owner attribution.
+                include_owner=bool(current_user)
+                and not _thread_grants_active(data_layer),
                 live_ids=live_ids,
+                strip_storage_keys=True,
             )
         )
     )
@@ -3519,6 +3794,11 @@ async def get_thread_element(
     res = await data_layer.get_element(thread_id, element_id)
     if res is None:
         raise HTTPException(status_code=404, detail="Element not found")
+    # Storage ids are not needed by any renderer and must not reach named
+    # share readers (or the owner's browser).
+    res = {
+        key: value for key, value in res.items() if key not in ("PK", "SK", "objectKey")
+    }
     return _no_store(JSONResponse(content=res))
 
 
@@ -4228,6 +4508,12 @@ async def connect_mcp(
             detail="This app does not support MCP.",
         )
 
+    if _mcp_capacity_reached(session, payload.name):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many MCP connections for this session",
+        )
+
     # Reject user-provided connections that try to claim a configured server's
     # name — must run BEFORE any eviction, otherwise a rejected attempt would
     # still have killed the legitimate session. Compared case-insensitively
@@ -4593,13 +4879,37 @@ async def connect_mcp(
                             stop_event=oauth_stop_event,
                             oauth_server_key=oauth_server_key,
                         )
-                        session.mcp_sessions[payload.name] = mcp_session_obj
+                        old_mcp = session.swap_mcp_session(
+                            payload.name, mcp_session_obj
+                        )
                         if session.mcp_oauth_tasks.get(payload.name) is task:
                             del session.mcp_oauth_tasks[payload.name]
 
                         connected = True
                         oauth_result["mcp"] = mcp_data
                         oauth_connected.set()
+
+                    if old_mcp is not None:
+                        # A plain connect may have published between our
+                        # initialization and this swap. Close the displaced
+                        # client instead of orphaning its transport/task.
+                        if on_mcp_disconnect := config.code.on_mcp_disconnect:
+                            try:
+                                await on_mcp_disconnect(payload.name, old_mcp.client)
+                            except Exception:
+                                logger.debug(
+                                    "Error in on_mcp_disconnect callback for %s",
+                                    payload.name,
+                                    exc_info=True,
+                                )
+                        try:
+                            await old_mcp.close()
+                        except Exception:
+                            logger.debug(
+                                "Error closing displaced MCP session %s",
+                                payload.name,
+                                exc_info=True,
+                            )
 
                     await _emit_oauth_event("mcp_connected", {"mcp": mcp_data})
                     await oauth_stop_event.wait()
@@ -5176,11 +5486,12 @@ async def disconnect_mcp(
         try:
             if callback:
                 await callback(payload.name, mcp_session_obj.client)
-        except Exception as e:
+        except Exception:
+            logger.exception("MCP disconnect callback failed")
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not disconnect from the MCP: {e!s}",
-            )
+                detail="Could not disconnect from the MCP server.",
+            ) from None
         finally:
             await mcp_session_obj.close()
 
@@ -5372,11 +5683,27 @@ async def upload_file(
         # the limit; rejected MIME/size uploads never reach this point.
         session.uploaded_file_counts[ask_parent_id] = uploaded + 1
         try:
-            content = await file.read()
-
-            file_response = await session.persist_file(
-                name=file.filename, content=content, mime=file.content_type
-            )
+            max_bytes = get_max_upload_size_bytes(spec)
+            if file.size is None or file.size > _UPLOAD_STREAM_THRESHOLD:
+                # Large or unknown-size bodies are streamed with a hard byte
+                # cap instead of being materialized with read().
+                file.file.seek(0)
+                file_response = await session.persist_file(
+                    name=file.filename,
+                    mime=file.content_type,
+                    fileobj=file.file,
+                    max_bytes=max_bytes,
+                )
+            else:
+                content = await file.read()
+                if max_bytes is not None and len(content) > max_bytes:
+                    raise ValueError("File size too large")
+                file_response = await session.persist_file(
+                    name=file.filename, content=content, mime=file.content_type
+                )
+        except ValueError as e:
+            session.uploaded_file_counts[ask_parent_id] -= 1
+            raise HTTPException(status_code=400, detail=str(e)) from None
         except BaseException:
             session.uploaded_file_counts[ask_parent_id] -= 1
             raise
@@ -5386,6 +5713,11 @@ async def upload_file(
         await file.close()
 
 
+# Bodies above this size are streamed to disk instead of being read into one
+# bytes object. Small uploads keep the existing in-memory path.
+_UPLOAD_STREAM_THRESHOLD = 8 * 1024 * 1024
+
+
 def get_max_upload_files(spec: Optional[AskFileSpec]) -> Optional[int]:
     """Return the upload limit for an ask, or for spontaneous uploads."""
     if spec is not None:
@@ -5393,6 +5725,24 @@ def get_max_upload_files(spec: Optional[AskFileSpec]) -> Optional[int]:
 
     spontaneous = config.features.spontaneous_file_upload
     return spontaneous.max_files if spontaneous else None
+
+
+def get_max_upload_size_bytes(spec: Optional[AskFileSpec]) -> Optional[int]:
+    """Return the configured byte cap, or None when unlimited."""
+    if not spec and (
+        config.features.spontaneous_file_upload is None
+        or config.features.spontaneous_file_upload.max_size_mb is None
+    ):
+        return None
+
+    max_size_mb = (
+        config.features.spontaneous_file_upload.max_size_mb
+        if not spec
+        else spec.max_size_mb
+    )
+    if max_size_mb is None:
+        return None
+    return int(max_size_mb * 1024 * 1024)
 
 
 def validate_file_upload(file: UploadFile, spec: Optional[AskFileSpec] = None):
@@ -5467,12 +5817,8 @@ def validate_file_size(file: UploadFile, spec: Optional[AskFileSpec]):
     ):
         return
 
-    max_size_mb = (
-        config.features.spontaneous_file_upload.max_size_mb
-        if not spec
-        else spec.max_size_mb
-    )
-    if file.size is not None and file.size > max_size_mb * 1024 * 1024:
+    max_bytes = get_max_upload_size_bytes(spec)
+    if max_bytes is not None and file.size is not None and file.size > max_bytes:
         raise ValueError("File size too large")
 
 
@@ -5512,7 +5858,12 @@ async def get_file(
             content_disposition_type=(
                 "inline" if Element.is_browser_rendered_mime(mime) else "attachment"
             ),
-            headers={"X-Content-Type-Options": "nosniff"},
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                # The URL carries the session id; keep it out of Referer
+                # headers when the rendered document links elsewhere.
+                "Referrer-Policy": "no-referrer",
+            },
         )
     else:
         raise HTTPException(status_code=404, detail="File not found")

@@ -317,6 +317,7 @@ def public_thread(
     include_settings: bool = False,
     include_owner: bool = True,
     live_ids: Optional[Set[str]] = None,
+    strip_storage_keys: bool = False,
 ) -> Optional[ThreadDict]:
     """Copy a thread with only browser-visible metadata, preserving stored state.
 
@@ -365,16 +366,14 @@ def public_thread(
                 else step
                 for step in public_steps
             ]
-        public_elements = result.get("elements")
-        if isinstance(public_elements, list):
-            result["elements"] = [
-                {
-                    key: value
-                    for key, value in element.items()
-                    if key not in ("PK", "SK", "objectKey")
-                }
-                if isinstance(element, dict)
-                else element
-                for element in public_elements
-            ]
+    if (not include_owner or strip_storage_keys) and isinstance(
+        result.get("elements"), list
+    ):
+        blocked = {"PK", "SK", "objectKey"}
+        result["elements"] = [
+            {key: value for key, value in element.items() if key not in blocked}
+            if isinstance(element, dict)
+            else element
+            for element in cast(list, result["elements"])
+        ]
     return cast(ThreadDict, result)

@@ -1,5 +1,6 @@
 import getRouterBasename from '@/lib/router';
 import {
+  isTrustedMessageOrigin,
   useApi,
   useAuth,
   useChatInteract,
@@ -12,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 export default function AppWrapper() {
   const [translationLoaded, setTranslationLoaded] = useState(false);
   const { isAuthenticated, isReady } = useAuth();
-  const { language: languageInUse } = useConfig();
+  const { config, language: languageInUse } = useConfig();
   const { i18n } = useTranslation();
   const { windowMessage } = useChatInteract();
 
@@ -33,11 +34,23 @@ export default function AppWrapper() {
 
   useEffect(() => {
     const handleWindowMessage = (event: MessageEvent) => {
+      // Only this origin or an explicitly configured peer may drive the
+      // app-level window camera. A wildcard CORS posture must not turn every
+      // embedding page into a trusted message source.
+      if (
+        !isTrustedMessageOrigin(
+          event.origin,
+          window.location.origin,
+          config?.allowOrigins
+        )
+      ) {
+        return;
+      }
       windowMessage(event.data);
     };
     window.addEventListener('message', handleWindowMessage);
     return () => window.removeEventListener('message', handleWindowMessage);
-  }, [windowMessage]);
+  }, [config?.allowOrigins, windowMessage]);
 
   if (!translationLoaded) return null;
 

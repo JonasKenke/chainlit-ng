@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from chainlit.auth import get_current_user
+from chainlit.auth import get_current_user, get_current_user_optional
 from chainlit.config import config
 from chainlit.context import context_var
 from chainlit.data.acl import (
@@ -59,6 +59,7 @@ def isolate_context():
 def client():
     yield TestClient(app)
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_current_user_optional, None)
 
 
 @pytest.fixture
@@ -69,6 +70,7 @@ def data_layer():
 
 def as_user(user):
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_current_user_optional] = lambda: user
 
 
 @pytest.fixture
@@ -1686,6 +1688,7 @@ class TestSqlThreadGrants:
         # An anonymous public link keeps working after the revoke.
         await layer.update_thread("thread-1", metadata={"is_shared": True})
         app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_current_user_optional, None)
         assert client.get("/project/share/thread-1").status_code == 200
 
     @pytest.mark.parametrize(

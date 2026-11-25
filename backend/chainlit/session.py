@@ -255,8 +255,10 @@ class BaseSession:
         mime: str,
         path: Optional[str] = None,
         content: Optional[Union[bytes, str]] = None,
+        fileobj: Optional[Any] = None,
+        max_bytes: Optional[int] = None,
     ) -> FileReference:
-        if not path and content is None:
+        if not path and content is None and fileobj is None:
             raise ValueError(
                 "Either path or content must be provided to persist a file"
             )
@@ -272,22 +274,43 @@ class BaseSession:
         if file_extension:
             file_path = file_path.with_suffix(file_extension)
 
-        if path:
-            # Copy the file from the given path
-            async with (
-                aiofiles.open(path, "rb") as src,
-                aiofiles.open(file_path, "wb") as dst,
-            ):
-                await dst.write(await src.read())
-        elif content is not None:
-            # Write the provided content to the file
-            async with aiofiles.open(file_path, "wb") as buffer:
-                if isinstance(content, str):
-                    content = content.encode("utf-8")
-                await buffer.write(content)
+        try:
+            if path:
+                # Copy the file from the given path
+                async with (
+                    aiofiles.open(path, "rb") as src,
+                    aiofiles.open(file_path, "wb") as dst,
+                ):
+                    await dst.write(await src.read())
+            elif content is not None:
+                # Write the provided content to the file
+                async with aiofiles.open(file_path, "wb") as buffer:
+                    if isinstance(content, str):
+                        content = content.encode("utf-8")
+                    await buffer.write(content)
+            elif fileobj is not None:
+                # Stream in bounded chunks so a large upload never has to fit
+                # in memory. Enforce the cap against bytes actually written:
+                # the declared size can be absent or stale.
+                written = 0
+                async with aiofiles.open(file_path, "wb") as buffer:
+                    while True:
+                        chunk = await asyncio.to_thread(fileobj.read, 1024 * 1024)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if max_bytes is not None and written > max_bytes:
+                            raise ValueError("File size too large")
+                        await buffer.write(chunk)
+        except BaseException:
+            file_path.unlink(missing_ok=True)
+            raise
 
         # Get the file size
         file_size = file_path.stat().st_size
+        if max_bytes is not None and file_size > max_bytes:
+            file_path.unlink(missing_ok=True)
+            raise ValueError("File size too large")
         # Store the file content in memory
         self.files[file_id] = {
             "id": file_id,
@@ -421,6 +444,13 @@ class WebsocketSession(BaseSession):
         self.thread_queues: Dict[str, ThreadQueue] = {}
         self.mcp_sessions = {}
         self.mcp_oauth_tasks = {}
+        # Serialize user turns and keep every owned task so stop/disconnect
+        # can cancel the whole fan-out, not only the newest pointer.
+        self.run_lock = asyncio.Lock()
+        self.run_tasks: set[asyncio.Task] = set()
+        self.audio_lock = asyncio.Lock()
+        self.audio_tasks: set[asyncio.Task] = set()
+        self.processed_message_ids: set[str] = set()
 
         match = (
             re.match(
@@ -510,6 +540,12 @@ class WebsocketSession(BaseSession):
 
     async def delete(self):
         """Delete the session."""
+        owned_tasks = [*self.run_tasks, *self.audio_tasks]
+        for task in owned_tasks:
+            task.cancel()
+        if owned_tasks:
+            await asyncio.gather(*owned_tasks, return_exceptions=True)
+
         if self.files_dir.is_dir():
             shutil.rmtree(self.files_dir)
         ws_sessions_sid.pop(self.socket_id, None)

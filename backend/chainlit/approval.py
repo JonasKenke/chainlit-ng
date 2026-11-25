@@ -450,11 +450,46 @@ def pending_approvals_for_thread(thread_id: str) -> list[_Entry]:
     ]
 
 
+async def _shared_live_ids_strict(thread_id: str) -> set[str]:
+    """Shared pending set, raising instead of treating an outage as empty."""
+    ids = await _store_call(get_state_store().set_members(_thread_key(thread_id)))
+    live: set[str] = set()
+    for approval_id in ids:
+        if await _owner_alive(approval_id) and await _store_call(
+            get_state_store().exists(_pending_key(approval_id))
+        ):
+            live.add(approval_id)
+    return live
+
+
 async def guard_pending_approval(thread_id: Optional[str]) -> None:
-    """Refuse a new run while a pending interaction owns the thread."""
+    """Refuse a new run while a pending interaction owns the thread.
+
+    An unavailable shared store is unknown state, not "no pending approval":
+    fail closed so an approval on another worker cannot be bypassed during an
+    outage.
+    """
     if not thread_id:
         return
-    if pending_approvals_for_thread(thread_id) or await _shared_live_ids(thread_id):
+    if pending_approvals_for_thread(thread_id):
+        raise ApprovalPending(
+            "Resolve the pending approval or question before starting a run"
+        )
+    try:
+        shared = await asyncio.wait_for(
+            _shared_live_ids_strict(thread_id),
+            timeout=_STATE_STORE_TIMEOUT,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Pending-approval state unavailable for thread %s; refusing run",
+            thread_id,
+            exc_info=True,
+        )
+        raise ApprovalPending(
+            "Cannot verify pending interactions; retry shortly"
+        ) from exc
+    if shared:
         raise ApprovalPending(
             "Resolve the pending approval or question before starting a run"
         )

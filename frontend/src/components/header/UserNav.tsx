@@ -42,6 +42,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Translator, useTranslation } from 'components/i18n';
 
+import { clearPersistedUserEnv } from '@/state/store';
+
 export default function UserNav() {
   const { user, logout } = useAuth();
   const { config } = useConfig();
@@ -156,7 +158,14 @@ export default function UserNav() {
               <Trash2 className="ml-auto" />
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onClick={() => logout(true)}>
+          <DropdownMenuItem
+            onClick={() => {
+              // User API keys are per-principal; never leave them for the
+              // next account on a shared browser.
+              clearPersistedUserEnv();
+              logout(true);
+            }}
+          >
             <Translator path="navigation.user.menu.logout" />
             <LogOut className="ml-auto" />
           </DropdownMenuItem>

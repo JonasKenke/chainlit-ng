@@ -310,7 +310,7 @@ class DynamoDBDataLayer(BaseDataLayer):
             data=content,
             mime=element.mime,
             overwrite=True,
-            content_disposition=element.get_content_disposition(),
+            content_disposition=element.get_content_disposition(element.mime),
         )
         if not uploaded_file:
             raise ValueError(
@@ -345,6 +345,7 @@ class DynamoDBDataLayer(BaseDataLayer):
                 "PK": {"S": f"THREAD#{thread_id}"},
                 "SK": {"S": f"ELEMENT#{element_id}"},
             },
+            ConsistentRead=True,
         )
 
         if "Item" not in response:
@@ -475,6 +476,7 @@ class DynamoDBDataLayer(BaseDataLayer):
                 "SK": {"S": "THREAD"},
             },
             ProjectionExpression="userId",
+            ConsistentRead=True,
         )
 
         if "Item" not in response:
@@ -493,6 +495,7 @@ class DynamoDBDataLayer(BaseDataLayer):
                 "SK": {"S": "THREAD"},
             },
             ProjectionExpression="userId, userIdentifier",
+            ConsistentRead=True,
         )
 
         if "Item" not in response:
@@ -818,6 +821,7 @@ class DynamoDBDataLayer(BaseDataLayer):
                 KeyConditionExpression="#pk = :pk",
                 ExpressionAttributeNames={"#pk": "PK"},
                 ExpressionAttributeValues={":pk": {"S": f"THREAD#{thread_id}"}},
+                ConsistentRead=True,
                 **cursor,
             )
 

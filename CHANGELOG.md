@@ -20,6 +20,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   text, and package metadata. The next public repository URL can be added in
   those locations without carrying the old host forward.
 
+### Security
+
+- Harden OAuth token handling: provider refresh tokens are request-local, never
+  stored in `User.metadata`, JWTs, or `/user`; new JWTs carry `iss`/`aud` claims.
+- Add scheme-aware CSRF origin checks, password-login throttling, JWT revocation
+  on logout, and logout-driven socket teardown.
+- Default wildcard CORS to non-credentialed responses; validate Engine.IO
+  Origins; require explicit origins for cross-origin credentialed widgets.
+- Scope feedback and step upserts to their thread, fail closed when approval
+  state is unavailable, cancel all session runs on stop, and bound queued
+  runs/audio/MCP connections.
+- Sanitize active raw Markdown HTML, strip storage keys from share/element
+  responses, reject NUL static paths, verify SQL TLS certificates, and use
+  consistent DynamoDB authorization reads.
+
 ### Inherited from 2.12
 
 - Carry forward the prompt gallery: save composer text as a prompt, search and

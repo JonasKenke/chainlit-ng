@@ -167,3 +167,68 @@ class TestJwtSecretConfiguration:
         monkeypatch.setattr(auth_module, "require_login", Mock(return_value=False))
 
         assert ensure_jwt_secret() is None
+
+
+class TestJwtExpiryRequirement:
+    def test_rejects_a_signed_token_without_exp(self):
+        token = pyjwt.encode(
+            {"identifier": "alice", "metadata": {}}, SECRET, algorithm="HS256"
+        )
+
+        with pytest.raises(pyjwt.MissingRequiredClaimError):
+            decode_jwt(token)
+
+    def test_empty_secret_is_treated_as_missing(self, monkeypatch):
+        monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "")
+        monkeypatch.setattr(auth_module, "require_login", Mock(return_value=True))
+
+        with pytest.raises(ValueError, match="JWT secret"):
+            ensure_jwt_secret()
+
+
+class TestJwtIssuerAndAudience:
+    def test_rejects_a_foreign_issuer(self):
+        token = pyjwt.encode(
+            _claims(iss="https://other-issuer.example"), SECRET, algorithm="HS256"
+        )
+
+        with pytest.raises(pyjwt.InvalidIssuerError):
+            decode_jwt(token)
+
+    def test_rejects_a_foreign_audience(self):
+        token = pyjwt.encode(_claims(aud="another-service"), SECRET, algorithm="HS256")
+
+        with pytest.raises(pyjwt.InvalidAudienceError):
+            decode_jwt(token)
+
+    def test_new_tokens_carry_issuer_and_audience(self):
+        token = create_jwt(User(identifier="alice"))
+        claims = pyjwt.decode(token, options={"verify_signature": False})
+
+        assert claims["iss"] == "chainlit"
+        assert claims["aud"] == "chainlit"
+
+
+def test_provider_tokens_are_removed_from_jwt_metadata():
+    token = create_jwt(
+        User(
+            identifier="alice",
+            metadata={"refresh_token": "secret-rt", "role": "user"},
+        )
+    )
+    claims = pyjwt.decode(token, options={"verify_signature": False})
+
+    assert claims["metadata"] == {"role": "user"}
+    assert "secret-rt" not in token
+
+
+def test_legacy_refresh_token_metadata_is_redacted_on_decode():
+    token = pyjwt.encode(
+        _claims(metadata={"refresh_token": "legacy-rt", "role": "user"}),
+        SECRET,
+        algorithm="HS256",
+    )
+
+    user = decode_jwt(token)
+
+    assert user.metadata == {"role": "user"}

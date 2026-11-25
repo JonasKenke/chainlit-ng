@@ -69,9 +69,21 @@ class ScheduledTaskWorker:
         for task in tasks[:available]:
             created_task = asyncio.create_task(self.run_task(task))
             self.active.add(created_task)
-            created_task.add_done_callback(self.active.discard)
+            created_task.add_done_callback(self._task_finished)
             created.append(created_task)
         return created
+
+    def _task_finished(self, task: asyncio.Task) -> None:
+        self.active.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "Scheduled task worker failed: %s",
+                exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     async def run_task(self, task: ScheduledTaskDict) -> None:
         lease_id = task["leaseId"]
