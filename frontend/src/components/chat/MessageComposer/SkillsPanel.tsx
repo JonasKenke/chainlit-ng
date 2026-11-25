@@ -53,9 +53,13 @@ interface UpdateTarget {
   versionId: string | null;
 }
 
+function isGated(skill: ISkill): boolean {
+  return !!skill.importedFrom || !!skill.sourcePromptId;
+}
+
 /** Imported and linked copies must be reviewed before reaching a model. */
 function needsReview(skill: ISkill): boolean {
-  if (!skill.importedFrom && !skill.sourcePromptId) return false;
+  if (!isGated(skill)) return false;
   return !skill.reviewHash || skill.reviewedContentHash !== skill.reviewHash;
 }
 
@@ -361,7 +365,7 @@ export function SkillsPanel() {
             <div className="divide-y">
               {visibleSkills.map((skill) => {
                 const update = updatesById.get(skill.id);
-                const gated = needsReview(skill);
+                const gated = isGated(skill);
                 return (
                   <div
                     key={skill.id}

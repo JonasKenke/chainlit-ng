@@ -300,7 +300,7 @@ describe('SkillsPanel', () => {
 
     fireEvent.click(
       await screen.findByRole('switch', {
-        name: 'chat.skills.toggle imported-skill'
+        name: 'chat.skills.enable imported-skill'
       })
     );
 
